@@ -696,13 +696,17 @@ interface AnalysisEditorProps {
 
 export function AnalysisEditor({
   analysis,
-  update,
+  update: updateAnalysis,
   toolbar,
 }: AnalysisEditorProps) {
+  const [confirmedRevision, setConfirmedRevision] = useState<
+    string | undefined
+  >();
+  const confirmed = confirmedRevision === analysis.updatedAt;
   const listing = useMemo(() => materializeListing(analysis), [analysis]);
   const validation = useMemo(() => validateRentalListing(listing), [listing]);
   const results = useMemo(() => {
-    if (!validation.valid) return undefined;
+    if (!confirmed || !validation.valid) return undefined;
     return {
       monthly: calculateEstimatedTrueMonthlyCost(listing),
       moveIn: calculateRequiredMoveInCash(listing),
@@ -712,7 +716,14 @@ export function AnalysisEditor({
       effective: calculateEffectiveMonthlyRent(listing),
       missing: listMissingCostCategories(listing),
     };
-  }, [listing, validation.valid]);
+  }, [confirmed, listing, validation.valid]);
+
+  const update = (
+    transform: (analysis: RentalAnalysis) => RentalAnalysis,
+  ): void => {
+    setConfirmedRevision(undefined);
+    updateAnalysis(transform);
+  };
 
   const identity = <K extends keyof ListingIdentity>(
     key: K,
@@ -732,16 +743,21 @@ export function AnalysisEditor({
   return (
     <main>
       <header>
-        <span className="eyebrow">Rental cost analysis</span>
+        <span className="eyebrow">
+          {confirmed ? 'Step 2 · Results' : 'Step 1 · Review inputs'}
+        </span>
         <h1>RentSight</h1>
         <p>
-          Review the listing, replace assumptions, and see the true cost update
-          instantly.
+          {confirmed
+            ? 'Your results use the values you reviewed and confirmed.'
+            : 'Check every extracted or estimated value. You can edit any field before calculating.'}
         </p>
       </header>
-      {toolbar && <div className="analysis-toolbar">{toolbar}</div>}
+      {confirmed && toolbar && (
+        <div className="analysis-toolbar">{toolbar}</div>
+      )}
 
-      {analysis.locationEstimate && (
+      {!confirmed && analysis.locationEstimate && (
         <section className="location-note" aria-labelledby="location-heading">
           <h2 id="location-heading">Local estimate context</h2>
           <p>
@@ -755,7 +771,7 @@ export function AnalysisEditor({
         </section>
       )}
 
-      {!validation.valid && (
+      {!confirmed && !validation.valid && (
         <section className="warning" aria-labelledby="validation-heading">
           <h2 id="validation-heading">Fix these values</h2>
           <ul>
@@ -766,7 +782,7 @@ export function AnalysisEditor({
         </section>
       )}
 
-      {analysis.extraction?.warnings.length ? (
+      {!confirmed && analysis.extraction?.warnings.length ? (
         <section className="warning" aria-labelledby="extraction-heading">
           <h2 id="extraction-heading">Extraction needs review</h2>
           <ul>
@@ -777,258 +793,336 @@ export function AnalysisEditor({
         </section>
       ) : null}
 
-      <section aria-labelledby="summary-heading">
-        <h2 id="summary-heading">Listing summary</h2>
-        <TextField
-          label="Address"
-          field={analysis.listing.identity.fullAddress}
-          baseline={analysis.baseline.identity.fullAddress}
-          onChange={(value) => identity('fullAddress', value)}
-          onReset={() => reset('identity', 'fullAddress')}
-        />
-        <NumberField
-          label="Monthly rent"
-          prefix="$"
-          field={analysis.listing.recurring.advertisedRent}
-          baseline={analysis.baseline.recurring.advertisedRent}
-          onChange={(value) => recurring('advertisedRent', value)}
-          onReset={() => reset('recurring', 'advertisedRent')}
-        />
-        <div className="columns">
-          <NumberField
-            label="Bedrooms"
-            step={0.5}
-            field={analysis.listing.identity.bedrooms}
-            baseline={analysis.baseline.identity.bedrooms}
-            onChange={(value) => identity('bedrooms', value)}
-            onReset={() => reset('identity', 'bedrooms')}
-          />
-          <NumberField
-            label="Bathrooms"
-            step={0.5}
-            field={analysis.listing.identity.bathrooms}
-            baseline={analysis.baseline.identity.bathrooms}
-            onChange={(value) => identity('bathrooms', value)}
-            onReset={() => reset('identity', 'bathrooms')}
-          />
-          <NumberField
-            label="Square feet"
-            field={analysis.listing.identity.squareFootage}
-            baseline={analysis.baseline.identity.squareFootage}
-            onChange={(value) => identity('squareFootage', value)}
-            onReset={() => reset('identity', 'squareFootage')}
-          />
-        </div>
-        <TextField
-          label="Listing URL"
-          type="url"
-          field={analysis.listing.identity.url}
-          baseline={analysis.baseline.identity.url}
-          onChange={(value) => identity('url', value)}
-          onReset={() => reset('identity', 'url')}
-        />
-      </section>
+      {!confirmed && (
+        <section className="review-intro" aria-labelledby="review-heading">
+          <h2 id="review-heading">Review extracted values</h2>
+          <p>
+            Source badges show where each value came from. Missing and estimated
+            values deserve extra attention before confirmation.
+          </p>
+        </section>
+      )}
 
-      <section aria-labelledby="utilities-heading">
-        <h2 id="utilities-heading">Utilities</h2>
-        <div className="utility-list">
-          {UTILITY_CATEGORIES.map((category) => (
-            <div className="utility" key={category}>
-              <NumberField
-                label={UTILITY_LABELS[category]}
-                prefix="$"
-                field={analysis.listing.recurring[category]}
-                baseline={analysis.baseline.recurring[category]}
-                disabled={analysis.utilityIncluded[category]}
-                onChange={(value) => recurring(category, value)}
-                onReset={() =>
-                  update((current) => resetUtility(current, category))
-                }
-              />
-              <label className="included">
-                <input
-                  type="checkbox"
-                  checked={analysis.utilityIncluded[category]}
-                  onChange={(event) =>
-                    update((current) =>
-                      setUtilityIncluded(
-                        current,
-                        category,
-                        event.target.checked,
-                      ),
-                    )
+      {!confirmed && (
+        <section aria-labelledby="summary-heading">
+          <h2 id="summary-heading">Listing summary</h2>
+          <TextField
+            label="Listing title"
+            field={analysis.listing.identity.listingTitle}
+            baseline={analysis.baseline.identity.listingTitle}
+            onChange={(value) => identity('listingTitle', value)}
+            onReset={() => reset('identity', 'listingTitle')}
+          />
+          <TextField
+            label="Address"
+            field={analysis.listing.identity.fullAddress}
+            baseline={analysis.baseline.identity.fullAddress}
+            onChange={(value) => identity('fullAddress', value)}
+            onReset={() => reset('identity', 'fullAddress')}
+          />
+          <div className="columns">
+            <TextField
+              label="City"
+              field={analysis.listing.identity.city}
+              baseline={analysis.baseline.identity.city}
+              onChange={(value) => identity('city', value)}
+              onReset={() => reset('identity', 'city')}
+            />
+            <TextField
+              label="State"
+              field={analysis.listing.identity.state}
+              baseline={analysis.baseline.identity.state}
+              onChange={(value) => identity('state', value)}
+              onReset={() => reset('identity', 'state')}
+            />
+            <TextField
+              label="ZIP code"
+              field={analysis.listing.identity.zipCode}
+              baseline={analysis.baseline.identity.zipCode}
+              onChange={(value) => identity('zipCode', value)}
+              onReset={() => reset('identity', 'zipCode')}
+            />
+          </div>
+          <NumberField
+            label="Monthly rent"
+            prefix="$"
+            field={analysis.listing.recurring.advertisedRent}
+            baseline={analysis.baseline.recurring.advertisedRent}
+            onChange={(value) => recurring('advertisedRent', value)}
+            onReset={() => reset('recurring', 'advertisedRent')}
+          />
+          <div className="columns">
+            <NumberField
+              label="Bedrooms"
+              step={0.5}
+              field={analysis.listing.identity.bedrooms}
+              baseline={analysis.baseline.identity.bedrooms}
+              onChange={(value) => identity('bedrooms', value)}
+              onReset={() => reset('identity', 'bedrooms')}
+            />
+            <NumberField
+              label="Bathrooms"
+              step={0.5}
+              field={analysis.listing.identity.bathrooms}
+              baseline={analysis.baseline.identity.bathrooms}
+              onChange={(value) => identity('bathrooms', value)}
+              onReset={() => reset('identity', 'bathrooms')}
+            />
+            <NumberField
+              label="Square feet"
+              field={analysis.listing.identity.squareFootage}
+              baseline={analysis.baseline.identity.squareFootage}
+              onChange={(value) => identity('squareFootage', value)}
+              onReset={() => reset('identity', 'squareFootage')}
+            />
+          </div>
+          <TextField
+            label="Listing URL"
+            type="url"
+            field={analysis.listing.identity.url}
+            baseline={analysis.baseline.identity.url}
+            onChange={(value) => identity('url', value)}
+            onReset={() => reset('identity', 'url')}
+          />
+        </section>
+      )}
+
+      {!confirmed && (
+        <section aria-labelledby="utilities-heading">
+          <h2 id="utilities-heading">Utilities</h2>
+          <div className="utility-list">
+            {UTILITY_CATEGORIES.map((category) => (
+              <div className="utility" key={category}>
+                <NumberField
+                  label={UTILITY_LABELS[category]}
+                  prefix="$"
+                  field={analysis.listing.recurring[category]}
+                  baseline={analysis.baseline.recurring[category]}
+                  disabled={analysis.utilityIncluded[category]}
+                  onChange={(value) => recurring(category, value)}
+                  onReset={() =>
+                    update((current) => resetUtility(current, category))
                   }
                 />
-                Included in rent
-              </label>
-            </div>
+                <label className="included">
+                  <input
+                    type="checkbox"
+                    checked={analysis.utilityIncluded[category]}
+                    onChange={(event) =>
+                      update((current) =>
+                        setUtilityIncluded(
+                          current,
+                          category,
+                          event.target.checked,
+                        ),
+                      )
+                    }
+                  />
+                  Included in rent
+                </label>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {!confirmed && (
+        <section aria-labelledby="expenses-heading">
+          <h2 id="expenses-heading">Property expenses</h2>
+          {(
+            [
+              ['parking', 'Parking'],
+              ['laundry', 'Laundry'],
+              ['petRent', 'Pet rent'],
+              ['rentersInsurance', 'Renters insurance'],
+              ['amenityFees', 'Amenity fees'],
+              ['otherRequiredMonthlyFees', 'Other required fees'],
+            ] as const
+          ).map(([key, label]) => (
+            <NumberField
+              key={key}
+              label={label}
+              prefix="$"
+              field={analysis.listing.recurring[key]}
+              baseline={analysis.baseline.recurring[key]}
+              onChange={(value) => recurring(key, value)}
+              onReset={() => reset('recurring', key)}
+            />
           ))}
-        </div>
-      </section>
-
-      <section aria-labelledby="expenses-heading">
-        <h2 id="expenses-heading">Property expenses</h2>
-        {(
-          [
-            ['parking', 'Parking'],
-            ['laundry', 'Laundry'],
-            ['petRent', 'Pet rent'],
-            ['rentersInsurance', 'Renters insurance'],
-            ['amenityFees', 'Amenity fees'],
-            ['otherRequiredMonthlyFees', 'Other required fees'],
-          ] as const
-        ).map(([key, label]) => (
-          <NumberField
-            key={key}
-            label={label}
-            prefix="$"
-            field={analysis.listing.recurring[key]}
-            baseline={analysis.baseline.recurring[key]}
-            onChange={(value) => recurring(key, value)}
-            onReset={() => reset('recurring', key)}
-          />
-        ))}
-        <label className="select-field">
-          Laundry type
-          <select
-            value={analysis.laundryType}
-            onChange={(event) =>
-              update((current) => ({
-                ...current,
-                laundryType: event.target
-                  .value as RentalAnalysis['laundryType'],
-              }))
+          <label className="select-field">
+            Laundry type
+            <select
+              value={analysis.laundryType}
+              onChange={(event) =>
+                update((current) => ({
+                  ...current,
+                  laundryType: event.target
+                    .value as RentalAnalysis['laundryType'],
+                }))
+              }
+            >
+              <option value="in_unit">In-unit</option>
+              <option value="shared_paid">Shared paid</option>
+              <option value="shared_free">Shared free</option>
+              <option value="hookups_only">Hookups only</option>
+              <option value="none">None</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </label>
+          {analysis.laundryType === 'shared_paid' && (
+            <fieldset>
+              <legend>Paid laundry estimate</legend>
+              <div className="columns">
+                {(['washPrice', 'dryPrice', 'loadsPerWeek'] as const).map(
+                  (key) => (
+                    <label key={key}>
+                      {key === 'washPrice'
+                        ? 'Wash price'
+                        : key === 'dryPrice'
+                          ? 'Dry price'
+                          : 'Loads per week'}
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.25"
+                        value={analysis.paidLaundry[key]}
+                        onChange={(event) =>
+                          update((current) => ({
+                            ...current,
+                            paidLaundry: {
+                              ...current.paidLaundry,
+                              [key]: event.target.valueAsNumber || 0,
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                  ),
+                )}
+              </div>
+            </fieldset>
+          )}
+          <FeeEditor
+            title="Add custom recurring fee"
+            fees={analysis.customRecurringFees}
+            onChange={(fees) =>
+              update((current) => ({ ...current, customRecurringFees: fees }))
             }
+          />
+        </section>
+      )}
+
+      {!confirmed && (
+        <section aria-labelledby="movein-heading">
+          <h2 id="movein-heading">Move-in costs</h2>
+          {(
+            [
+              ['applicationFee', 'Application fee'],
+              ['securityDeposit', 'Security deposit'],
+              ['firstMonthsRent', 'First month'],
+              ['lastMonthsRent', 'Last month'],
+              ['petDeposit', 'Pet deposit'],
+              ['administrativeFee', 'Administrative fee'],
+              ['utilityDeposits', 'Other deposits'],
+              ['otherMoveInFees', 'Other fees'],
+            ] as const
+          ).map(([key, label]) => (
+            <NumberField
+              key={key}
+              label={label}
+              prefix="$"
+              field={analysis.listing.upfront[key]}
+              baseline={analysis.baseline.upfront[key]}
+              onChange={(value) => upfront(key, value)}
+              onReset={() => reset('upfront', key)}
+            />
+          ))}
+          <FeeEditor
+            title="Add custom one-time fee"
+            fees={analysis.customOneTimeFees}
+            onChange={(fees) =>
+              update((current) => ({ ...current, customOneTimeFees: fees }))
+            }
+          />
+        </section>
+      )}
+
+      {!confirmed && (
+        <section aria-labelledby="lease-heading">
+          <h2 id="lease-heading">Lease and concessions</h2>
+          <NumberField
+            label="Lease duration (months)"
+            min={1}
+            field={analysis.listing.concessions?.leaseMonths}
+            baseline={analysis.baseline.concessions?.leaseMonths}
+            onChange={(value) => concession('leaseMonths', value)}
+            onReset={() => reset('concessions', 'leaseMonths')}
+          />
+          <NumberField
+            label="Free months"
+            step={0.5}
+            field={analysis.listing.concessions?.monthsFree}
+            baseline={analysis.baseline.concessions?.monthsFree}
+            onChange={(value) => concession('monthsFree', value)}
+            onReset={() => reset('concessions', 'monthsFree')}
+          />
+          <NumberField
+            label="One-time concession credit"
+            prefix="$"
+            field={analysis.listing.concessions?.oneTimeCredit}
+            baseline={analysis.baseline.concessions?.oneTimeCredit}
+            onChange={(value) => concession('oneTimeCredit', value)}
+            onReset={() => reset('concessions', 'oneTimeCredit')}
+          />
+          <label className="select-field">
+            Number of occupants
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={analysis.occupants}
+              onChange={(event) =>
+                update((current) => ({
+                  ...current,
+                  occupants: event.target.valueAsNumber || 1,
+                }))
+              }
+            />
+            <span className="source source-user">Entered by user</span>
+          </label>
+        </section>
+      )}
+
+      {!confirmed && (
+        <section className="confirm-panel" aria-labelledby="confirm-heading">
+          <h2 id="confirm-heading">Ready to calculate?</h2>
+          <p id="confirm-help">
+            RentSight will calculate using the values above. Missing costs will
+            remain clearly identified in the results.
+          </p>
+          <button
+            type="button"
+            className="primary-action confirm-action"
+            disabled={!validation.valid}
+            aria-describedby="confirm-help"
+            onClick={() => setConfirmedRevision(analysis.updatedAt)}
           >
-            <option value="in_unit">In-unit</option>
-            <option value="shared_paid">Shared paid</option>
-            <option value="shared_free">Shared free</option>
-            <option value="hookups_only">Hookups only</option>
-            <option value="none">None</option>
-            <option value="unknown">Unknown</option>
-          </select>
-        </label>
-        {analysis.laundryType === 'shared_paid' && (
-          <fieldset>
-            <legend>Paid laundry estimate</legend>
-            <div className="columns">
-              {(['washPrice', 'dryPrice', 'loadsPerWeek'] as const).map(
-                (key) => (
-                  <label key={key}>
-                    {key === 'washPrice'
-                      ? 'Wash price'
-                      : key === 'dryPrice'
-                        ? 'Dry price'
-                        : 'Loads per week'}
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.25"
-                      value={analysis.paidLaundry[key]}
-                      onChange={(event) =>
-                        update((current) => ({
-                          ...current,
-                          paidLaundry: {
-                            ...current.paidLaundry,
-                            [key]: event.target.valueAsNumber || 0,
-                          },
-                        }))
-                      }
-                    />
-                  </label>
-                ),
-              )}
-            </div>
-          </fieldset>
-        )}
-        <FeeEditor
-          title="Add custom recurring fee"
-          fees={analysis.customRecurringFees}
-          onChange={(fees) =>
-            update((current) => ({ ...current, customRecurringFees: fees }))
-          }
-        />
-      </section>
-
-      <section aria-labelledby="movein-heading">
-        <h2 id="movein-heading">Move-in costs</h2>
-        {(
-          [
-            ['applicationFee', 'Application fee'],
-            ['securityDeposit', 'Security deposit'],
-            ['firstMonthsRent', 'First month'],
-            ['lastMonthsRent', 'Last month'],
-            ['petDeposit', 'Pet deposit'],
-            ['administrativeFee', 'Administrative fee'],
-            ['utilityDeposits', 'Other deposits'],
-            ['otherMoveInFees', 'Other fees'],
-          ] as const
-        ).map(([key, label]) => (
-          <NumberField
-            key={key}
-            label={label}
-            prefix="$"
-            field={analysis.listing.upfront[key]}
-            baseline={analysis.baseline.upfront[key]}
-            onChange={(value) => upfront(key, value)}
-            onReset={() => reset('upfront', key)}
-          />
-        ))}
-        <FeeEditor
-          title="Add custom one-time fee"
-          fees={analysis.customOneTimeFees}
-          onChange={(fees) =>
-            update((current) => ({ ...current, customOneTimeFees: fees }))
-          }
-        />
-      </section>
-
-      <section aria-labelledby="lease-heading">
-        <h2 id="lease-heading">Lease and concessions</h2>
-        <NumberField
-          label="Lease duration (months)"
-          min={1}
-          field={analysis.listing.concessions?.leaseMonths}
-          baseline={analysis.baseline.concessions?.leaseMonths}
-          onChange={(value) => concession('leaseMonths', value)}
-          onReset={() => reset('concessions', 'leaseMonths')}
-        />
-        <NumberField
-          label="Free months"
-          step={0.5}
-          field={analysis.listing.concessions?.monthsFree}
-          baseline={analysis.baseline.concessions?.monthsFree}
-          onChange={(value) => concession('monthsFree', value)}
-          onReset={() => reset('concessions', 'monthsFree')}
-        />
-        <NumberField
-          label="One-time concession credit"
-          prefix="$"
-          field={analysis.listing.concessions?.oneTimeCredit}
-          baseline={analysis.baseline.concessions?.oneTimeCredit}
-          onChange={(value) => concession('oneTimeCredit', value)}
-          onReset={() => reset('concessions', 'oneTimeCredit')}
-        />
-        <label className="select-field">
-          Number of occupants
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value={analysis.occupants}
-            onChange={(event) =>
-              update((current) => ({
-                ...current,
-                occupants: event.target.valueAsNumber || 1,
-              }))
-            }
-          />
-          <span className="source source-user">Entered by user</span>
-        </label>
-      </section>
+            Confirm
+          </button>
+        </section>
+      )}
 
       {results && (
         <>
+          <div className="results-actions">
+            <button
+              type="button"
+              className="edit-review-action"
+              onClick={() => setConfirmedRevision(undefined)}
+            >
+              Edit reviewed inputs
+            </button>
+          </div>
           <section className="results" aria-labelledby="results-heading">
             <h2 id="results-heading">Results</h2>
             <dl>
