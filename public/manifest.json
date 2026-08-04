@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "RentSight",
+  "version": "0.1.0",
+  "description": "Estimate the true monthly cost of rental-property listings.",
+  "permissions": ["activeTab", "storage", "scripting", "sidePanel"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open RentSight"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}

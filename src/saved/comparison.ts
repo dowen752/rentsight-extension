@@ -1,0 +1,112 @@
+import {
+  calculateCostPerSquareFoot,
+  calculateEstimatedTrueMonthlyCost,
+  calculateFirstYearHousingCost,
+  calculateRequiredMoveInCash,
+  type SourcedValue,
+} from '../calculations';
+import { materializeListing, UTILITY_CATEGORIES } from '../shared/analysis';
+import type { SavedListingRecord } from './types';
+
+export interface CompletenessScore {
+  score: number;
+  known: number;
+  estimated: number;
+  missing: number;
+  label: 'Data completeness';
+}
+
+const importantFields = (
+  record: SavedListingRecord,
+): (SourcedValue<unknown> | undefined)[] => {
+  const listing = materializeListing(record.analysis);
+  return [
+    listing.identity.fullAddress,
+    listing.recurring.advertisedRent,
+    listing.identity.bedrooms,
+    listing.identity.bathrooms,
+    listing.identity.squareFootage,
+    ...UTILITY_CATEGORIES.map((key) => listing.recurring[key]),
+    listing.recurring.parking,
+    listing.recurring.laundry,
+    listing.recurring.petRent,
+    listing.upfront.securityDeposit,
+    listing.upfront.applicationFee,
+  ];
+};
+
+export function calculateCompleteness(
+  record: SavedListingRecord,
+): CompletenessScore {
+  const fields = importantFields(record);
+  const known = fields.filter(
+    (field) => field && ['listing', 'user'].includes(field.source),
+  ).length;
+  const estimated = fields.filter(
+    (field) => field && ['default', 'location_estimate'].includes(field.source),
+  ).length;
+  const missing = fields.length - known - estimated;
+  return {
+    score: Math.round(((known + estimated * 0.5) / fields.length) * 100),
+    known,
+    estimated,
+    missing,
+    label: 'Data completeness',
+  };
+}
+
+export interface ComparisonSnapshot {
+  id: string;
+  address: string;
+  advertisedRent?: number;
+  trueMonthlyCost: number;
+  monthlyDifference?: number;
+  moveInCash: number;
+  firstYearTotal: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  squareFootage?: number;
+  costPerSquareFoot?: number;
+  utilities: number;
+  parking?: number;
+  laundry?: number;
+  petExpenses: number;
+  completeness: CompletenessScore;
+}
+
+export function createComparison(
+  record: SavedListingRecord,
+): ComparisonSnapshot {
+  const listing = materializeListing(record.analysis);
+  const advertisedRent = listing.recurring.advertisedRent?.value;
+  const trueMonthlyCost = calculateEstimatedTrueMonthlyCost(listing);
+  return {
+    id: record.id,
+    address:
+      listing.identity.fullAddress?.value ??
+      listing.identity.listingTitle?.value ??
+      record.url,
+    advertisedRent,
+    trueMonthlyCost,
+    monthlyDifference:
+      advertisedRent === undefined
+        ? undefined
+        : trueMonthlyCost - advertisedRent,
+    moveInCash: calculateRequiredMoveInCash(listing),
+    firstYearTotal: calculateFirstYearHousingCost(listing),
+    bedrooms: listing.identity.bedrooms?.value,
+    bathrooms: listing.identity.bathrooms?.value,
+    squareFootage: listing.identity.squareFootage?.value,
+    costPerSquareFoot: calculateCostPerSquareFoot(listing),
+    utilities: UTILITY_CATEGORIES.reduce(
+      (sum, key) => sum + (listing.recurring[key]?.value ?? 0),
+      0,
+    ),
+    parking: listing.recurring.parking?.value,
+    laundry: listing.recurring.laundry?.value,
+    petExpenses:
+      (listing.recurring.petRent?.value ?? 0) +
+      (listing.upfront.petDeposit?.value ?? 0),
+    completeness: calculateCompleteness(record),
+  };
+}
