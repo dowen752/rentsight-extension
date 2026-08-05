@@ -146,6 +146,24 @@ function FeeEditor({ title, fees, onChange }: FeeEditorProps) {
   );
 }
 
+function ReviewDisclosure({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className="review-disclosure">
+      <summary>
+        <span>{title}</span>
+        <span className="disclosure-icon" aria-hidden="true" />
+      </summary>
+      <div className="review-disclosure-content">{children}</div>
+    </details>
+  );
+}
+
 export function App() {
   const [view, setView] = useState<ViewState>({ status: 'loading' });
 
@@ -928,8 +946,7 @@ export function AnalysisEditor({
       )}
 
       {!confirmed && (
-        <section aria-labelledby="utilities-heading">
-          <h2 id="utilities-heading">Utilities</h2>
+        <ReviewDisclosure title="Utilities">
           <div className="utility-list">
             {UTILITY_CATEGORIES.map((category) => (
               <div className="utility" key={category}>
@@ -963,12 +980,11 @@ export function AnalysisEditor({
               </div>
             ))}
           </div>
-        </section>
+        </ReviewDisclosure>
       )}
 
       {!confirmed && (
-        <section aria-labelledby="expenses-heading">
-          <h2 id="expenses-heading">Property expenses</h2>
+        <ReviewDisclosure title="Property expenses">
           {(
             [
               ['parking', 'Parking'],
@@ -1049,12 +1065,11 @@ export function AnalysisEditor({
               update((current) => ({ ...current, customRecurringFees: fees }))
             }
           />
-        </section>
+        </ReviewDisclosure>
       )}
 
       {!confirmed && (
-        <section aria-labelledby="movein-heading">
-          <h2 id="movein-heading">Move-in costs</h2>
+        <ReviewDisclosure title="Move-in costs">
           {(
             [
               ['applicationFee', 'Application fee'],
@@ -1084,12 +1099,11 @@ export function AnalysisEditor({
               update((current) => ({ ...current, customOneTimeFees: fees }))
             }
           />
-        </section>
+        </ReviewDisclosure>
       )}
 
       {!confirmed && (
-        <section aria-labelledby="lease-heading">
-          <h2 id="lease-heading">Lease and concessions</h2>
+        <ReviewDisclosure title="Lease and concessions">
           <NumberField
             label="Lease duration (months)"
             min={1}
@@ -1130,7 +1144,7 @@ export function AnalysisEditor({
             />
             <span className="source source-user">Entered by user</span>
           </label>
-        </section>
+        </ReviewDisclosure>
       )}
 
       {!confirmed && (

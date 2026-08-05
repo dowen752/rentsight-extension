@@ -75,6 +75,7 @@ export function validateRentalListing(
   const squareFootage = listing.identity.squareFootage?.value;
   const url = listing.identity.url?.value;
   const leaseMonths = listing.concessions?.leaseMonths?.value;
+  const monthsFree = listing.concessions?.monthsFree?.value;
   if (latitude !== undefined && (latitude < -90 || latitude > 90)) {
     errors.push({
       path: 'identity.latitude.value',
@@ -111,6 +112,16 @@ export function validateRentalListing(
     errors.push({
       path: 'concessions.leaseMonths.value',
       message: 'Lease duration must be a whole number of at least one month.',
+    });
+  }
+  if (
+    monthsFree !== undefined &&
+    leaseMonths !== undefined &&
+    monthsFree > leaseMonths
+  ) {
+    errors.push({
+      path: 'concessions.monthsFree.value',
+      message: 'Free months cannot exceed the lease duration.',
     });
   }
 

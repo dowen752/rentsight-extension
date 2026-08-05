@@ -26,7 +26,8 @@ select {
 }
 button:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+summary:focus-visible {
   outline: 3px solid #7ca487;
   outline-offset: 2px;
 }
@@ -69,6 +70,47 @@ section {
   border: 1px solid #dfe5dc;
   border-radius: 12px;
   margin-bottom: 14px;
+  padding: 17px 15px;
+}
+.review-disclosure {
+  background: #fff;
+  border: 1px solid #dfe5dc;
+  border-radius: 12px;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.review-disclosure summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-size: 18px;
+  font-weight: 750;
+  justify-content: space-between;
+  letter-spacing: -0.015em;
+  list-style: none;
+  padding: 17px 15px;
+  user-select: none;
+}
+.review-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+.review-disclosure summary:hover {
+  background: #f8faf7;
+}
+.disclosure-icon {
+  border-bottom: 2px solid #526057;
+  border-right: 2px solid #526057;
+  height: 8px;
+  margin-right: 3px;
+  transform: rotate(45deg);
+  transition: transform 140ms ease;
+  width: 8px;
+}
+.review-disclosure[open] .disclosure-icon {
+  transform: rotate(225deg);
+}
+.review-disclosure-content {
+  border-top: 1px solid #edf0eb;
   padding: 17px 15px;
 }
 .field {

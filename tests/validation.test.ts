@@ -52,4 +52,22 @@ describe('calculation validation', () => {
       'squareFootage',
     ]);
   });
+
+  it('rejects concessions longer than the lease', () => {
+    const listing: RentalListing = {
+      identity: {},
+      recurring: {},
+      upfront: {},
+      concessions: {
+        leaseMonths: { value: 6, source: 'user', confidence: 1 },
+        monthsFree: { value: 7, source: 'user', confidence: 1 },
+      },
+    };
+    const result = validateRentalListing(listing);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual({
+      path: 'concessions.monthsFree.value',
+      message: 'Free months cannot exceed the lease duration.',
+    });
+  });
 });

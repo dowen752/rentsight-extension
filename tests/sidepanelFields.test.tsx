@@ -41,6 +41,14 @@ describe('analysis review workflow', () => {
     expect(markup).toContain('Review extracted values');
     expect(markup).toContain('>Confirm</button>');
     expect(markup).not.toContain('id="results-heading"');
+    expect(markup.match(/class="review-disclosure"/g)).toHaveLength(4);
+    expect(markup).toContain('<span>Utilities</span>');
+    expect(markup).toContain('<span>Property expenses</span>');
+    expect(markup).toContain('<span>Move-in costs</span>');
+    expect(markup).toContain('<span>Lease and concessions</span>');
+    expect(markup).not.toContain('<details class="review-disclosure" open=""');
+    expect(markup).toContain('aria-label="Electricity"');
+    expect(markup).toContain('aria-label="Security deposit"');
   });
 
   it('restores a persisted draft when SPA navigation returns to its URL', () => {

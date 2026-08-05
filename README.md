@@ -71,7 +71,7 @@ All temporary assumptions live in `src/calculations/assumptions.ts`. Baseline mo
 
 The side panel keeps one serializable analysis per listing URL in `chrome.storage.local`. Each analysis contains the normalized listing, its original extracted/default baseline, utility inclusion choices, occupancy and laundry details, and custom fees. User edits become sourced values with `source: user`; Reset restores the baseline. Untouched utility assumptions are recalculated from occupancy, bedrooms, and square footage, while user-entered amounts remain fixed. The UI materializes custom fees and paid-laundry usage into a normalized listing before invoking the pure calculation engine, so React and Chrome storage remain outside the calculation layer.
 
-Opening the side panel automatically runs local extraction, then presents a two-stage workflow. **Review inputs** shows every relevant extracted, estimated, missing, or user-entered value with its source and allows edits. RentSight does not run or display final calculations until the user selects **Confirm**. Results are tied to the confirmed analysis revision; a later edit, extraction update, or location update invalidates confirmation and requires review again. Saving the current listing is available from the confirmed results stage.
+Opening the side panel automatically runs local extraction, then presents a two-stage workflow. **Review inputs** shows every relevant extracted, estimated, missing, or user-entered value with its source and allows edits. The listing summary remains visible while utilities, property expenses, move-in costs, and lease/concession fields start as collapsed, keyboard-accessible disclosure sections. RentSight does not run or display final calculations until the user selects **Confirm**. Results are tied to the confirmed analysis revision; a later edit, extraction update, or location update invalidates confirmation and requires review again. Saving the current listing is available from the confirmed results stage.
 
 ## Listing extractors
 
@@ -87,7 +87,7 @@ To add another listing site:
 
 ### Currently supported sites
 
-- Zillow rental detail pages
+- Zillow rental-detail and apartment-community pages
 - Apartments.com listing pages
 - Generic rental pages through JSON-LD and visible-text fallback patterns
 
