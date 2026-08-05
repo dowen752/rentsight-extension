@@ -13,14 +13,127 @@ interface LegacyRecord {
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const SOURCES = new Set(['listing', 'user', 'location_estimate', 'default']);
+
+function isSourcedValue(
+  value: unknown,
+  valueType: 'string' | 'number',
+): boolean {
+  if (!isObject(value)) return false;
+  return (
+    'value' in value &&
+    typeof value.value === valueType &&
+    (valueType !== 'number' || Number.isFinite(value.value)) &&
+    typeof value.source === 'string' &&
+    SOURCES.has(value.source) &&
+    typeof value.confidence === 'number' &&
+    Number.isFinite(value.confidence) &&
+    value.confidence >= 0 &&
+    value.confidence <= 1 &&
+    (value.note === undefined || typeof value.note === 'string')
+  );
+}
+
+function isSourcedGroup(
+  value: unknown,
+  fields: Readonly<Record<string, 'string' | 'number'>>,
+): boolean {
+  return (
+    isObject(value) &&
+    Object.entries(value).every(
+      ([key, field]) =>
+        key in fields &&
+        (field === undefined || isSourcedValue(field, fields[key])),
+    )
+  );
+}
+
+const IDENTITY_FIELDS = {
+  url: 'string',
+  listingTitle: 'string',
+  fullAddress: 'string',
+  city: 'string',
+  state: 'string',
+  zipCode: 'string',
+  latitude: 'number',
+  longitude: 'number',
+  bedrooms: 'number',
+  bathrooms: 'number',
+  squareFootage: 'number',
+} as const;
+
+const RECURRING_FIELDS = {
+  advertisedRent: 'number',
+  electricity: 'number',
+  naturalGas: 'number',
+  water: 'number',
+  sewer: 'number',
+  trash: 'number',
+  internet: 'number',
+  parking: 'number',
+  laundry: 'number',
+  petRent: 'number',
+  rentersInsurance: 'number',
+  amenityFees: 'number',
+  otherRequiredMonthlyFees: 'number',
+} as const;
+
+const UPFRONT_FIELDS = {
+  applicationFee: 'number',
+  securityDeposit: 'number',
+  firstMonthsRent: 'number',
+  lastMonthsRent: 'number',
+  petDeposit: 'number',
+  administrativeFee: 'number',
+  utilityDeposits: 'number',
+  otherMoveInFees: 'number',
+} as const;
+
+const CONCESSION_FIELDS = {
+  monthsFree: 'number',
+  oneTimeCredit: 'number',
+  leaseMonths: 'number',
+} as const;
+
+function isListing(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    isSourcedGroup(value.identity, IDENTITY_FIELDS) &&
+    isSourcedGroup(value.recurring, RECURRING_FIELDS) &&
+    isSourcedGroup(value.upfront, UPFRONT_FIELDS) &&
+    (value.concessions === undefined ||
+      isSourcedGroup(value.concessions, CONCESSION_FIELDS))
+  );
+}
+
+function isBooleanRecord(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    Object.values(value).every((item) => typeof item === 'boolean')
+  );
+}
+
+function isCustomFee(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    typeof value.id === 'string' &&
+    typeof value.label === 'string' &&
+    typeof value.amount === 'number' &&
+    Number.isFinite(value.amount) &&
+    value.amount >= 0
+  );
+}
+
 export function isRentalAnalysis(value: unknown): value is RentalAnalysis {
   if (!isObject(value)) return false;
   return (
-    isObject(value.listing) &&
-    isObject(value.baseline) &&
-    isObject(value.utilityIncluded) &&
+    isListing(value.listing) &&
+    isListing(value.baseline) &&
+    isBooleanRecord(value.utilityIncluded) &&
     Array.isArray(value.customRecurringFees) &&
-    Array.isArray(value.customOneTimeFees)
+    value.customRecurringFees.every(isCustomFee) &&
+    Array.isArray(value.customOneTimeFees) &&
+    value.customOneTimeFees.every(isCustomFee)
   );
 }
 
@@ -46,6 +159,11 @@ function normalizeAnalysis(
       ...defaults.utilityIncludedSource,
       ...analysis.utilityIncludedSource,
     },
+    userClearedFields: Array.isArray(analysis.userClearedFields)
+      ? analysis.userClearedFields.filter(
+          (path): path is string => typeof path === 'string',
+        )
+      : [],
   };
 }
 

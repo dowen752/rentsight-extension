@@ -143,11 +143,11 @@ export function parseUsAddress(
   | { fullAddress: string; city: string; state: string; zipCode: string }
   | undefined {
   const match = text.match(
-    /(\d{1,6}\s+[A-Za-z0-9 .'-]+(?:St(?:reet)?|Ave(?:nue)?|Rd|Road|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct)[^,\n]*),\s*([A-Za-z .'-]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/,
+    /(\d{1,6}\s+[^,\n]+),\s*([A-Za-z .'-]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\b/i,
   );
   return match
     ? {
-        fullAddress: match[1].trim(),
+        fullAddress: `${match[1].trim()}, ${match[2].trim()}, ${match[3]} ${match[4]}`,
         city: match[2].trim(),
         state: match[3],
         zipCode: match[4],

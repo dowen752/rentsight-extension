@@ -18,6 +18,7 @@ import {
   createInitialAnalysis,
   applyExtraction,
   applyLocationEstimate,
+  clearField,
   materializeListing,
   resetField,
   resetUtility,
@@ -54,6 +55,7 @@ import {
   locationCacheKey,
   type LocationCache,
 } from '../location';
+import { analysisForNavigation } from './navigationState';
 
 type ViewState =
   | { status: 'loading' }
@@ -62,6 +64,7 @@ type ViewState =
       url: string;
       analysis: RentalAnalysis;
       savedListings: SavedListingRecord[];
+      canPersistSavedListings: boolean;
     }
   | { status: 'error'; message: string };
 
@@ -169,9 +172,11 @@ export function App() {
           analysis = applyExtraction(analysis, response.payload.extraction);
         }
         let savedListings: SavedListingRecord[] = [];
+        let canPersistSavedListings = true;
         try {
           savedListings = migrateSavedRecords(storedRecords);
         } catch (error: unknown) {
+          canPersistSavedListings = false;
           console.warn(
             '[RentSight] Saved listings could not be migrated',
             error,
@@ -183,6 +188,7 @@ export function App() {
             url: response.payload.url,
             analysis,
             savedListings,
+            canPersistSavedListings,
           });
       } catch (error: unknown) {
         if (!active) return;
@@ -201,26 +207,37 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    let navigationRevision = 0;
     const listener = (message: unknown) => {
       if (!isExtractionUpdatedMessage(message)) return;
-      setView((current) => {
-        const base =
-          current.status === 'ready' && current.url === message.payload.url
-            ? current.analysis
-            : createInitialAnalysis(message.payload.url, message.payload.title);
-        return {
-          status: 'ready',
-          url: message.payload.url,
-          analysis: message.payload.extraction
-            ? applyExtraction(base, message.payload.extraction)
-            : base,
-          savedListings:
-            current.status === 'ready' ? current.savedListings : [],
-        };
+      const revision = ++navigationRevision;
+      void extensionStorage.get('rentalAnalyses').then((stored) => {
+        if (!active || revision !== navigationRevision) return;
+        setView((current) =>
+          current.status === 'ready'
+            ? {
+                ...current,
+                url: message.payload.url,
+                analysis: analysisForNavigation(
+                  current.url === message.payload.url
+                    ? current.analysis
+                    : undefined,
+                  message.payload.url,
+                  message.payload.title,
+                  message.payload.extraction,
+                  stored,
+                ),
+              }
+            : current,
+        );
       });
     };
     chrome.runtime.onMessage.addListener(listener);
-    return () => chrome.runtime.onMessage.removeListener(listener);
+    return () => {
+      active = false;
+      chrome.runtime.onMessage.removeListener(listener);
+    };
   }, []);
 
   useEffect(() => {
@@ -243,9 +260,11 @@ export function App() {
 
   const persistedSavedListings =
     view.status === 'ready' ? view.savedListings : undefined;
+  const canPersistSavedListings =
+    view.status === 'ready' ? view.canPersistSavedListings : false;
 
   useEffect(() => {
-    if (!persistedSavedListings) return;
+    if (!persistedSavedListings || !canPersistSavedListings) return;
     void extensionStorage
       .set('savedListings', persistedSavedListings)
       .then(() => extensionStorage.set('savedListingsSchemaVersion', 1))
@@ -255,7 +274,7 @@ export function App() {
           error,
         ),
       );
-  }, [persistedSavedListings]);
+  }, [canPersistSavedListings, persistedSavedListings]);
 
   const locationAddress =
     view.status === 'ready'
@@ -729,12 +748,33 @@ export function AnalysisEditor({
     key: K,
     value: NonNullable<ListingIdentity[K]>['value'],
   ) => update((current) => setIdentityValue(current, key, value));
-  const recurring = (key: keyof RecurringCosts, value: number) =>
-    update((current) => setRecurringValue(current, key, value));
-  const upfront = (key: keyof UpfrontCosts, value: number) =>
-    update((current) => setUpfrontValue(current, key, value));
-  const concession = (key: keyof RentConcessions, value: number) =>
-    update((current) => setConcessionValue(current, key, value));
+  const numericIdentity = (
+    key: 'bedrooms' | 'bathrooms' | 'squareFootage',
+    value: number | undefined,
+  ) =>
+    update((current) =>
+      value === undefined
+        ? clearField(current, 'identity', key)
+        : setIdentityValue(current, key, value),
+    );
+  const recurring = (key: keyof RecurringCosts, value: number | undefined) =>
+    update((current) =>
+      value === undefined
+        ? clearField(current, 'recurring', key)
+        : setRecurringValue(current, key, value),
+    );
+  const upfront = (key: keyof UpfrontCosts, value: number | undefined) =>
+    update((current) =>
+      value === undefined
+        ? clearField(current, 'upfront', key)
+        : setUpfrontValue(current, key, value),
+    );
+  const concession = (key: keyof RentConcessions, value: number | undefined) =>
+    update((current) =>
+      value === undefined
+        ? clearField(current, 'concessions', key)
+        : setConcessionValue(current, key, value),
+    );
   const reset = (
     group: 'identity' | 'recurring' | 'upfront' | 'concessions',
     key: string,
@@ -857,7 +897,7 @@ export function AnalysisEditor({
               step={0.5}
               field={analysis.listing.identity.bedrooms}
               baseline={analysis.baseline.identity.bedrooms}
-              onChange={(value) => identity('bedrooms', value)}
+              onChange={(value) => numericIdentity('bedrooms', value)}
               onReset={() => reset('identity', 'bedrooms')}
             />
             <NumberField
@@ -865,14 +905,14 @@ export function AnalysisEditor({
               step={0.5}
               field={analysis.listing.identity.bathrooms}
               baseline={analysis.baseline.identity.bathrooms}
-              onChange={(value) => identity('bathrooms', value)}
+              onChange={(value) => numericIdentity('bathrooms', value)}
               onReset={() => reset('identity', 'bathrooms')}
             />
             <NumberField
               label="Square feet"
               field={analysis.listing.identity.squareFootage}
               baseline={analysis.baseline.identity.squareFootage}
-              onChange={(value) => identity('squareFootage', value)}
+              onChange={(value) => numericIdentity('squareFootage', value)}
               onReset={() => reset('identity', 'squareFootage')}
             />
           </div>

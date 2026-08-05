@@ -36,6 +36,32 @@ describe('listing extraction', () => {
     expect(result.listing.upfront.securityDeposit?.value).toBe(2_000);
   });
 
+  it('supports Zillow apartment-community pages without choosing ranges', () => {
+    const url = new URL(
+      'https://www.zillow.com/apartments/redwood-city-ca/example/5XkJhC/',
+    );
+    const result = extractListing(
+      fixture('zillow-apartments-listing.html', url.href),
+      url,
+    );
+    expect(result.siteName).toBe('Zillow');
+    expect(result.listing.identity.listingTitle?.value).toBe(
+      'Cirrus Redwood City',
+    );
+    expect(result.listing.identity.fullAddress?.value).toBe(
+      '2580 El Camino Real, Redwood City, CA 94061',
+    );
+    expect(result.listing.identity.city?.value).toBe('Redwood City');
+    expect(result.listing.identity.zipCode?.value).toBe('94061');
+    expect(result.rent).toMatchObject({
+      kind: 'range',
+      minimum: { value: 2_905 },
+      maximum: { value: 4_995 },
+    });
+    expect(result.listing.recurring.advertisedRent).toBeUndefined();
+    expect(result.listing.identity.bedrooms).toBeUndefined();
+  });
+
   it('preserves an Apartments.com rent range explicitly', () => {
     const url = new URL('https://www.apartments.com/sample/abc/');
     const result = extractListing(

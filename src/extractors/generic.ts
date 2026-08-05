@@ -54,18 +54,24 @@ export const genericExtractor: ListingExtractor = {
     result.rent = parseRentEvidence(rentLines, 0.55);
     if (result.rent?.kind === 'single')
       result.listing.recurring.advertisedRent = result.rent.amount;
-    const bedrooms = parseNumberNear(
-      body,
-      /(\d+(?:\.\d+)?)\s*(?:bed(?:room)?s?|bd)\b/i,
-    );
-    const bathrooms = parseNumberNear(
-      body,
-      /(\d+(?:\.\d+)?)\s*(?:bath(?:room)?s?|ba)\b/i,
-    );
-    const squareFeet = parseNumberNear(
-      body,
-      /([\d,]+)\s*(?:sq\.?\s*ft|square feet)\b/i,
-    );
+    const bedrooms =
+      /\d+(?:\.\d+)?\s*(?:-|–|—|to)\s*\d+(?:\.\d+)?\s*(?:bed(?:room)?s?|bd)\b/i.test(
+        body,
+      )
+        ? undefined
+        : parseNumberNear(body, /(\d+(?:\.\d+)?)\s*(?:bed(?:room)?s?|bd)\b/i);
+    const bathrooms =
+      /\d+(?:\.\d+)?\s*(?:-|–|—|to)\s*\d+(?:\.\d+)?\s*(?:bath(?:room)?s?|ba)\b/i.test(
+        body,
+      )
+        ? undefined
+        : parseNumberNear(body, /(\d+(?:\.\d+)?)\s*(?:bath(?:room)?s?|ba)\b/i);
+    const squareFeet =
+      /[\d,]+\s*(?:-|–|—|to)\s*[\d,]+\s*(?:sq\.?\s*ft|square feet)\b/i.test(
+        body,
+      )
+        ? undefined
+        : parseNumberNear(body, /([\d,]+)\s*(?:sq\.?\s*ft|square feet)\b/i);
     if (bedrooms !== undefined)
       result.listing.identity.bedrooms = listingValue(bedrooms, 0.58);
     if (bathrooms !== undefined)

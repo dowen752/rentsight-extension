@@ -5,12 +5,14 @@ import {
 } from '../src/calculations';
 import {
   applyExtraction,
+  clearField,
   createInitialAnalysis,
   materializeListing,
   setIdentityValue,
   setRecurringValue,
   setUpfrontValue,
   setUtilityIncluded,
+  resetField,
 } from '../src/shared/analysis';
 import { emptyExtraction } from '../src/extractors/types';
 
@@ -85,5 +87,29 @@ describe('manual listing analysis integration', () => {
     expect(analysis.utilityIncluded.water).toBe(false);
     expect(analysis.utilityIncludedSource.water).toBe('user');
     expect(analysis.baseline.recurring.water?.value).toBe(0);
+  });
+
+  it('keeps a user-cleared number unknown during extraction and can reset it', () => {
+    let analysis = createInitialAnalysis(
+      'https://example.com/rental/5',
+      'Clear extracted value',
+    );
+    const extraction = emptyExtraction('Test extractor', '1.0.0');
+    extraction.listing.recurring.advertisedRent = {
+      value: 2_400,
+      source: 'listing',
+      confidence: 0.9,
+    };
+    analysis = applyExtraction(analysis, extraction);
+    analysis = clearField(analysis, 'recurring', 'advertisedRent');
+    analysis = applyExtraction(analysis, extraction);
+    expect(analysis.listing.recurring.advertisedRent).toBeUndefined();
+    expect(analysis.userClearedFields).toContain('recurring.advertisedRent');
+
+    analysis = resetField(analysis, 'recurring', 'advertisedRent');
+    expect(analysis.listing.recurring.advertisedRent?.value).toBe(2_400);
+    expect(analysis.userClearedFields).not.toContain(
+      'recurring.advertisedRent',
+    );
   });
 });

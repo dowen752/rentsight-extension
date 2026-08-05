@@ -2,7 +2,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { NumberField } from '../src/sidepanel/Fields';
 import { AnalysisEditor } from '../src/sidepanel/App';
-import { createInitialAnalysis } from '../src/shared/analysis';
+import { analysisForNavigation } from '../src/sidepanel/navigationState';
+import {
+  createInitialAnalysis,
+  setRecurringValue,
+} from '../src/shared/analysis';
+import { emptyExtraction } from '../src/extractors/types';
 
 describe('side-panel fields', () => {
   it('renders an accessible value, visible source, and reset control', () => {
@@ -36,5 +41,30 @@ describe('analysis review workflow', () => {
     expect(markup).toContain('Review extracted values');
     expect(markup).toContain('>Confirm</button>');
     expect(markup).not.toContain('id="results-heading"');
+  });
+
+  it('restores a persisted draft when SPA navigation returns to its URL', () => {
+    const url = 'https://example.com/rental/saved';
+    const stored = setRecurringValue(
+      createInitialAnalysis(url, 'Stored title'),
+      'advertisedRent',
+      2_750,
+    );
+    const extraction = emptyExtraction('Test', '1.0.0');
+    extraction.listing.identity.listingTitle = {
+      value: 'Fresh title',
+      source: 'listing',
+      confidence: 0.9,
+    };
+    const restored = analysisForNavigation(
+      undefined,
+      url,
+      'Fresh title',
+      extraction,
+      { [url]: stored },
+    );
+    expect(restored.listing.recurring.advertisedRent?.value).toBe(2_750);
+    expect(restored.listing.recurring.advertisedRent?.source).toBe('user');
+    expect(restored.listing.identity.listingTitle?.value).toBe('Fresh title');
   });
 });

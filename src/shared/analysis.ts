@@ -36,6 +36,7 @@ export interface RentalAnalysis {
   paidLaundry: PaidLaundryDetails;
   customRecurringFees: CustomFee[];
   customOneTimeFees: CustomFee[];
+  userClearedFields: string[];
   updatedAt: string;
   extraction?: ListingExtraction;
   locationEstimate?: LocationEstimate;
@@ -114,6 +115,7 @@ export function createInitialAnalysis(
     paidLaundry: { washPrice: 2, dryPrice: 2, loadsPerWeek: 2 },
     customRecurringFees: [],
     customOneTimeFees: [],
+    userClearedFields: [],
     updatedAt: new Date().toISOString(),
   };
 }
@@ -247,9 +249,10 @@ export function applyLocationEstimate(
     keyof typeof values,
     string,
   ][]) {
+    const current = next.listing.identity[key];
     if (
-      !next.listing.identity[key] ||
-      next.listing.identity[key]?.source !== 'user'
+      (!current || current.source === 'default') &&
+      !next.userClearedFields?.includes(`identity.${key}`)
     ) {
       next.listing.identity[key] = {
         value,
@@ -273,7 +276,11 @@ export function setIdentityValue<K extends keyof ListingIdentity>(
   value: NonNullable<ListingIdentity[K]>['value'],
 ): RentalAnalysis {
   const next = structuredClone(analysis);
+  next.userClearedFields ??= [];
   next.listing.identity[key] = userValue(value) as ListingIdentity[K];
+  next.userClearedFields = next.userClearedFields.filter(
+    (path) => path !== `identity.${String(key)}`,
+  );
   next.updatedAt = new Date().toISOString();
   return next;
 }
@@ -284,7 +291,11 @@ export function setRecurringValue<K extends keyof RecurringCosts>(
   value: number,
 ): RentalAnalysis {
   const next = structuredClone(analysis);
+  next.userClearedFields ??= [];
   next.listing.recurring[key] = userValue(value);
+  next.userClearedFields = next.userClearedFields.filter(
+    (path) => path !== `recurring.${String(key)}`,
+  );
   next.updatedAt = new Date().toISOString();
   return next;
 }
@@ -295,7 +306,11 @@ export function setUpfrontValue<K extends keyof UpfrontCosts>(
   value: number,
 ): RentalAnalysis {
   const next = structuredClone(analysis);
+  next.userClearedFields ??= [];
   next.listing.upfront[key] = userValue(value);
+  next.userClearedFields = next.userClearedFields.filter(
+    (path) => path !== `upfront.${String(key)}`,
+  );
   next.updatedAt = new Date().toISOString();
   return next;
 }
@@ -306,8 +321,12 @@ export function setConcessionValue<K extends keyof RentConcessions>(
   value: number,
 ): RentalAnalysis {
   const next = structuredClone(analysis);
+  next.userClearedFields ??= [];
   next.listing.concessions ??= {};
   next.listing.concessions[key] = userValue(value);
+  next.userClearedFields = next.userClearedFields.filter(
+    (path) => path !== `concessions.${String(key)}`,
+  );
   next.updatedAt = new Date().toISOString();
   return next;
 }
@@ -318,13 +337,33 @@ export function resetField(
   key: string,
 ): RentalAnalysis {
   const next = structuredClone(analysis);
+  next.userClearedFields ??= [];
   const currentGroup = next.listing[group] as
     Record<string, unknown> | undefined;
   const baselineGroup = next.baseline[group] as
     Record<string, unknown> | undefined;
   if (!currentGroup) return next;
+  next.userClearedFields = next.userClearedFields.filter(
+    (path) => path !== `${group}.${key}`,
+  );
   if (baselineGroup?.[key] === undefined) delete currentGroup[key];
   else currentGroup[key] = structuredClone(baselineGroup[key]);
+  next.updatedAt = new Date().toISOString();
+  return next;
+}
+
+export function clearField(
+  analysis: RentalAnalysis,
+  group: 'identity' | 'recurring' | 'upfront' | 'concessions',
+  key: string,
+): RentalAnalysis {
+  const next = structuredClone(analysis);
+  next.userClearedFields ??= [];
+  const currentGroup = next.listing[group] as
+    Record<string, unknown> | undefined;
+  if (currentGroup) delete currentGroup[key];
+  const path = `${group}.${key}`;
+  if (!next.userClearedFields.includes(path)) next.userClearedFields.push(path);
   next.updatedAt = new Date().toISOString();
   return next;
 }
@@ -335,6 +374,10 @@ export function setUtilityIncluded(
   included: boolean,
 ): RentalAnalysis {
   const next = structuredClone(analysis);
+  next.userClearedFields ??= [];
+  next.userClearedFields = next.userClearedFields.filter(
+    (path) => path !== `recurring.${category}`,
+  );
   next.utilityIncludedSource ??= Object.fromEntries(
     UTILITY_CATEGORIES.map((item) => [item, 'default']),
   ) as Record<UtilityCategory, ValueSource>;
@@ -361,6 +404,10 @@ export function resetUtility(
   category: UtilityCategory,
 ): RentalAnalysis {
   const next = structuredClone(analysis);
+  next.userClearedFields ??= [];
+  next.userClearedFields = next.userClearedFields.filter(
+    (path) => path !== `recurring.${category}`,
+  );
   next.utilityIncludedSource ??= Object.fromEntries(
     UTILITY_CATEGORIES.map((item) => [item, 'default']),
   ) as Record<UtilityCategory, ValueSource>;
@@ -379,11 +426,17 @@ function mergeExtractedGroup(
   current: Record<string, SourcedValue<unknown> | undefined>,
   baseline: Record<string, SourcedValue<unknown> | undefined>,
   extracted: Record<string, SourcedValue<unknown> | undefined>,
+  group: 'identity' | 'recurring' | 'upfront' | 'concessions',
+  userClearedFields: readonly string[],
 ): void {
   for (const [key, field] of Object.entries(extracted)) {
     if (!field) continue;
     baseline[key] = structuredClone(field);
-    if (current[key]?.source !== 'user') current[key] = structuredClone(field);
+    if (
+      current[key]?.source !== 'user' &&
+      !userClearedFields.includes(`${group}.${key}`)
+    )
+      current[key] = structuredClone(field);
   }
 }
 
@@ -392,6 +445,7 @@ export function applyExtraction(
   extraction: ListingExtraction,
 ): RentalAnalysis {
   const next = structuredClone(analysis);
+  next.userClearedFields ??= [];
   next.utilityIncludedSource ??= Object.fromEntries(
     UTILITY_CATEGORIES.map((item) => [item, 'default']),
   ) as Record<UtilityCategory, ValueSource>;
@@ -402,6 +456,8 @@ export function applyExtraction(
       string,
       SourcedValue<unknown> | undefined
     >,
+    'identity',
+    next.userClearedFields,
   );
   mergeExtractedGroup(
     next.listing.recurring as Record<string, SourcedValue<unknown> | undefined>,
@@ -413,6 +469,8 @@ export function applyExtraction(
       string,
       SourcedValue<unknown> | undefined
     >,
+    'recurring',
+    next.userClearedFields,
   );
   mergeExtractedGroup(
     next.listing.upfront as Record<string, SourcedValue<unknown> | undefined>,
@@ -421,6 +479,8 @@ export function applyExtraction(
       string,
       SourcedValue<unknown> | undefined
     >,
+    'upfront',
+    next.userClearedFields,
   );
   if (extraction.listing.concessions) {
     next.listing.concessions ??= {};
@@ -438,6 +498,8 @@ export function applyExtraction(
         string,
         SourcedValue<unknown> | undefined
       >,
+      'concessions',
+      next.userClearedFields,
     );
   }
   for (const utility of extraction.includedUtilities) {

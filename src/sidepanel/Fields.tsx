@@ -51,7 +51,7 @@ interface NumberFieldProps {
   label: string;
   field?: SourcedValue<number>;
   baseline?: SourcedValue<number>;
-  onChange: (value: number) => void;
+  onChange: (value: number | undefined) => void;
   onReset: () => void;
   prefix?: string;
   step?: number;
@@ -86,7 +86,9 @@ export function NumberField({
         value={field?.value ?? ''}
         disabled={disabled}
         onChange={(event) => {
-          if (event.target.value !== '') onChange(event.target.valueAsNumber);
+          onChange(
+            event.target.value === '' ? undefined : event.target.valueAsNumber,
+          );
         }}
       />
     </FieldFrame>

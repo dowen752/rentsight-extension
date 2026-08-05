@@ -2,11 +2,17 @@ import { appearsToBeRentalListing } from '../shared/listing';
 import { extractListing } from '../extractors';
 import { emptyExtraction } from '../extractors/types';
 import { observeListingNavigation } from './navigation';
-import {
-  isExtensionRequest,
-  type ExtensionResponse,
-  type PageInfo,
+import type {
+  ExtensionRequest,
+  ExtensionResponse,
+  PageInfo,
 } from '../shared/messages';
+
+const isExtensionRequest = (value: unknown): value is ExtensionRequest =>
+  typeof value === 'object' &&
+  value !== null &&
+  'type' in value &&
+  value.type === 'GET_PAGE_INFO';
 
 function getPageInfo(): PageInfo {
   const url = window.location.href;

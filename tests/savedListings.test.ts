@@ -83,6 +83,26 @@ describe('listing transfer and migration', () => {
     expect(importListingsJson('{"listings":[]}').errors[0]).toContain(
       'not a RentSight',
     );
+    const malformed = JSON.stringify({
+      format: 'rentsight-saved-listings',
+      schemaVersion: 1,
+      listings: [
+        {
+          schemaVersion: 1,
+          url: 'https://example.com/broken',
+          analysis: {
+            listing: {},
+            baseline: {},
+            utilityIncluded: {},
+            customRecurringFees: [],
+            customOneTimeFees: [],
+          },
+        },
+      ],
+    });
+    expect(importListingsJson(malformed).errors[0]).toContain(
+      'analysis is missing or invalid',
+    );
   });
 
   it('migrates a version-zero record and supplies new analysis defaults', () => {

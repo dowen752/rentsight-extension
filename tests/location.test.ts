@@ -9,6 +9,7 @@ import {
 import {
   applyLocationEstimate,
   createInitialAnalysis,
+  setIdentityValue,
 } from '../src/shared/analysis';
 
 describe('location estimates', () => {
@@ -71,5 +72,25 @@ describe('location estimates', () => {
       source: 'location_estimate',
     });
     expect(adjusted.listing.identity.city?.value).toBe('Seattle');
+  });
+
+  it('does not replace identity values extracted from the listing', () => {
+    const analysis = createInitialAnalysis('https://example.com/2', 'Rental');
+    analysis.listing.identity.city = {
+      value: 'Redwood City',
+      source: 'listing',
+      confidence: 0.95,
+    };
+    const withUserState = setIdentityValue(analysis, 'state', 'CA');
+    const adjusted = applyLocationEstimate(withUserState, {
+      location: { city: 'Seattle', state: 'WA', zipCode: '98101' },
+      utilityAdjustmentFactor: 0.92,
+      providerNotes: ['Test'],
+      resolvedAt: new Date().toISOString(),
+    });
+    expect(adjusted.listing.identity.city?.value).toBe('Redwood City');
+    expect(adjusted.listing.identity.city?.source).toBe('listing');
+    expect(adjusted.listing.identity.state?.value).toBe('CA');
+    expect(adjusted.listing.identity.zipCode?.value).toBe('98101');
   });
 });
