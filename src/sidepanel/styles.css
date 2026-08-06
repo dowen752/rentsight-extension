@@ -1,66 +1,66 @@
 :root {
   /* Core palette */
-  --color-background: #f4f6f1;
-  --color-surface: #fff;
-  --color-surface-hover: #f8faf7;
-  --color-input: #fbfcfa;
-  --color-text: #1d271f;
-  --color-text-secondary: #5e6a60;
-  --color-text-muted: #657067;
-  --color-text-subtle: #69756b;
-  --color-label: #344036;
-  --color-primary: #285f38;
-  --color-primary-text: #356544;
-  --color-primary-dark: #1d2c21;
+  --color-background: #f6f3e8;
+  --color-surface: #fffef9;
+  --color-surface-hover: #f4f8ee;
+  --color-input: #fffef8;
+  --color-text: #203025;
+  --color-text-secondary: #59675d;
+  --color-text-muted: #667169;
+  --color-text-subtle: #6a756d;
+  --color-label: #304336;
+  --color-primary: #247a45;
+  --color-primary-text: #1f713e;
+  --color-primary-dark: #193d29;
   --color-on-primary: #fff;
-  --color-focus: #7ca487;
-  --color-control-accent: #376c47;
-  --color-border: #d7ded5;
-  --color-border-card: #dfe5dc;
-  --color-border-input: #cbd4c9;
-  --color-divider: #edf0eb;
+  --color-focus: #e2a52e;
+  --color-control-accent: #2d814b;
+  --color-border: #d9dccd;
+  --color-border-card: #dfe2d3;
+  --color-border-input: #c9d1c1;
+  --color-divider: #eceee4;
 
   /* Component and feedback colors */
-  --color-source-listing-bg: #e1eee4;
-  --color-source-listing-text: #285f36;
-  --color-source-user-bg: #e7e7f7;
-  --color-source-user-text: #46408a;
-  --color-source-location-bg: #e0edf1;
-  --color-source-location-text: #275c6a;
-  --color-source-default-bg: #eee9dc;
-  --color-source-default-text: #6b5727;
-  --color-source-unknown-bg: #f0f1ef;
-  --color-source-unknown-text: #6f756f;
-  --color-success-bg: #e3f0e5;
-  --color-success-text: #285b35;
-  --color-info-bg: #eef5f0;
-  --color-info-border: #cfe0d2;
-  --color-warning-bg: #fff9e8;
-  --color-warning-border: #e9dcae;
-  --color-warning-heading: #715b18;
-  --color-warning-text: #5f522b;
+  --color-source-listing-bg: #d8f0de;
+  --color-source-listing-text: #176438;
+  --color-source-user-bg: #ffead2;
+  --color-source-user-text: #8a480b;
+  --color-source-location-bg: #dff1e5;
+  --color-source-location-text: #216044;
+  --color-source-default-bg: #fff0b8;
+  --color-source-default-text: #745500;
+  --color-source-unknown-bg: #f0eee5;
+  --color-source-unknown-text: #68685e;
+  --color-success-bg: #dff2df;
+  --color-success-text: #1e6535;
+  --color-info-bg: #edf6e9;
+  --color-info-border: #c8dfc5;
+  --color-warning-bg: #fff3c4;
+  --color-warning-border: #e6b842;
+  --color-warning-heading: #794b00;
+  --color-warning-text: #654b12;
   --color-error-bg: #f9e2df;
   --color-error-text: #8d2820;
   --color-danger-text: #8a3e37;
   --color-disabled: #9ba59c;
   --color-disabled-text: #9aa29b;
-  --color-control-muted-bg: #eef1ec;
-  --color-disclosure-icon: #526057;
-  --color-fieldset-label: #4d5a50;
-  --color-dashed-border: #aebbae;
-  --color-neutral-bg: #e9ede6;
-  --color-neutral-text: #4a554b;
-  --color-results-text: #f4f8f2;
-  --color-results-border: #37473b;
-  --color-results-muted: #adbbae;
-  --color-results-accent: #aee8bb;
-  --color-tab-active-bg: #dfe9df;
-  --color-tab-active-text: #244f31;
-  --color-confirm-bg: #edf4ee;
-  --color-confirm-border: #bfd3c3;
-  --color-secondary-button-border: #b9c6ba;
-  --color-secondary-button-text: #315f3e;
-  --color-table-label: #4c584e;
+  --color-control-muted-bg: #eef1e8;
+  --color-disclosure-icon: #4c6655;
+  --color-fieldset-label: #465b4c;
+  --color-dashed-border: #9fb39f;
+  --color-neutral-bg: #ecebdd;
+  --color-neutral-text: #4d574d;
+  --color-results-text: #f8fbf3;
+  --color-results-border: #356348;
+  --color-results-muted: #b4c8b8;
+  --color-results-accent: #ffd36a;
+  --color-tab-active-bg: #d7ead7;
+  --color-tab-active-text: #185b31;
+  --color-confirm-bg: #e8f4e3;
+  --color-confirm-border: #acd1ae;
+  --color-secondary-button-border: #a9c1aa;
+  --color-secondary-button-text: #246c3c;
+  --color-table-label: #485a4c;
 
   font-family:
     Inter,
@@ -298,6 +298,22 @@ select {
   accent-color: var(--color-control-accent);
   height: 15px;
   width: 15px;
+}
+.utility-inclusion-source {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-top: 7px;
+}
+.utility-inclusion-source .reset {
+  background: transparent;
+  border: 0;
+  color: var(--color-primary-text);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 0;
 }
 .select-field {
   display: flex;

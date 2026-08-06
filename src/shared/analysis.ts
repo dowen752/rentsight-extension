@@ -75,7 +75,6 @@ export function createInitialAnalysis(
       water: estimated(35, 'National placeholder estimate.'),
       sewer: estimated(25, 'National placeholder estimate.'),
       trash: estimated(25, 'National placeholder estimate.'),
-      internet: estimated(60, 'National placeholder estimate.'),
       rentersInsurance: estimated(15, 'Default renters-insurance assumption.'),
     },
     upfront: {},
@@ -138,6 +137,7 @@ export function materializeListing(analysis: RentalAnalysis): RentalListing {
     },
   });
   for (const category of UTILITY_CATEGORIES) {
+    if (category === 'internet' && !listing.recurring.internet) continue;
     if (listing.recurring[category]?.source !== 'user') {
       const estimate = utilityEstimates[category];
       if (estimate && analysis.locationEstimate && estimate.value > 0) {
@@ -223,6 +223,7 @@ export function applyLocationEstimate(
   });
   for (const category of UTILITY_CATEGORIES) {
     const current = next.listing.recurring[category];
+    if (category === 'internet' && !current) continue;
     const base = utilityEstimates[category];
     if (
       base &&
@@ -263,6 +264,23 @@ export function applyLocationEstimate(
     }
   }
   next.updatedAt = new Date().toISOString();
+  return next;
+}
+
+export function applyInternetPreference(
+  analysis: RentalAnalysis,
+  monthlyCost: number | undefined,
+): RentalAnalysis {
+  const next = structuredClone(analysis);
+  const listingIncludesInternet =
+    next.utilityIncluded.internet &&
+    next.utilityIncludedSource.internet === 'listing';
+  if (listingIncludesInternet) return next;
+  if (monthlyCost === undefined) {
+    delete next.listing.recurring.internet;
+  } else {
+    next.listing.recurring.internet = userValue(monthlyCost);
+  }
   return next;
 }
 

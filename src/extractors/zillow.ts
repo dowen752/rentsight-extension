@@ -107,6 +107,13 @@ export const zillowExtractor: ListingExtractor = {
         deposit,
       );
     result.includedUtilities = classifyIncludedUtilities(body);
+    result.rawUtilityText =
+      body.match(
+        /[^.\n]*(?:all utilities\s+(?:are\s+)?included|includ(?:e|es|ed|ing)\s+all utilities|(?:landlord|owner)\s+pays(?:\s+for)?\s+[^.\n]+)[^.\n]*/i,
+      )?.[0] ??
+      body.match(
+        /[^.\n]*(?:utilities?\s+(?:are\s+)?included|\b(?:electricity|gas|water|sewer|trash|internet|wi-?fi)\b[^.\n]*\bincluded\b)[^.\n]*/i,
+      )?.[0];
     result.laundryType = classifyLaundry(body);
     return result;
   },

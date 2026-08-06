@@ -57,6 +57,20 @@ describe('analysis review workflow', () => {
     expect(markup).not.toContain('value="Example rental"');
   });
 
+  it('shows when utility inclusion was changed by the user', () => {
+    const analysis = createInitialAnalysis(
+      'https://example.com/rental/utility-override',
+      'Utility override',
+    );
+    analysis.utilityIncludedSource.naturalGas = 'user';
+    const markup = renderToStaticMarkup(
+      <AnalysisEditor analysis={analysis} update={() => undefined} />,
+    );
+
+    expect(markup).toContain('Inclusion changed by user');
+    expect(markup).toContain('Reset inclusion');
+  });
+
   it('restores a persisted draft when SPA navigation returns to its URL', () => {
     const url = 'https://example.com/rental/saved';
     const stored = setIdentityValue(

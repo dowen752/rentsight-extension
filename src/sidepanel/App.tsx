@@ -16,6 +16,7 @@ import {
 } from '../calculations';
 import {
   createInitialAnalysis,
+  applyInternetPreference,
   applyExtraction,
   applyLocationEstimate,
   clearField,
@@ -178,9 +179,10 @@ export function App() {
           setView({ status: 'error', message: response.error });
           return;
         }
-        const [saved, storedRecords] = await Promise.all([
+        const [saved, storedRecords, storedInternetCost] = await Promise.all([
           extensionStorage.get('rentalAnalyses'),
           extensionStorage.get('savedListings'),
+          extensionStorage.get('internetMonthlyCost'),
         ]);
         let analysis =
           saved?.[response.payload.url] ??
@@ -188,6 +190,18 @@ export function App() {
         if (response.payload.extraction) {
           analysis = applyExtraction(analysis, response.payload.extraction);
         }
+        const legacyInternetCost =
+          !analysis.utilityIncluded.internet &&
+          analysis.listing.recurring.internet?.source === 'user'
+            ? analysis.listing.recurring.internet.value
+            : undefined;
+        const internetCost = storedInternetCost ?? legacyInternetCost;
+        if (
+          storedInternetCost === undefined &&
+          legacyInternetCost !== undefined
+        )
+          await extensionStorage.set('internetMonthlyCost', legacyInternetCost);
+        analysis = applyInternetPreference(analysis, internetCost);
         let savedListings: SavedListingRecord[] = [];
         try {
           savedListings = migrateSavedRecords(storedRecords);
@@ -227,21 +241,27 @@ export function App() {
     const listener = (message: unknown) => {
       if (!isExtractionUpdatedMessage(message)) return;
       const revision = ++navigationRevision;
-      void extensionStorage.get('rentalAnalyses').then((stored) => {
+      void Promise.all([
+        extensionStorage.get('rentalAnalyses'),
+        extensionStorage.get('internetMonthlyCost'),
+      ]).then(([stored, internetCost]) => {
         if (!active || revision !== navigationRevision) return;
         setView((current) =>
           current.status === 'ready'
             ? {
                 ...current,
                 url: message.payload.url,
-                analysis: analysisForNavigation(
-                  current.url === message.payload.url
-                    ? current.analysis
-                    : undefined,
-                  message.payload.url,
-                  message.payload.title,
-                  message.payload.extraction,
-                  stored,
+                analysis: applyInternetPreference(
+                  analysisForNavigation(
+                    current.url === message.payload.url
+                      ? current.analysis
+                      : undefined,
+                    message.payload.url,
+                    message.payload.title,
+                    message.payload.extraction,
+                    stored,
+                  ),
+                  internetCost,
                 ),
               }
             : current,
@@ -345,11 +365,32 @@ export function App() {
   }, [currentLocationKey, locationBedrooms, locationQuery, view.status]);
 
   const update = (transform: (analysis: RentalAnalysis) => RentalAnalysis) => {
-    setView((current) =>
-      current.status === 'ready'
-        ? { ...current, analysis: transform(current.analysis) }
-        : current,
-    );
+    setView((current) => {
+      if (current.status !== 'ready') return current;
+      const next = transform(current.analysis);
+      const previousInternet = current.analysis.listing.recurring.internet;
+      const nextInternet = next.listing.recurring.internet;
+      const inclusionChanged =
+        current.analysis.utilityIncluded.internet !==
+        next.utilityIncluded.internet;
+      if (
+        !inclusionChanged &&
+        (previousInternet?.value !== nextInternet?.value ||
+          previousInternet?.source !== nextInternet?.source)
+      ) {
+        const write =
+          nextInternet?.source === 'user'
+            ? extensionStorage.set('internetMonthlyCost', nextInternet.value)
+            : extensionStorage.remove('internetMonthlyCost');
+        void write.catch((error: unknown) =>
+          console.error(
+            '[RentSight] Could not save internet preference',
+            error,
+          ),
+        );
+      }
+      return { ...current, analysis: next };
+    });
   };
 
   const setSavedListings = async (
@@ -975,6 +1016,7 @@ export function AnalysisEditor({
                   field={analysis.listing.recurring[category]}
                   baseline={analysis.baseline.recurring[category]}
                   disabled={analysis.utilityIncluded[category]}
+                  allowReset={category === 'internet'}
                   onChange={(value) => recurring(category, value)}
                   onReset={() =>
                     update((current) => resetUtility(current, category))
@@ -996,6 +1038,28 @@ export function AnalysisEditor({
                   />
                   Included in rent
                 </label>
+                <div className="utility-inclusion-source">
+                  <span
+                    className={`source source-${analysis.utilityIncludedSource[category]}`}
+                  >
+                    {analysis.utilityIncludedSource[category] === 'listing'
+                      ? 'Inclusion from listing'
+                      : analysis.utilityIncludedSource[category] === 'user'
+                        ? 'Inclusion changed by user'
+                        : 'Inclusion not confirmed'}
+                  </span>
+                  {analysis.utilityIncludedSource[category] === 'user' && (
+                    <button
+                      type="button"
+                      className="reset"
+                      onClick={() =>
+                        update((current) => resetUtility(current, category))
+                      }
+                    >
+                      Reset inclusion
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>

@@ -5,6 +5,7 @@ import {
   parseMoney,
   parseNumberNear,
   parseRentEvidence,
+  parseUsAddress,
 } from './parsers';
 import { emptyExtraction, type ListingExtractor } from './types';
 
@@ -19,11 +20,28 @@ export const apartmentsExtractor: ListingExtractor = {
     const pick = (selectors: string) =>
       document.querySelector(selectors)?.textContent?.trim();
     const title = pick('h1.propertyName, h1');
-    const address = pick('.propertyAddress, [data-testid="property-address"]');
+    const addressText = pick(
+      '.propertyAddress, [data-testid="property-address"]',
+    );
+    const address = addressText ? parseUsAddress(addressText) : undefined;
     if (title)
       result.listing.identity.listingTitle = listingValue(title, 0.9, title);
-    if (address)
-      result.listing.identity.fullAddress = listingValue(address, 0.9, address);
+    if (address) {
+      result.listing.identity.fullAddress = listingValue(
+        address.fullAddress,
+        0.9,
+        addressText,
+      );
+      result.listing.identity.city = listingValue(address.city, 0.9);
+      result.listing.identity.state = listingValue(address.state, 0.9);
+      result.listing.identity.zipCode = listingValue(address.zipCode, 0.9);
+    } else if (addressText) {
+      result.listing.identity.fullAddress = listingValue(
+        addressText,
+        0.72,
+        addressText,
+      );
+    }
     const rentTexts = [
       ...document.querySelectorAll(
         '.rentInfoDetail, .rentRange, [data-testid="rent"]',
@@ -33,18 +51,22 @@ export const apartmentsExtractor: ListingExtractor = {
     if (result.rent?.kind === 'single')
       result.listing.recurring.advertisedRent = result.rent.amount;
     const body = document.body.textContent ?? '';
-    const beds = parseNumberNear(
-      body,
-      /(\d+(?:\.\d+)?)\s*(?:beds?|bedrooms?)\b/i,
-    );
-    const baths = parseNumberNear(
-      body,
-      /(\d+(?:\.\d+)?)\s*(?:baths?|bathrooms?)\b/i,
-    );
-    const sqft = parseNumberNear(
-      body,
-      /([\d,]+)\s*(?:sq\.?\s*ft|square feet)/i,
-    );
+    const beds =
+      /(?:studio|\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*\d+(?:\.\d+)?\s*(?:beds?|bedrooms?|bd)\b/i.test(
+        body,
+      )
+        ? undefined
+        : parseNumberNear(body, /(\d+(?:\.\d+)?)\s*(?:beds?|bedrooms?)\b/i);
+    const baths =
+      /\d+(?:\.\d+)?\s*(?:-|–|—|to)\s*\d+(?:\.\d+)?\s*(?:baths?|ba)\b/i.test(
+        body,
+      )
+        ? undefined
+        : parseNumberNear(body, /(\d+(?:\.\d+)?)\s*(?:baths?|bathrooms?)\b/i);
+    const sqft =
+      /[\d,]+\s*(?:-|–|—|to)\s*[\d,]+\s*(?:sq\.?\s*ft|square feet)/i.test(body)
+        ? undefined
+        : parseNumberNear(body, /([\d,]+)\s*(?:sq\.?\s*ft|square feet)/i);
     if (beds !== undefined)
       result.listing.identity.bedrooms = listingValue(beds, 0.8);
     if (baths !== undefined)

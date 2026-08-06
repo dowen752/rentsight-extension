@@ -107,27 +107,45 @@ export function classifyLaundry(text: string): LaundryType | undefined {
 
 const UTILITY_PHRASES: Record<UtilityCategory, RegExp> = {
   electricity:
-    /electric(?:ity)?\s+(?:is\s+)?included|includes?\s+electric(?:ity)?/i,
+    /electric(?:ity)?\s+(?:is\s+)?included|rent\s+includes?\s+electric(?:ity)?/i,
   naturalGas:
-    /(?:natural\s+)?gas\s+(?:is\s+)?included|includes?\s+(?:natural\s+)?gas/i,
-  water: /water\s+(?:is\s+)?included|includes?\s+water/i,
-  sewer: /sewer\s+(?:is\s+)?included|includes?\s+sewer/i,
-  trash: /trash\s+(?:is\s+)?included|includes?\s+trash/i,
-  internet: /internet\s+(?:is\s+)?included|includes?\s+internet/i,
+    /(?:natural\s+)?gas\s+(?:is\s+)?included|rent\s+includes?\s+(?:natural\s+)?gas/i,
+  water: /water\s+(?:is\s+)?included|rent\s+includes?\s+water/i,
+  sewer: /sewer\s+(?:is\s+)?included|rent\s+includes?\s+sewer/i,
+  trash: /trash\s+(?:is\s+)?included|rent\s+includes?\s+trash/i,
+  internet: /internet\s+(?:is\s+)?included|rent\s+includes?\s+internet/i,
 };
 
 export function classifyIncludedUtilities(text: string): UtilityCategory[] {
-  if (/all utilities (?:are )?included/i.test(text))
+  if (
+    /all utilities (?:are )?included|includ(?:e|es|ing)\s+all utilities/i.test(
+      text,
+    )
+  )
     return Object.keys(UTILITY_PHRASES) as UtilityCategory[];
   const found = new Set<UtilityCategory>();
-  for (const match of text.matchAll(/([^.;\n]{0,120})\bincluded\b/gi)) {
-    const clause = match[1];
+  const addUtilitiesIn = (clause: string) => {
     if (/\belectric(?:ity)?\b/i.test(clause)) found.add('electricity');
     if (/\b(?:natural\s+)?gas\b/i.test(clause)) found.add('naturalGas');
     if (/\bwater\b/i.test(clause)) found.add('water');
     if (/\bsewer\b/i.test(clause)) found.add('sewer');
-    if (/\btrash\b/i.test(clause)) found.add('trash');
-    if (/\binternet\b/i.test(clause)) found.add('internet');
+    if (/\b(?:trash|compost|recycl(?:e|ing))\b/i.test(clause))
+      found.add('trash');
+    if (/\b(?:internet|wi-?fi)\b/i.test(clause)) found.add('internet');
+  };
+  for (const match of text.matchAll(/([^.;\n]{0,120})\bincluded\b/gi)) {
+    if (/\bnot\s*$/i.test(match[1])) continue;
+    addUtilitiesIn(match[1]);
+  }
+  for (const match of text.matchAll(
+    /\butilities?\s+(?:are\s+)?included(?:\s+in\s+(?:the\s+)?rent)?\s*[:-]?\s*([^.;\n]{1,240})/gi,
+  )) {
+    addUtilitiesIn(match[1]);
+  }
+  for (const match of text.matchAll(
+    /\b(?:rent\s+includes?|(?:landlord|owner)\s+pays(?:\s+for)?)\s+([^.;\n]{1,240})/gi,
+  )) {
+    addUtilitiesIn(match[1]);
   }
   for (const [category, pattern] of Object.entries(UTILITY_PHRASES) as [
     UtilityCategory,

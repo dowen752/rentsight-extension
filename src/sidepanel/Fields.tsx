@@ -57,6 +57,7 @@ interface NumberFieldProps {
   step?: number;
   min?: number;
   disabled?: boolean;
+  allowReset?: boolean;
 }
 
 export function NumberField({
@@ -69,12 +70,13 @@ export function NumberField({
   step = 1,
   min = 0,
   disabled = false,
+  allowReset = false,
 }: NumberFieldProps) {
   return (
     <FieldFrame
       label={label}
       field={field}
-      canReset={Boolean(baseline)}
+      canReset={allowReset || Boolean(baseline)}
       onReset={onReset}
     >
       {prefix && <span className="prefix">{prefix}</span>}

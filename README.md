@@ -65,7 +65,7 @@ Every normalized listing value carries its source (`listing`, `user`, `location_
 
 ### Placeholder estimation assumptions
 
-All temporary assumptions live in `src/calculations/assumptions.ts`. Baseline monthly amounts are electricity $90, natural gas $45, water $35, sewer $25, trash $25, internet $60, renters insurance $15, and paid shared laundry $24. Included utilities estimate to $0. Non-included utilities are adjusted by occupants (+15% after the first), bedrooms (+8% after the first), square footage (+5% per 500 square feet above 800), and housing type (apartment/condo 1.0×, townhouse 1.1×, single-family 1.2×). These defaults use deliberately low confidence and should be replaced by location-aware estimates later.
+All temporary assumptions live in `src/calculations/assumptions.ts`. Baseline monthly amounts are electricity $90, natural gas $45, water $35, sewer $25, trash $25, renters insurance $15, and paid shared laundry $24. Internet starts blank because it is usually a renter-level subscription; a user-entered internet amount is stored as a global preference and applied across listings unless a property explicitly includes internet at $0. Included utilities estimate to $0. Non-included utilities are adjusted by occupants (+15% after the first), bedrooms (+8% after the first), square footage (+5% per 500 square feet above 800), and housing type (apartment/condo 1.0×, townhouse 1.1×, single-family 1.2×). These defaults use deliberately low confidence and should be replaced by location-aware estimates later.
 
 ## Side-panel state and persistence
 
@@ -89,6 +89,8 @@ To add another listing site:
 
 - Zillow rental-detail and apartment-community pages
 - Apartments.com listing pages
+- Apartment List community pages with a selected unit
+- Redfin rental-detail pages
 - Generic rental pages through JSON-LD and visible-text fallback patterns
 
 Site markup changes frequently. Extraction is best-effort, ambiguity is shown instead of guessed, and every value remains manually editable.

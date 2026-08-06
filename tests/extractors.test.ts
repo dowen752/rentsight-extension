@@ -101,6 +101,50 @@ describe('listing extraction', () => {
       maximum: { value: 2_250 },
     });
     expect(result.listing.recurring.advertisedRent).toBeUndefined();
+    expect(result.listing.identity.fullAddress?.value).toBe(
+      '300 Fixture Street',
+    );
+    expect(result.listing.identity.city?.value).toBe('Demoville');
+    expect(result.listing.identity.bedrooms).toBeUndefined();
+  });
+
+  it('extracts the selected Apartment List unit instead of community facts', () => {
+    const url = new URL(
+      'https://www.apartmentlist.com/ca/camarillo/mission-hills',
+    );
+    const result = extractListing(
+      fixture('apartmentlist-listing.html', url.href),
+      url,
+    );
+    expect(result.siteName).toBe('Apartment List');
+    expect(result.listing.identity.fullAddress?.value).toBe(
+      '45 Rincon Dr #104A',
+    );
+    expect(result.listing.recurring.advertisedRent?.value).toBe(2_441);
+    expect(result.listing.identity.bedrooms?.value).toBe(1);
+    expect(result.listing.identity.bathrooms?.value).toBe(1);
+    expect(result.listing.identity.squareFootage?.value).toBe(723);
+    expect(result.listing.upfront.securityDeposit?.value).toBe(600);
+    expect(result.listing.recurring.petRent?.value).toBe(55);
+  });
+
+  it('uses the selected Redfin rental summary instead of nearby numbers', () => {
+    const url = new URL(
+      'https://www.redfin.com/CA/Palo-Alto/4140-Old-Adobe-Rd-94306/home/1',
+    );
+    const result = extractListing(
+      fixture('redfin-listing.html', url.href),
+      url,
+    );
+    expect(result.siteName).toBe('Redfin');
+    expect(result.listing.recurring.advertisedRent?.value).toBe(25_750);
+    expect(result.listing.identity.bedrooms?.value).toBe(5);
+    expect(result.listing.identity.bathrooms?.value).toBe(5.5);
+    expect(result.listing.identity.squareFootage?.value).toBe(5_552);
+    expect(result.listing.identity.fullAddress?.value).toBe(
+      '4140 Old Adobe Rd',
+    );
+    expect(result.laundryType).toBe('in_unit');
   });
 
   it('extracts generic visible text and supporting classifications', () => {
@@ -151,5 +195,29 @@ describe('phrase classification', () => {
       classifyIncludedUtilities('Water, sewer and trash included'),
     ).toEqual(expect.arrayContaining(['water', 'trash']));
     expect(classifyIncludedUtilities('All utilities included')).toHaveLength(6);
+  });
+
+  it('does not treat a list of available utilities as included in rent', () => {
+    expect(
+      classifyIncludedUtilities(
+        'Utilities include electricity, gas, water/sewer, trash/compost/recycle, and hi-speed wi-fi internet.',
+      ),
+    ).toEqual([]);
+    expect(classifyIncludedUtilities('Electricity is not included.')).toEqual(
+      [],
+    );
+  });
+
+  it('classifies utilities only when payment language is explicit', () => {
+    const allUtilities = classifyIncludedUtilities(
+      'Rent: $3,995 per month (including all utilities)',
+    );
+    expect(allUtilities).toHaveLength(6);
+    expect(allUtilities).toContain('naturalGas');
+    expect(
+      classifyIncludedUtilities(
+        'Landlord pays for water, sewer, trash, and wi-fi.',
+      ),
+    ).toEqual(expect.arrayContaining(['water', 'sewer', 'trash', 'internet']));
   });
 });

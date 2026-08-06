@@ -9,6 +9,7 @@ export interface StorageSchema {
   savedListings: SavedListingRecord[];
   savedListingsSchemaVersion: number;
   locationCache: Record<string, LocationEstimate>;
+  internetMonthlyCost: number;
 }
 
 type StorageKey = keyof StorageSchema;

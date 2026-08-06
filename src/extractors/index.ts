@@ -1,9 +1,11 @@
 import type { SourcedValue } from '../calculations';
 import { apartmentsExtractor } from './apartments';
+import { apartmentListExtractor } from './apartmentList';
 import { extractEmbeddedData } from './embeddedData';
 import { genericExtractor } from './generic';
 import { extractJsonLd } from './jsonLd';
 import { zillowExtractor } from './zillow';
+import { redfinExtractor } from './redfin';
 import {
   emptyExtraction,
   type ListingExtraction,
@@ -14,6 +16,8 @@ import {
 const SITE_EXTRACTORS: readonly ListingExtractor[] = [
   zillowExtractor,
   apartmentsExtractor,
+  apartmentListExtractor,
+  redfinExtractor,
 ];
 
 function mergeGroup(
@@ -133,7 +137,8 @@ export function extractListing(
     reconcileRent(layers.flatMap((layer) => (layer.rent ? [layer.rent] : [])));
   if (result.rent?.kind === 'single')
     result.listing.recurring.advertisedRent = result.rent.amount;
-  else delete result.listing.recurring.advertisedRent;
+  else if (result.rent?.kind === 'range' || result.rent?.kind === 'conflict')
+    delete result.listing.recurring.advertisedRent;
   if (result.rent?.kind === 'range')
     result.warnings.push(`Rent is listed as a range: ${result.rent.rawText}`);
   if (result.rent?.kind === 'conflict')
@@ -156,4 +161,10 @@ export type {
   ListingExtractor,
   RentEvidence,
 } from './types';
-export { apartmentsExtractor, genericExtractor, zillowExtractor };
+export {
+  apartmentListExtractor,
+  apartmentsExtractor,
+  genericExtractor,
+  redfinExtractor,
+  zillowExtractor,
+};

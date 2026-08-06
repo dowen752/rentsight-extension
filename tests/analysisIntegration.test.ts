@@ -5,6 +5,7 @@ import {
 } from '../src/calculations';
 import {
   applyExtraction,
+  applyInternetPreference,
   clearField,
   createInitialAnalysis,
   materializeListing,
@@ -36,10 +37,42 @@ describe('manual listing analysis integration', () => {
     analysis.customOneTimeFees = [{ id: 'once', label: 'Key fee', amount: 25 }];
 
     const listing = materializeListing(analysis);
-    expect(calculateEstimatedTrueMonthlyCost(listing)).toBeCloseTo(2_379.67, 2);
+    expect(calculateEstimatedTrueMonthlyCost(listing)).toBeCloseTo(2_319.67, 2);
     expect(calculateRequiredMoveInCash(listing)).toBe(2_025);
     expect(listing.identity.fullAddress?.source).toBe('user');
     expect(listing.recurring.water?.value).toBe(0);
+  });
+
+  it('leaves internet blank until a global preference is supplied', () => {
+    const analysis = createInitialAnalysis(
+      'https://example.com/rental/internet-blank',
+      'Internet preference',
+    );
+    expect(analysis.listing.recurring.internet).toBeUndefined();
+    expect(materializeListing(analysis).recurring.internet).toBeUndefined();
+
+    const preferred = applyInternetPreference(analysis, 50);
+    expect(preferred.listing.recurring.internet).toEqual({
+      value: 50,
+      source: 'user',
+      confidence: 1,
+    });
+  });
+
+  it('lets listing-included internet override the global preference', () => {
+    let analysis = createInitialAnalysis(
+      'https://example.com/rental/internet-included',
+      'Included internet',
+    );
+    const extraction = emptyExtraction('Test extractor', '1.0.0');
+    extraction.includedUtilities = ['internet'];
+    extraction.rawUtilityText = 'Internet included in rent';
+    analysis = applyExtraction(analysis, extraction);
+    analysis = applyInternetPreference(analysis, 90);
+
+    expect(analysis.utilityIncluded.internet).toBe(true);
+    expect(analysis.listing.recurring.internet?.value).toBe(0);
+    expect(analysis.listing.recurring.internet?.source).toBe('listing');
   });
 
   it('updates untouched estimates for occupants but preserves user edits', () => {
