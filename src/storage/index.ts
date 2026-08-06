@@ -32,3 +32,26 @@ export const extensionStorage = {
     await chrome.storage.local.remove(key);
   },
 };
+
+const isQuotaError = (error: unknown): boolean =>
+  error instanceof Error && /quota.*exceed/i.test(error.message);
+
+export async function persistSavedListings(
+  records: SavedListingRecord[],
+): Promise<void> {
+  try {
+    await extensionStorage.set('savedListings', records);
+  } catch (error: unknown) {
+    if (!isQuotaError(error)) throw error;
+
+    // Draft analyses can be reconstructed from their listing pages, and the
+    // location cache can be regenerated. Prefer the user's explicit shortlist
+    // when Chrome's local-storage quota has already been consumed.
+    await Promise.all([
+      extensionStorage.remove('rentalAnalyses'),
+      extensionStorage.remove('locationCache'),
+    ]);
+    await extensionStorage.set('savedListings', records);
+  }
+  await extensionStorage.set('savedListingsSchemaVersion', 1);
+}

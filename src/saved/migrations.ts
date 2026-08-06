@@ -1,5 +1,6 @@
 import { createInitialAnalysis, type RentalAnalysis } from '../shared/analysis';
 import { SAVED_LISTING_SCHEMA_VERSION, type SavedListingRecord } from './types';
+import { compactAnalysisForStorage } from './repository';
 
 interface LegacyRecord {
   id?: unknown;
@@ -193,7 +194,9 @@ export function migrateSavedRecord(value: unknown): SavedListingRecord {
         ? legacy.id
         : crypto.randomUUID(),
     url: legacy.url,
-    analysis: normalizeAnalysis(legacy.analysis, legacy.url),
+    analysis: compactAnalysisForStorage(
+      normalizeAnalysis(legacy.analysis, legacy.url),
+    ),
     createdAt: typeof legacy.createdAt === 'string' ? legacy.createdAt : now,
     updatedAt: typeof legacy.updatedAt === 'string' ? legacy.updatedAt : now,
   };

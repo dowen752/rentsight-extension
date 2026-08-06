@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createInitialAnalysis } from '../src/shared/analysis';
-import { extensionStorage } from '../src/storage';
+import { extensionStorage, persistSavedListings } from '../src/storage';
 
 describe('extension storage', () => {
   const values: Record<string, unknown> = {};
@@ -27,5 +27,26 @@ describe('extension storage', () => {
     await expect(extensionStorage.get('rentalAnalyses')).resolves.toEqual(
       analyses,
     );
+  });
+
+  it('clears reconstructable caches and retries when saved listings hit quota', async () => {
+    values.rentalAnalyses = { oversized: true };
+    values.locationCache = { oversized: true };
+    let firstWrite = true;
+    vi.mocked(chrome.storage.local.set).mockImplementation(
+      async (update: Record<string, unknown>) => {
+        if ('savedListings' in update && firstWrite) {
+          firstWrite = false;
+          throw new Error('Resource::kQuotaBytes quota exceeded');
+        }
+        Object.assign(values, update);
+      },
+    );
+
+    await persistSavedListings([]);
+
+    expect(values.rentalAnalyses).toBeUndefined();
+    expect(values.locationCache).toBeUndefined();
+    expect(values.savedListings).toEqual([]);
   });
 });

@@ -80,11 +80,12 @@ export function createComparison(
   const listing = materializeListing(record.analysis);
   const advertisedRent = listing.recurring.advertisedRent?.value;
   const trueMonthlyCost = calculateEstimatedTrueMonthlyCost(listing);
+  const displayName = listing.identity.listingTitle?.value.trim();
   return {
     id: record.id,
     address:
-      listing.identity.fullAddress?.value ??
-      listing.identity.listingTitle?.value ??
+      displayName ||
+      listing.identity.fullAddress?.value ||
       record.url,
     advertisedRent,
     trueMonthlyCost,

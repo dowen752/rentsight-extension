@@ -102,6 +102,7 @@ interface TextFieldProps {
   onChange: (value: string) => void;
   onReset: () => void;
   type?: 'text' | 'url';
+  placeholder?: string;
 }
 
 export function TextField({
@@ -111,6 +112,7 @@ export function TextField({
   onChange,
   onReset,
   type = 'text',
+  placeholder,
 }: TextFieldProps) {
   return (
     <FieldFrame
@@ -123,6 +125,7 @@ export function TextField({
         aria-label={label}
         type={type}
         value={field?.value ?? ''}
+        placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
       />
     </FieldFrame>

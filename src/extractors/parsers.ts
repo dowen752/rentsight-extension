@@ -10,11 +10,12 @@ export function listingValue<T>(
   confidence: number,
   rawText?: string,
 ): SourcedValue<T> {
+  const supportingText = rawText?.trim().replace(/\s+/g, ' ').slice(0, 500);
   return {
     value,
     source: 'listing',
     confidence,
-    note: rawText ? `Supporting text: ${rawText.trim()}` : undefined,
+    note: supportingText ? `Supporting text: ${supportingText}` : undefined,
   };
 }
 

@@ -5,6 +5,7 @@ import { AnalysisEditor } from '../src/sidepanel/App';
 import { analysisForNavigation } from '../src/sidepanel/navigationState';
 import {
   createInitialAnalysis,
+  setIdentityValue,
   setRecurringValue,
 } from '../src/shared/analysis';
 import { emptyExtraction } from '../src/extractors/types';
@@ -49,14 +50,23 @@ describe('analysis review workflow', () => {
     expect(markup).not.toContain('<details class="review-disclosure" open=""');
     expect(markup).toContain('aria-label="Electricity"');
     expect(markup).toContain('aria-label="Security deposit"');
+    expect(markup).toContain('aria-label="Listing name (optional)"');
+    expect(markup).toContain(
+      'placeholder="Give this property any name you like"',
+    );
+    expect(markup).not.toContain('value="Example rental"');
   });
 
   it('restores a persisted draft when SPA navigation returns to its URL', () => {
     const url = 'https://example.com/rental/saved';
-    const stored = setRecurringValue(
-      createInitialAnalysis(url, 'Stored title'),
-      'advertisedRent',
-      2_750,
+    const stored = setIdentityValue(
+      setRecurringValue(
+        createInitialAnalysis(url, 'Ignored page title'),
+        'advertisedRent',
+        2_750,
+      ),
+      'listingTitle',
+      'Stored title',
     );
     const extraction = emptyExtraction('Test', '1.0.0');
     extraction.listing.identity.listingTitle = {
@@ -73,6 +83,6 @@ describe('analysis review workflow', () => {
     );
     expect(restored.listing.recurring.advertisedRent?.value).toBe(2_750);
     expect(restored.listing.recurring.advertisedRent?.source).toBe('user');
-    expect(restored.listing.identity.listingTitle?.value).toBe('Fresh title');
+    expect(restored.listing.identity.listingTitle?.value).toBe('Stored title');
   });
 });

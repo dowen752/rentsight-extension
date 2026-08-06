@@ -62,12 +62,12 @@ const estimated = (value: number, note: string): SourcedValue<number> => ({
 
 export function createInitialAnalysis(
   url: string,
-  title: string,
+  title?: string,
 ): RentalAnalysis {
+  void title;
   const listing: RentalListing = {
     identity: {
       url: { value: url, source: 'listing', confidence: 1 },
-      listingTitle: { value: title, source: 'listing', confidence: 1 },
     },
     recurring: {
       electricity: estimated(90, 'National placeholder estimate.'),
@@ -449,10 +449,12 @@ export function applyExtraction(
   next.utilityIncludedSource ??= Object.fromEntries(
     UTILITY_CATEGORIES.map((item) => [item, 'default']),
   ) as Record<UtilityCategory, ValueSource>;
+  const extractedIdentity = { ...extraction.listing.identity };
+  delete extractedIdentity.listingTitle;
   mergeExtractedGroup(
     next.listing.identity as Record<string, SourcedValue<unknown> | undefined>,
     next.baseline.identity as Record<string, SourcedValue<unknown> | undefined>,
-    extraction.listing.identity as Record<
+    extractedIdentity as Record<
       string,
       SourcedValue<unknown> | undefined
     >,

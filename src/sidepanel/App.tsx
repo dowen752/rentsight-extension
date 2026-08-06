@@ -34,7 +34,7 @@ import {
 } from '../shared/analysis';
 import type { ExtensionResponse } from '../shared/messages';
 import { isExtractionUpdatedMessage } from '../shared/messages';
-import { extensionStorage } from '../storage';
+import { extensionStorage, persistSavedListings } from '../storage';
 import { NumberField, TextField } from './Fields';
 import {
   createComparison,
@@ -64,7 +64,6 @@ type ViewState =
       url: string;
       analysis: RentalAnalysis;
       savedListings: SavedListingRecord[];
-      canPersistSavedListings: boolean;
     }
   | { status: 'error'; message: string };
 
@@ -190,15 +189,14 @@ export function App() {
           analysis = applyExtraction(analysis, response.payload.extraction);
         }
         let savedListings: SavedListingRecord[] = [];
-        let canPersistSavedListings = true;
         try {
           savedListings = migrateSavedRecords(storedRecords);
         } catch (error: unknown) {
-          canPersistSavedListings = false;
-          console.warn(
-            '[RentSight] Saved listings could not be migrated',
-            error,
-          );
+          const message =
+            error instanceof Error ? error.message : 'Unknown storage error.';
+          throw new Error(`Saved listings could not be loaded: ${message}`, {
+            cause: error,
+          });
         }
         if (active)
           setView({
@@ -206,7 +204,6 @@ export function App() {
             url: response.payload.url,
             analysis,
             savedListings,
-            canPersistSavedListings,
           });
       } catch (error: unknown) {
         if (!active) return;
@@ -275,24 +272,6 @@ export function App() {
     }, 250);
     return () => window.clearTimeout(timeout);
   }, [view]);
-
-  const persistedSavedListings =
-    view.status === 'ready' ? view.savedListings : undefined;
-  const canPersistSavedListings =
-    view.status === 'ready' ? view.canPersistSavedListings : false;
-
-  useEffect(() => {
-    if (!persistedSavedListings || !canPersistSavedListings) return;
-    void extensionStorage
-      .set('savedListings', persistedSavedListings)
-      .then(() => extensionStorage.set('savedListingsSchemaVersion', 1))
-      .catch((error: unknown) =>
-        console.error(
-          '[RentSight] Could not save saved-listing collection',
-          error,
-        ),
-      );
-  }, [canPersistSavedListings, persistedSavedListings]);
 
   const locationAddress =
     view.status === 'ready'
@@ -373,6 +352,30 @@ export function App() {
     );
   };
 
+  const setSavedListings = async (
+    savedListings: SavedListingRecord[],
+  ): Promise<void> => {
+    if (view.status !== 'ready') return;
+
+    // Start the durable write in the same event as the user's change. Waiting
+    // for a React effect leaves a window where closing or refreshing the panel
+    // can happen before Chrome receives the storage request.
+    await persistSavedListings(savedListings);
+
+    const stored = migrateSavedRecords(
+      await extensionStorage.get('savedListings'),
+    );
+    const expectedIds = savedListings.map((record) => record.id).sort();
+    const storedIds = stored.map((record) => record.id).sort();
+    if (JSON.stringify(storedIds) !== JSON.stringify(expectedIds)) {
+      throw new Error('Chrome did not retain the saved-listing collection.');
+    }
+
+    setView((current) =>
+      current.status === 'ready' ? { ...current, savedListings } : current,
+    );
+  };
+
   if (view.status === 'loading') {
     return (
       <main>
@@ -393,11 +396,7 @@ export function App() {
       analysis={view.analysis}
       savedListings={view.savedListings}
       update={update}
-      setSavedListings={(savedListings) =>
-        setView((current) =>
-          current.status === 'ready' ? { ...current, savedListings } : current,
-        )
-      }
+      setSavedListings={setSavedListings}
     />
   );
 }
@@ -413,7 +412,7 @@ function Workspace({
   analysis: RentalAnalysis;
   savedListings: SavedListingRecord[];
   update: (transform: (analysis: RentalAnalysis) => RentalAnalysis) => void;
-  setSavedListings: (records: SavedListingRecord[]) => void;
+  setSavedListings: (records: SavedListingRecord[]) => Promise<void>;
 }) {
   const [tab, setTab] = useState<WorkspaceTab>('current');
   const [selected, setSelected] = useState<string[]>([]);
@@ -423,10 +422,10 @@ function Workspace({
     (record) => record.url === currentUrl,
   );
 
-  const saveCurrent = () => {
+  const saveCurrent = async () => {
     try {
       const result = saveListing(savedListings, analysis);
-      setSavedListings(result.records);
+      await setSavedListings(result.records);
       setNotice(result.created ? 'Listing saved.' : 'Saved listing updated.');
     } catch (error: unknown) {
       setNotice(
@@ -466,7 +465,7 @@ function Workspace({
             <button
               type="button"
               className="primary-action"
-              onClick={saveCurrent}
+              onClick={() => void saveCurrent()}
             >
               {currentSaved ? 'Update saved listing' : 'Save this listing'}
             </button>
@@ -514,7 +513,7 @@ function SavedListingsView({
   records: SavedListingRecord[];
   selected: string[];
   setSelected: (ids: string[]) => void;
-  setRecords: (records: SavedListingRecord[]) => void;
+  setRecords: (records: SavedListingRecord[]) => Promise<void>;
   setNotice: (notice: string) => void;
   openCompare: () => void;
 }) {
@@ -526,7 +525,7 @@ function SavedListingsView({
     if (!file) return;
     const result = importListingsJson(await file.text());
     if (result.records.length) {
-      setRecords(mergeImportedListings(records, result.records));
+      await setRecords(mergeImportedListings(records, result.records));
     }
     setNotice(
       result.errors.length
@@ -623,7 +622,7 @@ function SavedListingsView({
                   type="button"
                   className="remove"
                   onClick={() => {
-                    setRecords(deleteListing(records, record.id));
+                    void setRecords(deleteListing(records, record.id));
                     setSelected(selected.filter((id) => id !== record.id));
                     setNotice('Saved listing deleted.');
                   }}
@@ -765,7 +764,12 @@ export function AnalysisEditor({
   const identity = <K extends keyof ListingIdentity>(
     key: K,
     value: NonNullable<ListingIdentity[K]>['value'],
-  ) => update((current) => setIdentityValue(current, key, value));
+  ) =>
+    update((current) =>
+      typeof value === 'string' && value.trim() === ''
+        ? clearField(current, 'identity', key)
+        : setIdentityValue(current, key, value),
+    );
   const numericIdentity = (
     key: 'bedrooms' | 'bathrooms' | 'squareFootage',
     value: number | undefined,
@@ -865,11 +869,12 @@ export function AnalysisEditor({
         <section aria-labelledby="summary-heading">
           <h2 id="summary-heading">Listing summary</h2>
           <TextField
-            label="Listing title"
+            label="Listing name (optional)"
             field={analysis.listing.identity.listingTitle}
             baseline={analysis.baseline.identity.listingTitle}
             onChange={(value) => identity('listingTitle', value)}
             onReset={() => reset('identity', 'listingTitle')}
+            placeholder="Give this property any name you like"
           />
           <TextField
             label="Address"
@@ -878,7 +883,7 @@ export function AnalysisEditor({
             onChange={(value) => identity('fullAddress', value)}
             onReset={() => reset('identity', 'fullAddress')}
           />
-          <div className="columns">
+          <div className="columns-two">
             <TextField
               label="City"
               field={analysis.listing.identity.city}
@@ -893,14 +898,14 @@ export function AnalysisEditor({
               onChange={(value) => identity('state', value)}
               onReset={() => reset('identity', 'state')}
             />
-            <TextField
-              label="ZIP code"
-              field={analysis.listing.identity.zipCode}
-              baseline={analysis.baseline.identity.zipCode}
-              onChange={(value) => identity('zipCode', value)}
-              onReset={() => reset('identity', 'zipCode')}
-            />
           </div>
+          <TextField
+            label="ZIP code"
+            field={analysis.listing.identity.zipCode}
+            baseline={analysis.baseline.identity.zipCode}
+            onChange={(value) => identity('zipCode', value)}
+            onReset={() => reset('identity', 'zipCode')}
+          />
           <NumberField
             label="Monthly rent"
             prefix="$"
@@ -909,7 +914,7 @@ export function AnalysisEditor({
             onChange={(value) => recurring('advertisedRent', value)}
             onReset={() => reset('recurring', 'advertisedRent')}
           />
-          <div className="columns">
+          <div className="columns-two">
             <NumberField
               label="Bedrooms"
               step={0.5}
@@ -926,14 +931,14 @@ export function AnalysisEditor({
               onChange={(value) => numericIdentity('bathrooms', value)}
               onReset={() => reset('identity', 'bathrooms')}
             />
-            <NumberField
-              label="Square feet"
-              field={analysis.listing.identity.squareFootage}
-              baseline={analysis.baseline.identity.squareFootage}
-              onChange={(value) => numericIdentity('squareFootage', value)}
-              onReset={() => reset('identity', 'squareFootage')}
-            />
           </div>
+          <NumberField
+            label="Square feet"
+            field={analysis.listing.identity.squareFootage}
+            baseline={analysis.baseline.identity.squareFootage}
+            onChange={(value) => numericIdentity('squareFootage', value)}
+            onReset={() => reset('identity', 'squareFootage')}
+          />
           <TextField
             label="Listing URL"
             type="url"
