@@ -31,7 +31,12 @@ export function extractJsonLd(document: Document): ListingExtraction {
     'script[type="application/ld+json"]',
   )) {
     try {
-      for (const node of nodes(JSON.parse(script.textContent ?? ''))) {
+      const source = script.textContent ?? '';
+      if (source.length > 1_000_000) {
+        result.warnings.push('An unusually large JSON-LD block was skipped.');
+        continue;
+      }
+      for (const node of nodes(JSON.parse(source))) {
         const address = object(node.address) ? node.address : undefined;
         const floorSize = object(node.floorSize)
           ? node.floorSize.value

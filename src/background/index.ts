@@ -1,6 +1,25 @@
 import { isExtensionRequest, type ExtensionResponse } from '../shared/messages';
 
 const CONTENT_SCRIPT_FILE = 'content.js';
+const PAGE_INSPECTION_TIMEOUT_MS = 5_000;
+
+async function withInspectionTimeout<T>(request: Promise<T>): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      request,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () =>
+            reject(new Error('Page inspection timed out. Please try again.')),
+          PAGE_INSPECTION_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 chrome.runtime.onInstalled.addListener(() => {
   console.info('[RentSight] Extension initialized');
@@ -39,9 +58,9 @@ async function requestPageInfo(): Promise<ExtensionResponse> {
     const tab = await getActiveTab();
 
     try {
-      return (await chrome.tabs.sendMessage(tab.id!, {
-        type: 'GET_PAGE_INFO',
-      })) as ExtensionResponse;
+      return (await withInspectionTimeout(
+        chrome.tabs.sendMessage(tab.id!, { type: 'GET_PAGE_INFO' }),
+      )) as ExtensionResponse;
     } catch {
       try {
         await chrome.scripting.executeScript({
@@ -55,9 +74,9 @@ async function requestPageInfo(): Promise<ExtensionResponse> {
           { cause: error },
         );
       }
-      return (await chrome.tabs.sendMessage(tab.id!, {
-        type: 'GET_PAGE_INFO',
-      })) as ExtensionResponse;
+      return (await withInspectionTimeout(
+        chrome.tabs.sendMessage(tab.id!, { type: 'GET_PAGE_INFO' }),
+      )) as ExtensionResponse;
     }
   } catch (error: unknown) {
     const message =

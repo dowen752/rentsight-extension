@@ -89,6 +89,30 @@ describe('listing extraction', () => {
     expect(result.listing.identity.bedrooms).toBeUndefined();
   });
 
+  it('scopes Zillow extraction to an opened community unit', () => {
+    const url = new URL(
+      'https://www.zillow.com/apartments/san-francisco-ca/example/abc/',
+    );
+    const document = new JSDOM(`
+      <html><body>
+        <div>Available units: Unit 1 $1,000 · Unit 2 $9,000</div>
+        <section role="dialog">
+          <div>
+            <h1>Unit 42</h1>
+            <p>1 bed, 1.5 baths | $2,550 Fees may apply</p>
+            <div>1,023 sqft</div>
+          </div>
+        </section>
+      </body></html>
+    `).window.document;
+    const result = extractListing(document, url);
+
+    expect(result.listing.recurring.advertisedRent?.value).toBe(2_550);
+    expect(result.listing.identity.bedrooms?.value).toBe(1);
+    expect(result.listing.identity.bathrooms?.value).toBe(1.5);
+    expect(result.listing.identity.squareFootage?.value).toBe(1_023);
+  });
+
   it('preserves an Apartments.com rent range explicitly', () => {
     const url = new URL('https://www.apartments.com/sample/abc/');
     const result = extractListing(

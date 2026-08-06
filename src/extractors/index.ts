@@ -90,6 +90,7 @@ export function extractListing(
     extractor.matches(url, document),
   );
   const siteLayer = site?.extract(document, url);
+  const selectedZillowUnit = /(?:^|#)rentsight-unit=/i.test(url.hash);
   const layers = (
     site
       ? [
@@ -97,7 +98,7 @@ export function extractListing(
           // the user. JSON-LD is listing-scoped, while embedded application
           // state and generic page text can contain background search cards.
           siteLayer,
-          extractJsonLd(document),
+          selectedZillowUnit ? undefined : extractJsonLd(document),
         ]
       : [
           extractJsonLd(document),

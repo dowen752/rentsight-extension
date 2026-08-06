@@ -9,17 +9,18 @@ import {
 import { emptyExtraction, type ListingExtractor } from './types';
 
 function activeUnitText(document: Document): string | undefined {
-  const candidates = [...document.querySelectorAll('section, aside, div')]
-    .map((element) => element.textContent?.replace(/\s+/g, ' ').trim() ?? '')
-    .filter(
-      (text) =>
-        /\bUnit\s+\S+/i.test(text) &&
-        /\bTotal price\b/i.test(text) &&
-        /\bBed\b/i.test(text) &&
-        /\bBath\b/i.test(text) &&
-        /\bsqft\b/i.test(text),
-    );
-  return candidates.sort((left, right) => left.length - right.length)[0];
+  for (const dialog of document.querySelectorAll('[role="dialog"]')) {
+    const text = dialog.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+    if (
+      /\bUnit\s+\S+/i.test(text) &&
+      /\bTotal price\b/i.test(text) &&
+      /\bBed\b/i.test(text) &&
+      /\bBath\b/i.test(text) &&
+      /\bsqft\b/i.test(text)
+    )
+      return text;
+  }
+  return undefined;
 }
 
 export const apartmentListExtractor: ListingExtractor = {

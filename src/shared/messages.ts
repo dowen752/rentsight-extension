@@ -5,6 +5,8 @@ export interface PageInfo {
   title: string;
   appearsToBeRentalListing: boolean;
   extraction?: ListingExtraction;
+  requiresUnitSelection?: boolean;
+  selectedUnitId?: string;
 }
 
 export interface GetPageInfoMessage {

@@ -60,6 +60,7 @@ import { analysisForNavigation } from './navigationState';
 
 type ViewState =
   | { status: 'loading' }
+  | { status: 'unit-selection-required' }
   | {
       status: 'ready';
       url: string;
@@ -179,6 +180,10 @@ export function App() {
           setView({ status: 'error', message: response.error });
           return;
         }
+        if (response.payload.requiresUnitSelection) {
+          setView({ status: 'unit-selection-required' });
+          return;
+        }
         const [saved, storedRecords, storedInternetCost] = await Promise.all([
           extensionStorage.get('rentalAnalyses'),
           extensionStorage.get('savedListings'),
@@ -240,6 +245,14 @@ export function App() {
     let navigationRevision = 0;
     const listener = (message: unknown) => {
       if (!isExtractionUpdatedMessage(message)) return;
+      if (message.payload.requiresUnitSelection) {
+        setView({ status: 'unit-selection-required' });
+        return;
+      }
+      if (message.payload.selectedUnitId) {
+        window.location.reload();
+        return;
+      }
       const revision = ++navigationRevision;
       void Promise.all([
         extensionStorage.get('rentalAnalyses'),
@@ -428,6 +441,27 @@ export function App() {
     return (
       <main>
         <p className="status error">{view.message}</p>
+      </main>
+    );
+  }
+  if (view.status === 'unit-selection-required') {
+    return (
+      <main>
+        <section className="warning">
+          <h1>Select a unit first</h1>
+          <p>
+            Zillow community pages can contain many units with different rents,
+            dimensions, fees, and availability. Choose a listing before using
+            RentSight.
+          </p>
+          <button
+            type="button"
+            className="primary-action"
+            onClick={() => window.location.reload()}
+          >
+            Check again
+          </button>
+        </section>
       </main>
     );
   }
