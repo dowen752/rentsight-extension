@@ -85,12 +85,22 @@ export function extractListing(
   const site = SITE_EXTRACTORS.find((extractor) =>
     extractor.matches(url, document),
   );
-  const layers = [
-    extractJsonLd(document),
-    extractEmbeddedData(document),
-    site?.extract(document, url),
-    genericExtractor.extract(document, url),
-  ].filter((value): value is ListingExtraction => Boolean(value));
+  const siteLayer = site?.extract(document, url);
+  const layers = (
+    site
+      ? [
+          // Site-specific selectors describe the listing currently visible to
+          // the user. JSON-LD is listing-scoped, while embedded application
+          // state and generic page text can contain background search cards.
+          siteLayer,
+          extractJsonLd(document),
+        ]
+      : [
+          extractJsonLd(document),
+          extractEmbeddedData(document),
+          genericExtractor.extract(document, url),
+        ]
+  ).filter((value): value is ListingExtraction => Boolean(value));
   const result = emptyExtraction(
     site?.siteName ?? genericExtractor.siteName,
     site?.version ?? genericExtractor.version,
@@ -118,9 +128,9 @@ export function extractListing(
     result.rawLaundryText ??= layer.rawLaundryText;
     result.warnings.push(...layer.warnings);
   }
-  result.rent = reconcileRent(
-    layers.flatMap((layer) => (layer.rent ? [layer.rent] : [])),
-  );
+  result.rent =
+    siteLayer?.rent ??
+    reconcileRent(layers.flatMap((layer) => (layer.rent ? [layer.rent] : [])));
   if (result.rent?.kind === 'single')
     result.listing.recurring.advertisedRent = result.rent.amount;
   else delete result.listing.recurring.advertisedRent;

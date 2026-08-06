@@ -148,9 +148,11 @@ export function parseUsAddress(
   );
   return match
     ? {
-        fullAddress: `${match[1].trim()}, ${match[2].trim()}, ${match[3]} ${match[4]}`,
+        // RentalListing stores locality fields separately, so fullAddress is
+        // the street/unit portion shown in the Address editor.
+        fullAddress: match[1].trim(),
         city: match[2].trim(),
-        state: match[3],
+        state: match[3].toUpperCase(),
         zipCode: match[4],
       }
     : undefined;

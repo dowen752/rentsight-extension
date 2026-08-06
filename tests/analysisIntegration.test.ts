@@ -74,6 +74,74 @@ describe('manual listing analysis integration', () => {
     expect(analysis.baseline.recurring.advertisedRent?.value).toBe(1_900);
   });
 
+  it('removes stale listing facts while preserving user edits', () => {
+    let analysis = createInitialAnalysis(
+      'https://example.com/rental/stale',
+      'Stale extraction',
+    );
+    const first = emptyExtraction('Test extractor', '1.0.0');
+    first.listing.recurring.advertisedRent = {
+      value: 1_900,
+      source: 'listing',
+      confidence: 0.9,
+    };
+    first.listing.upfront.securityDeposit = {
+      value: 1_000,
+      source: 'listing',
+      confidence: 0.8,
+    };
+    analysis = applyExtraction(analysis, first);
+    analysis = setUpfrontValue(analysis, 'securityDeposit', 1_500);
+    analysis = applyExtraction(
+      analysis,
+      emptyExtraction('Test extractor', '1.0.1'),
+    );
+
+    expect(analysis.listing.recurring.advertisedRent).toBeUndefined();
+    expect(analysis.baseline.recurring.advertisedRent).toBeUndefined();
+    expect(analysis.listing.upfront.securityDeposit?.value).toBe(1_500);
+  });
+
+  it('removes stale listing-derived utility inclusion', () => {
+    let analysis = createInitialAnalysis(
+      'https://example.com/rental/utilities',
+      'Utilities',
+    );
+    const first = emptyExtraction('Test extractor', '1.0.0');
+    first.includedUtilities = ['water'];
+    analysis = applyExtraction(analysis, first);
+    analysis = applyExtraction(
+      analysis,
+      emptyExtraction('Test extractor', '1.0.1'),
+    );
+
+    expect(analysis.utilityIncluded.water).toBe(false);
+    expect(analysis.utilityIncludedSource.water).toBe('default');
+    expect(analysis.listing.recurring.water?.source).not.toBe('listing');
+  });
+
+  it('uses an extracted listing title unless the user supplied one', () => {
+    let analysis = createInitialAnalysis(
+      'https://example.com/apartments/community',
+      'Page title',
+    );
+    const extraction = emptyExtraction('Test extractor', '1.0.0');
+    extraction.listing.identity.listingTitle = {
+      value: 'Pine Court Apartments',
+      source: 'listing',
+      confidence: 0.9,
+    };
+    analysis = applyExtraction(analysis, extraction);
+    expect(analysis.listing.identity.listingTitle?.value).toBe(
+      'Pine Court Apartments',
+    );
+
+    analysis = setIdentityValue(analysis, 'listingTitle', 'My favorite');
+    extraction.listing.identity.listingTitle.value = 'New extracted name';
+    analysis = applyExtraction(analysis, extraction);
+    expect(analysis.listing.identity.listingTitle?.value).toBe('My favorite');
+  });
+
   it('preserves a user utility override when extraction says it is included', () => {
     let analysis = createInitialAnalysis(
       'https://example.com/rental/4',

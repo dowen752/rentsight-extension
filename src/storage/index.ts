@@ -44,13 +44,9 @@ export async function persistSavedListings(
   } catch (error: unknown) {
     if (!isQuotaError(error)) throw error;
 
-    // Draft analyses can be reconstructed from their listing pages, and the
-    // location cache can be regenerated. Prefer the user's explicit shortlist
-    // when Chrome's local-storage quota has already been consumed.
-    await Promise.all([
-      extensionStorage.remove('rentalAnalyses'),
-      extensionStorage.remove('locationCache'),
-    ]);
+    // Location estimates are regenerable. Draft analyses may contain manual
+    // edits that do not exist on the listing page, so never evict them here.
+    await extensionStorage.remove('locationCache');
     await extensionStorage.set('savedListings', records);
   }
   await extensionStorage.set('savedListingsSchemaVersion', 1);

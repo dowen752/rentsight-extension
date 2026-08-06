@@ -11,7 +11,7 @@ import { emptyExtraction, type ListingExtractor } from './types';
 
 export const zillowExtractor: ListingExtractor = {
   siteName: 'Zillow',
-  version: '1.0.0',
+  version: '1.1.0',
   matches(url) {
     return (
       /(^|\.)zillow\.com$/i.test(url.hostname) &&
@@ -26,9 +26,11 @@ export const zillowExtractor: ListingExtractor = {
     const isApartmentCommunity = /\/apartments\//i.test(url.pathname);
     const heading = pick('h1');
     const explicitAddress = pick(
-      '[data-testid="bdp-building-address"], [data-testid="building-address"], address, .property-address',
+      '[data-testid="bdp-building-address"], [data-testid="building-address"], [data-testid="property-address"], .property-address',
     );
-    const parsedAddress = parseUsAddress(explicitAddress ?? body);
+    const addressText =
+      explicitAddress ?? (!isApartmentCommunity ? heading : undefined);
+    const parsedAddress = addressText ? parseUsAddress(addressText) : undefined;
     const rentTexts = [
       ...document.querySelectorAll(
         '[data-testid="price"], [data-testid="rent"], [data-testid*="rent-price"], [data-testid="rent-zestimate"], .ds-price',
@@ -45,22 +47,22 @@ export const zillowExtractor: ListingExtractor = {
       result.listing.identity.fullAddress = listingValue(
         parsedAddress.fullAddress,
         0.88,
-        explicitAddress ?? parsedAddress.fullAddress,
+        addressText,
       );
       result.listing.identity.city = listingValue(
         parsedAddress.city,
         0.88,
-        explicitAddress ?? parsedAddress.fullAddress,
+        addressText,
       );
       result.listing.identity.state = listingValue(
         parsedAddress.state,
         0.88,
-        explicitAddress ?? parsedAddress.fullAddress,
+        addressText,
       );
       result.listing.identity.zipCode = listingValue(
         parsedAddress.zipCode,
         0.88,
-        explicitAddress ?? parsedAddress.fullAddress,
+        addressText,
       );
     } else if (explicitAddress ?? heading) {
       const address = explicitAddress ?? heading!;
@@ -75,18 +77,22 @@ export const zillowExtractor: ListingExtractor = {
       result.listing.recurring.advertisedRent = result.rent.amount;
     const facts =
       pick(
-        '[data-testid="bed-bath-beyond"], [data-testid="facts-and-features"]',
-      ) ??
-      document.body.textContent ??
-      '';
+        '[data-testid="bed-bath-sqft-facts"], [aria-label="Bed bath sqft facts"], [data-testid="bed-bath-beyond"], [data-testid="facts-and-features"]',
+      ) ?? '';
     const beds =
-      /\d+(?:\.\d+)?\s*(?:-|–|—|to)\s*\d+(?:\.\d+)?\s*(?:beds?|bd)\b/i.test(
+      /\d+(?:\.\d+)?\s*(?:-|–|—|to)\s*\d+(?:\.\d+)?\s*(?:beds?|bd)(?=\s|\d|$)/i.test(
         facts,
       )
         ? undefined
-        : parseNumberNear(facts, /(\d+(?:\.\d+)?)\s*(?:beds?|bd)\b/i);
-    const baths = parseNumberNear(facts, /(\d+(?:\.\d+)?)\s*(?:baths?|ba)\b/i);
-    const sqft = parseNumberNear(facts, /([\d,]+)\s*(?:sq\.?\s*ft|sqft)/i);
+        : parseNumberNear(facts, /(\d+(?:\.\d+)?)\s*(?:beds?|bd)(?=\s|\d|$)/i);
+    const baths = parseNumberNear(
+      facts,
+      /(\d+(?:\.\d+)?)\s*(?:baths?|ba)(?=\s|\d|$)/i,
+    );
+    const sqft = parseNumberNear(
+      facts,
+      /([\d,]+)\s*(?:sq\.?\s*ft|sqft)(?=\s|\d|$)/i,
+    );
     if (beds !== undefined)
       result.listing.identity.bedrooms = listingValue(beds, 0.84, facts);
     if (baths !== undefined)

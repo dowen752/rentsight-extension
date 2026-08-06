@@ -2,13 +2,34 @@
 <html>
   <head>
     <title>Example rental</title>
+    <script id="__NEXT_DATA__" type="application/json">
+      {
+        "recommendedProperty": {
+          "address": {
+            "streetAddress": "1050 Ralston Ave APT 16",
+            "city": "Belmont",
+            "state": "CA",
+            "zipcode": "94002"
+          },
+          "price": 8500,
+          "bedrooms": 6,
+          "bathrooms": 10,
+          "livingArea": 4000
+        }
+      }
+    </script>
   </head>
   <body>
-    <h1 data-testid="bdp-building-address">
-      200 Sample Road, Testville, OR 97000
-    </h1>
+    <h1>200 Sample Road, Testville, OR 97000</h1>
     <span data-testid="price">$2,650/mo</span>
-    <div data-testid="bed-bath-beyond">3 beds · 2 baths · 1,250 sqft</div>
+    <div data-testid="bed-bath-sqft-facts">
+      <span>3</span><span>beds</span><span>2</span><span>baths</span
+      ><span>1,250</span><span>sqft</span>
+    </div>
+    <aside>
+      <a href="/homedetails/nearby">6 beds · 10 baths</a>
+      <address>999 Unrelated Ave, Elsewhere, CA 90000</address>
+    </aside>
     <p>
       Security deposit $2,000. Water and trash included. In-unit washer and
       dryer.

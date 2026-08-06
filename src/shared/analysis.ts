@@ -440,6 +440,20 @@ function mergeExtractedGroup(
   }
 }
 
+function removeStaleExtractedGroup(
+  current: Record<string, SourcedValue<unknown> | undefined>,
+  baseline: Record<string, SourcedValue<unknown> | undefined>,
+  previous: Record<string, SourcedValue<unknown> | undefined> | undefined,
+  extracted: Record<string, SourcedValue<unknown> | undefined>,
+): void {
+  if (!previous) return;
+  for (const key of Object.keys(previous)) {
+    if (extracted[key] !== undefined) continue;
+    if (baseline[key]?.source === 'listing') delete baseline[key];
+    if (current[key]?.source === 'listing') delete current[key];
+  }
+}
+
 export function applyExtraction(
   analysis: RentalAnalysis,
   extraction: ListingExtraction,
@@ -450,14 +464,62 @@ export function applyExtraction(
     UTILITY_CATEGORIES.map((item) => [item, 'default']),
   ) as Record<UtilityCategory, ValueSource>;
   const extractedIdentity = { ...extraction.listing.identity };
-  delete extractedIdentity.listingTitle;
-  mergeExtractedGroup(
+  removeStaleExtractedGroup(
     next.listing.identity as Record<string, SourcedValue<unknown> | undefined>,
     next.baseline.identity as Record<string, SourcedValue<unknown> | undefined>,
-    extractedIdentity as Record<
+    next.extraction?.listing.identity as
+      Record<string, SourcedValue<unknown> | undefined> | undefined,
+    extractedIdentity as Record<string, SourcedValue<unknown> | undefined>,
+  );
+  removeStaleExtractedGroup(
+    next.listing.recurring as Record<string, SourcedValue<unknown> | undefined>,
+    next.baseline.recurring as Record<
       string,
       SourcedValue<unknown> | undefined
     >,
+    next.extraction?.listing.recurring as
+      Record<string, SourcedValue<unknown> | undefined> | undefined,
+    extraction.listing.recurring as Record<
+      string,
+      SourcedValue<unknown> | undefined
+    >,
+  );
+  removeStaleExtractedGroup(
+    next.listing.upfront as Record<string, SourcedValue<unknown> | undefined>,
+    next.baseline.upfront as Record<string, SourcedValue<unknown> | undefined>,
+    next.extraction?.listing.upfront as
+      Record<string, SourcedValue<unknown> | undefined> | undefined,
+    extraction.listing.upfront as Record<
+      string,
+      SourcedValue<unknown> | undefined
+    >,
+  );
+  if (next.extraction?.listing.concessions) {
+    next.listing.concessions ??= {};
+    next.baseline.concessions ??= {};
+    removeStaleExtractedGroup(
+      next.listing.concessions as Record<
+        string,
+        SourcedValue<unknown> | undefined
+      >,
+      next.baseline.concessions as Record<
+        string,
+        SourcedValue<unknown> | undefined
+      >,
+      next.extraction.listing.concessions as Record<
+        string,
+        SourcedValue<unknown> | undefined
+      >,
+      (extraction.listing.concessions ?? {}) as Record<
+        string,
+        SourcedValue<unknown> | undefined
+      >,
+    );
+  }
+  mergeExtractedGroup(
+    next.listing.identity as Record<string, SourcedValue<unknown> | undefined>,
+    next.baseline.identity as Record<string, SourcedValue<unknown> | undefined>,
+    extractedIdentity as Record<string, SourcedValue<unknown> | undefined>,
     'identity',
     next.userClearedFields,
   );
@@ -503,6 +565,21 @@ export function applyExtraction(
       'concessions',
       next.userClearedFields,
     );
+  }
+  const includedUtilities = new Set(extraction.includedUtilities);
+  for (const utility of next.extraction?.includedUtilities ?? []) {
+    if (
+      includedUtilities.has(utility) ||
+      next.utilityIncludedSource[utility] === 'user'
+    )
+      continue;
+    next.utilityIncluded[utility] = false;
+    next.utilityIncludedSource[utility] = 'default';
+    next.baselineUtilityIncluded[utility] = false;
+    if (next.listing.recurring[utility]?.source === 'listing')
+      delete next.listing.recurring[utility];
+    if (next.baseline.recurring[utility]?.source === 'listing')
+      delete next.baseline.recurring[utility];
   }
   for (const utility of extraction.includedUtilities) {
     const extractedValue: SourcedValue<number> = {

@@ -29,7 +29,7 @@ describe('extension storage', () => {
     );
   });
 
-  it('clears reconstructable caches and retries when saved listings hit quota', async () => {
+  it('preserves draft analyses and clears only regenerable caches on quota', async () => {
     values.rentalAnalyses = { oversized: true };
     values.locationCache = { oversized: true };
     let firstWrite = true;
@@ -45,8 +45,18 @@ describe('extension storage', () => {
 
     await persistSavedListings([]);
 
-    expect(values.rentalAnalyses).toBeUndefined();
+    expect(values.rentalAnalyses).toEqual({ oversized: true });
     expect(values.locationCache).toBeUndefined();
     expect(values.savedListings).toEqual([]);
+  });
+
+  it('surfaces quota failure rather than deleting draft analyses', async () => {
+    values.rentalAnalyses = { manualDraft: true };
+    vi.mocked(chrome.storage.local.set).mockRejectedValue(
+      new Error('Resource::kQuotaBytes quota exceeded'),
+    );
+
+    await expect(persistSavedListings([])).rejects.toThrow('quota exceeded');
+    expect(values.rentalAnalyses).toEqual({ manualDraft: true });
   });
 });

@@ -32,8 +32,35 @@ describe('listing extraction', () => {
       new URL('https://www.zillow.com/homedetails/example/1_zpid/'),
     );
     expect(result.siteName).toBe('Zillow');
+    expect(result.listing.identity.fullAddress?.value).toBe('200 Sample Road');
+    expect(result.listing.identity.city?.value).toBe('Testville');
     expect(result.listing.identity.bedrooms?.value).toBe(3);
+    expect(result.listing.identity.bathrooms?.value).toBe(2);
+    expect(result.listing.identity.squareFootage?.value).toBe(1_250);
+    expect(result.listing.recurring.advertisedRent?.value).toBe(2_650);
     expect(result.listing.upfront.securityDeposit?.value).toBe(2_000);
+  });
+
+  it('does not fill missing Zillow detail facts from background cards', () => {
+    const url = new URL(
+      'https://www.zillow.com/homedetails/selected-home/1_zpid/',
+    );
+    const document = new JSDOM(`
+      <html><body>
+        <h1>123 Selected St, Belmont, CA 94002</h1>
+        <div data-testid="property-card-details">
+          <span>6 bd</span><span>10 ba</span><span>4,000 sqft</span>
+          <address>1050 Ralston Ave APT 16, Belmont, CA 94002</address>
+        </div>
+      </body></html>
+    `).window.document;
+
+    const result = extractListing(document, url);
+
+    expect(result.listing.identity.fullAddress?.value).toBe('123 Selected St');
+    expect(result.listing.identity.bedrooms).toBeUndefined();
+    expect(result.listing.identity.bathrooms).toBeUndefined();
+    expect(result.listing.identity.squareFootage).toBeUndefined();
   });
 
   it('supports Zillow apartment-community pages without choosing ranges', () => {
@@ -49,7 +76,7 @@ describe('listing extraction', () => {
       'Cirrus Redwood City',
     );
     expect(result.listing.identity.fullAddress?.value).toBe(
-      '2580 El Camino Real, Redwood City, CA 94061',
+      '2580 El Camino Real',
     );
     expect(result.listing.identity.city?.value).toBe('Redwood City');
     expect(result.listing.identity.zipCode?.value).toBe('94061');

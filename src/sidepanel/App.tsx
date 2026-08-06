@@ -523,15 +523,21 @@ function SavedListingsView({
   const exportedRecords = selectedRecords.length ? selectedRecords : records;
   const importFile = async (file?: File) => {
     if (!file) return;
-    const result = importListingsJson(await file.text());
-    if (result.records.length) {
-      await setRecords(mergeImportedListings(records, result.records));
+    try {
+      const result = importListingsJson(await file.text());
+      if (result.records.length) {
+        await setRecords(mergeImportedListings(records, result.records));
+      }
+      setNotice(
+        result.errors.length
+          ? result.errors.join(' ')
+          : `Imported ${result.records.length} listing${result.records.length === 1 ? '' : 's'}.`,
+      );
+    } catch (error: unknown) {
+      setNotice(
+        error instanceof Error ? error.message : 'Could not import listings.',
+      );
     }
-    setNotice(
-      result.errors.length
-        ? result.errors.join(' ')
-        : `Imported ${result.records.length} listing${result.records.length === 1 ? '' : 's'}.`,
-    );
   };
   return (
     <main>
@@ -621,10 +627,18 @@ function SavedListingsView({
                 <button
                   type="button"
                   className="remove"
-                  onClick={() => {
-                    void setRecords(deleteListing(records, record.id));
-                    setSelected(selected.filter((id) => id !== record.id));
-                    setNotice('Saved listing deleted.');
+                  onClick={async () => {
+                    try {
+                      await setRecords(deleteListing(records, record.id));
+                      setSelected(selected.filter((id) => id !== record.id));
+                      setNotice('Saved listing deleted.');
+                    } catch (error: unknown) {
+                      setNotice(
+                        error instanceof Error
+                          ? error.message
+                          : 'Could not delete the saved listing.',
+                      );
+                    }
                   }}
                 >
                   Delete
