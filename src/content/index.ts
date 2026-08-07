@@ -85,10 +85,15 @@ if (!contentWindow.__rentSightInitialized) {
     /(^|\.)zillow\.com$/i.test(apartmentUrl.hostname) &&
     /\/apartments\//i.test(apartmentUrl.pathname)
   ) {
-    const poll = window.setInterval(() => {
-      const unitId = selectedZillowUnitId(document, apartmentUrl);
+    let unitTimer: number | undefined;
+    const detectUnit = () => {
+      const unitId = selectedZillowUnitId(
+        document,
+        new URL(window.location.href),
+      );
       if (!unitId) return;
-      window.clearInterval(poll);
+      window.clearTimeout(unitTimer);
+      observer.disconnect();
       const browserUrl = window.location.href.split('#')[0];
       const payload: PageInfo = {
         url: `${browserUrl}#rentsight-unit=${encodeURIComponent(unitId)}`,
@@ -100,6 +105,18 @@ if (!contentWindow.__rentSightInitialized) {
       void chrome.runtime
         .sendMessage({ type: 'EXTRACTION_UPDATED', payload })
         .catch(() => undefined);
-    }, 750);
+    };
+    const observer = new MutationObserver(() => {
+      if (unitTimer !== undefined) return;
+      unitTimer = window.setTimeout(() => {
+        unitTimer = undefined;
+        detectUnit();
+      }, 500);
+    });
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
+    detectUnit();
   }
 }

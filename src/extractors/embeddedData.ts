@@ -2,14 +2,22 @@ import { emptyExtraction, type ListingExtraction } from './types';
 import { listingValue, parseRentEvidence } from './parsers';
 
 type JsonObject = Record<string, unknown>;
+const MAX_EMBEDDED_JSON_BYTES = 1_000_000;
+const MAX_VISITED_NODES = 20_000;
 const isObject = (value: unknown): value is JsonObject =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-function findListing(value: unknown, depth = 0): JsonObject | undefined {
+function findListing(
+  value: unknown,
+  budget: { remaining: number },
+  depth = 0,
+): JsonObject | undefined {
+  budget.remaining -= 1;
+  if (budget.remaining < 0) return undefined;
   if (depth > 8) return undefined;
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = findListing(item, depth + 1);
+      const found = findListing(item, budget, depth + 1);
       if (found) return found;
     }
     return undefined;
@@ -22,7 +30,7 @@ function findListing(value: unknown, depth = 0): JsonObject | undefined {
   )
     return value;
   for (const child of Object.values(value)) {
-    const found = findListing(child, depth + 1);
+    const found = findListing(child, budget, depth + 1);
     if (found) return found;
   }
   return undefined;
@@ -55,7 +63,16 @@ export function extractEmbeddedData(document: Document): ListingExtraction {
   );
   for (const script of scripts) {
     try {
-      const found = findListing(JSON.parse(script.textContent ?? ''));
+      const source = script.textContent ?? '';
+      if (source.length > MAX_EMBEDDED_JSON_BYTES) {
+        result.warnings.push(
+          'An unusually large embedded-data block was skipped.',
+        );
+        continue;
+      }
+      const found = findListing(JSON.parse(source), {
+        remaining: MAX_VISITED_NODES,
+      });
       if (!found) continue;
       const addressValue = found.address;
       const address =

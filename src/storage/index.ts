@@ -34,6 +34,26 @@ export const extensionStorage = {
   },
 };
 
+const analysisStorageKey = (url: string): string =>
+  `rentalAnalysis:${encodeURIComponent(url)}`;
+
+export async function getRentalAnalysis(
+  url: string,
+): Promise<RentalAnalysisMap[string] | undefined> {
+  const key = analysisStorageKey(url);
+  const result = await chrome.storage.local.get(key);
+  const current = result[key] as RentalAnalysisMap[string] | undefined;
+  if (current) return current;
+  return (await extensionStorage.get('rentalAnalyses'))?.[url];
+}
+
+export async function setRentalAnalysis(
+  url: string,
+  analysis: RentalAnalysisMap[string],
+): Promise<void> {
+  await chrome.storage.local.set({ [analysisStorageKey(url)]: analysis });
+}
+
 const isQuotaError = (error: unknown): boolean =>
   error instanceof Error && /quota.*exceed/i.test(error.message);
 

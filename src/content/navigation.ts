@@ -4,10 +4,10 @@ export interface NavigationObserver {
 
 export function observeListingNavigation(
   window: Window,
-  document: Document,
+  _document: Document,
   callback: () => void,
   debounceMs = 500,
-  pollMs = 750,
+  pollMs = 2_000,
 ): NavigationObserver {
   let previousUrl = window.location.href;
   let timer: number | undefined;
@@ -20,16 +20,26 @@ export function observeListingNavigation(
       callback();
     }, debounceMs);
   };
-  void document;
   window.addEventListener('popstate', detectNavigation);
   window.addEventListener('hashchange', detectNavigation);
-  const poll = window.setInterval(detectNavigation, pollMs);
+  const navigation = (
+    window as Window & {
+      navigation?: EventTarget;
+    }
+  ).navigation;
+  navigation?.addEventListener('navigatesuccess', detectNavigation);
+  // Chromium's Navigation API observes pushState/replaceState performed by the
+  // page's main world. Retain a slower fallback only for test/older runtimes.
+  const poll = navigation
+    ? undefined
+    : window.setInterval(detectNavigation, pollMs);
   return {
     disconnect() {
       window.removeEventListener('popstate', detectNavigation);
       window.removeEventListener('hashchange', detectNavigation);
       window.clearTimeout(timer);
-      window.clearInterval(poll);
+      navigation?.removeEventListener('navigatesuccess', detectNavigation);
+      if (poll !== undefined) window.clearInterval(poll);
     },
   };
 }

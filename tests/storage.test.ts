@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createInitialAnalysis } from '../src/shared/analysis';
-import { extensionStorage, persistSavedListings } from '../src/storage';
+import {
+  extensionStorage,
+  getRentalAnalysis,
+  persistSavedListings,
+  setRentalAnalysis,
+} from '../src/storage';
 
 describe('extension storage', () => {
   const values: Record<string, unknown> = {};
@@ -27,6 +32,19 @@ describe('extension storage', () => {
     await expect(extensionStorage.get('rentalAnalyses')).resolves.toEqual(
       analyses,
     );
+  });
+
+  it('stores each edited analysis independently and reads legacy drafts', async () => {
+    const url = 'https://example.com/rental/independent';
+    const analysis = createInitialAnalysis(url, 'Rental');
+    await setRentalAnalysis(url, analysis);
+    await expect(getRentalAnalysis(url)).resolves.toEqual(analysis);
+    expect(values.rentalAnalyses).toBeUndefined();
+
+    const legacyUrl = 'https://example.com/rental/legacy';
+    const legacy = createInitialAnalysis(legacyUrl, 'Legacy');
+    values.rentalAnalyses = { [legacyUrl]: legacy };
+    await expect(getRentalAnalysis(legacyUrl)).resolves.toEqual(legacy);
   });
 
   it('preserves draft analyses and clears only regenerable caches on quota', async () => {

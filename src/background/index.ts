@@ -3,6 +3,12 @@ import { isExtensionRequest, type ExtensionResponse } from '../shared/messages';
 const CONTENT_SCRIPT_FILE = 'content.js';
 const PAGE_INSPECTION_TIMEOUT_MS = 5_000;
 
+const isMissingContentScript = (error: unknown): boolean =>
+  error instanceof Error &&
+  /receiving end does not exist|could not establish connection/i.test(
+    error.message,
+  );
+
 async function withInspectionTimeout<T>(request: Promise<T>): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -61,7 +67,11 @@ async function requestPageInfo(): Promise<ExtensionResponse> {
       return (await withInspectionTimeout(
         chrome.tabs.sendMessage(tab.id!, { type: 'GET_PAGE_INFO' }),
       )) as ExtensionResponse;
-    } catch {
+    } catch (error: unknown) {
+      // A timeout or extractor failure means the existing content script is
+      // already present. Reinjection cannot interrupt it and would only issue
+      // another expensive inspection request.
+      if (!isMissingContentScript(error)) throw error;
       try {
         await chrome.scripting.executeScript({
           target: { tabId: tab.id! },

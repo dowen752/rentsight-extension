@@ -9,13 +9,18 @@ import {
 } from './parsers';
 import { emptyExtraction, type ListingExtractor } from './types';
 
+const MAX_PAGE_TEXT = 300_000;
+const MAX_VISIBLE_FRAGMENTS = 2_000;
+
 export const genericExtractor: ListingExtractor = {
   siteName: 'Generic listing page',
   version: '1.0.0',
   matches: () => true,
   extract(document) {
     const result = emptyExtraction(this.siteName, this.version);
-    const body = document.body?.innerText || document.body?.textContent || '';
+    // textContent avoids a forced layout. Bound all generic work because this
+    // code executes on the host page's main thread.
+    const body = (document.body?.textContent ?? '').slice(0, MAX_PAGE_TEXT);
     result.listing.identity.listingTitle = document.title
       ? listingValue(document.title, 0.55)
       : undefined;
@@ -42,9 +47,13 @@ export const genericExtractor: ListingExtractor = {
         address.fullAddress,
       );
     }
-    const visibleFragments = [
-      ...document.querySelectorAll('h1, h2, p, li, [data-testid*="rent"]'),
-    ].map((node) => node.textContent?.trim() ?? '');
+    const visibleFragments: string[] = [];
+    for (const node of document.querySelectorAll(
+      'h1, h2, p, li, [data-testid*="rent"]',
+    )) {
+      visibleFragments.push((node.textContent ?? '').trim().slice(0, 2_000));
+      if (visibleFragments.length >= MAX_VISIBLE_FRAGMENTS) break;
+    }
     const rentLines = visibleFragments.filter(
       (line) =>
         /^\s*(?:(?:the|advertised)\s+)?(?:monthly\s+)?rent\s*(?::|is|from)?\s*\$[\d,]+/i.test(

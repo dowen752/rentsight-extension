@@ -7,6 +7,30 @@ import {
 } from '../src/content/pageState';
 
 describe('SPA listing navigation', () => {
+  it('uses Chromium navigation events without starting a permanent poll', async () => {
+    const dom = new JSDOM('<html><body></body></html>', {
+      url: 'https://example.com/listing/one',
+    });
+    const navigation = new dom.window.EventTarget();
+    Object.defineProperty(dom.window, 'navigation', { value: navigation });
+    const interval = vi.spyOn(dom.window, 'setInterval');
+    const callback = vi.fn();
+    const observer = observeListingNavigation(
+      dom.window as unknown as Window,
+      dom.window.document,
+      callback,
+      5,
+    );
+
+    dom.window.history.pushState({}, '', '/listing/two');
+    navigation.dispatchEvent(new dom.window.Event('navigatesuccess'));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(interval).not.toHaveBeenCalled();
+    observer.disconnect();
+  });
+
   it('debounces DOM changes and reruns only after the URL changes', async () => {
     const dom = new JSDOM('<html><body><main></main></body></html>', {
       url: 'https://example.com/listing/one',

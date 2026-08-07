@@ -31,11 +31,15 @@ import {
   UTILITY_CATEGORIES,
   type CustomFee,
   type RentalAnalysis,
-  type RentalAnalysisMap,
 } from '../shared/analysis';
 import type { ExtensionResponse } from '../shared/messages';
 import { isExtractionUpdatedMessage } from '../shared/messages';
-import { extensionStorage, persistSavedListings } from '../storage';
+import {
+  extensionStorage,
+  getRentalAnalysis,
+  persistSavedListings,
+  setRentalAnalysis,
+} from '../storage';
 import { NumberField, TextField } from './Fields';
 import {
   createComparison,
@@ -61,6 +65,7 @@ import { analysisForNavigation } from './navigationState';
 type ViewState =
   | { status: 'loading' }
   | { status: 'unit-selection-required' }
+  | { status: 'unsupported'; url: string; title: string }
   | {
       status: 'ready';
       url: string;
@@ -184,13 +189,21 @@ export function App() {
           setView({ status: 'unit-selection-required' });
           return;
         }
+        if (!response.payload.appearsToBeRentalListing) {
+          setView({
+            status: 'unsupported',
+            url: response.payload.url,
+            title: response.payload.title,
+          });
+          return;
+        }
         const [saved, storedRecords, storedInternetCost] = await Promise.all([
-          extensionStorage.get('rentalAnalyses'),
+          getRentalAnalysis(response.payload.url),
           extensionStorage.get('savedListings'),
           extensionStorage.get('internetMonthlyCost'),
         ]);
         let analysis =
-          saved?.[response.payload.url] ??
+          saved ??
           createInitialAnalysis(response.payload.url, response.payload.title);
         if (response.payload.extraction) {
           analysis = applyExtraction(analysis, response.payload.extraction);
@@ -243,65 +256,82 @@ export function App() {
   useEffect(() => {
     let active = true;
     let navigationRevision = 0;
-    const listener = (message: unknown) => {
+    const listener = (
+      message: unknown,
+      sender: chrome.runtime.MessageSender,
+    ) => {
       if (!isExtractionUpdatedMessage(message)) return;
-      if (message.payload.requiresUnitSelection) {
-        setView({ status: 'unit-selection-required' });
-        return;
-      }
-      if (message.payload.selectedUnitId) {
-        window.location.reload();
-        return;
-      }
-      const revision = ++navigationRevision;
-      void Promise.all([
-        extensionStorage.get('rentalAnalyses'),
-        extensionStorage.get('internetMonthlyCost'),
-      ]).then(([stored, internetCost]) => {
-        if (!active || revision !== navigationRevision) return;
-        setView((current) =>
-          current.status === 'ready'
-            ? {
-                ...current,
-                url: message.payload.url,
-                analysis: applyInternetPreference(
-                  analysisForNavigation(
-                    current.url === message.payload.url
-                      ? current.analysis
-                      : undefined,
-                    message.payload.url,
-                    message.payload.title,
-                    message.payload.extraction,
-                    stored,
-                  ),
-                  internetCost,
-                ),
-              }
-            : current,
-        );
-      });
+      void chrome.tabs
+        .query({ active: true, currentWindow: true })
+        .then(([tab]) => {
+          if (!active || !sender.tab?.id || sender.tab.id !== tab?.id) return;
+          if (message.payload.requiresUnitSelection) {
+            setView({ status: 'unit-selection-required' });
+            return;
+          }
+          if (!message.payload.appearsToBeRentalListing) {
+            setView({
+              status: 'unsupported',
+              url: message.payload.url,
+              title: message.payload.title,
+            });
+            return;
+          }
+          if (message.payload.selectedUnitId) {
+            window.location.reload();
+            return;
+          }
+          const revision = ++navigationRevision;
+          void Promise.all([
+            getRentalAnalysis(message.payload.url),
+            extensionStorage.get('internetMonthlyCost'),
+          ]).then(([stored, internetCost]) => {
+            if (!active || revision !== navigationRevision) return;
+            setView((current) =>
+              current.status === 'ready'
+                ? {
+                    ...current,
+                    url: message.payload.url,
+                    analysis: applyInternetPreference(
+                      analysisForNavigation(
+                        current.url === message.payload.url
+                          ? current.analysis
+                          : undefined,
+                        message.payload.url,
+                        message.payload.title,
+                        message.payload.extraction,
+                        stored ? { [message.payload.url]: stored } : undefined,
+                      ),
+                      internetCost,
+                    ),
+                  }
+                : current,
+            );
+          });
+        });
     };
     chrome.runtime.onMessage.addListener(listener);
+    const activeTabListener = (activeInfo: { tabId: number }) => {
+      void chrome.tabs
+        .query({ active: true, currentWindow: true })
+        .then(([tab]) => {
+          if (tab?.id === activeInfo.tabId) window.location.reload();
+        });
+    };
+    chrome.tabs.onActivated.addListener(activeTabListener);
     return () => {
       active = false;
       chrome.runtime.onMessage.removeListener(listener);
+      chrome.tabs.onActivated.removeListener(activeTabListener);
     };
   }, []);
 
   useEffect(() => {
     if (view.status !== 'ready') return;
     const timeout = window.setTimeout(() => {
-      void extensionStorage
-        .get('rentalAnalyses')
-        .then((saved) =>
-          extensionStorage.set('rentalAnalyses', {
-            ...saved,
-            [view.url]: view.analysis,
-          } satisfies RentalAnalysisMap),
-        )
-        .catch((error: unknown) =>
-          console.error('[RentSight] Could not save listing analysis', error),
-        );
+      void setRentalAnalysis(view.url, view.analysis).catch((error: unknown) =>
+        console.error('[RentSight] Could not save listing analysis', error),
+      );
     }, 250);
     return () => window.clearTimeout(timeout);
   }, [view]);
@@ -460,6 +490,51 @@ export function App() {
             onClick={() => window.location.reload()}
           >
             Check again
+          </button>
+        </section>
+      </main>
+    );
+  }
+  if (view.status === 'unsupported') {
+    const openManualEntry = async () => {
+      try {
+        const [storedAnalysis, storedRecords, internetCost] = await Promise.all(
+          [
+            getRentalAnalysis(view.url),
+            extensionStorage.get('savedListings'),
+            extensionStorage.get('internetMonthlyCost'),
+          ],
+        );
+        setView({
+          status: 'ready',
+          url: view.url,
+          analysis: applyInternetPreference(
+            storedAnalysis ?? createInitialAnalysis(view.url, view.title),
+            internetCost,
+          ),
+          savedListings: migrateSavedRecords(storedRecords),
+        });
+      } catch (error: unknown) {
+        setView({
+          status: 'error',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Unable to start manual entry.',
+        });
+      }
+    };
+    return (
+      <main>
+        <section className="warning">
+          <h1>This does not look like a rental listing</h1>
+          <p>Open a rental listing, or start with a blank analysis.</p>
+          <button
+            type="button"
+            className="primary-action"
+            onClick={() => void openManualEntry()}
+          >
+            Enter details manually
           </button>
         </section>
       </main>
