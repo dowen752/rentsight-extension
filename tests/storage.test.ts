@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createInitialAnalysis } from '../src/shared/analysis';
 import {
+  clearAllRentSightData,
   extensionStorage,
   getRentalAnalysis,
   persistSavedListings,
@@ -20,6 +21,9 @@ describe('extension storage', () => {
             Object.assign(values, update),
           ),
           remove: vi.fn(async (key: string) => delete values[key]),
+          clear: vi.fn(async () => {
+            for (const key of Object.keys(values)) delete values[key];
+          }),
         },
       },
     });
@@ -76,5 +80,24 @@ describe('extension storage', () => {
 
     await expect(persistSavedListings([])).rejects.toThrow('quota exceeded');
     expect(values.rentalAnalyses).toEqual({ manualDraft: true });
+  });
+
+  it('clears drafts, saved listings, preferences, and caches together', async () => {
+    values['rentalAnalysis:https%3A%2F%2Fexample.com'] = { draft: true };
+    values.savedListings = [{ id: 'saved' }];
+    values.internetMonthlyCost = 65;
+    values.householdProfile = {
+      occupants: 2,
+      smallDogs: 1,
+      largeDogs: 0,
+      otherPets: false,
+      internetMonthlyCost: 65,
+    };
+    values.locationCache = { place: true };
+
+    await clearAllRentSightData();
+
+    expect(values).toEqual({});
+    expect(chrome.storage.local.clear).toHaveBeenCalledOnce();
   });
 });

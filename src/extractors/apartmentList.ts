@@ -1,6 +1,7 @@
 import {
   classifyIncludedUtilities,
   classifyLaundry,
+  classifyNoPetsPolicy,
   listingValue,
   parseMoney,
   parseNumberNear,
@@ -32,6 +33,8 @@ export const apartmentListExtractor: ListingExtractor = {
   extract(document) {
     const result = emptyExtraction(this.siteName, this.version);
     const body = document.body.textContent ?? '';
+    result.rawPetPolicyText = classifyNoPetsPolicy(body);
+    if (result.rawPetPolicyText) result.petPolicy = 'none';
     const unit = activeUnitText(document);
     const title =
       document.querySelector('h1')?.textContent?.trim() ||

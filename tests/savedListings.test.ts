@@ -12,6 +12,7 @@ import {
 } from '../src/shared/analysis';
 import {
   calculateCompleteness,
+  comparisonBest,
   createComparison,
   deleteListing,
   exportListingsCsv,
@@ -90,9 +91,17 @@ describe('saved listings repository', () => {
 });
 
 describe('comparison and completeness', () => {
+  it('identifies the best value only when enough values are known', () => {
+    expect(comparisonBest([2_100, 2_500, 2_300], 'lower')).toBe(2_100);
+    expect(comparisonBest([1, 2, undefined], 'higher')).toBe(2);
+    expect(comparisonBest([1, undefined, undefined], 'higher')).toBeUndefined();
+    expect(comparisonBest([0, 0, 0], 'lower')).toBeUndefined();
+  });
+
   it('calculates comparable totals and cost differences', () => {
     const { record } = saveListing([], analysisFor('https://example.com/1'));
     const result = createComparison(record);
+    expect(result.url).toBe('https://example.com/1');
     expect(result.trueMonthlyCost).toBeGreaterThan(2_000);
     expect(result.monthlyDifference).toBe(result.trueMonthlyCost - 2_000);
     expect(result.costPerSquareFoot).toBe(result.trueMonthlyCost / 1_000);

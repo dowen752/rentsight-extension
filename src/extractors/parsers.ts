@@ -105,6 +105,12 @@ export function classifyLaundry(text: string): LaundryType | undefined {
   return undefined;
 }
 
+export function classifyNoPetsPolicy(text: string): string | undefined {
+  return text.match(
+    /\b(?:no pets(?:\s+(?:allowed|permitted))?|pets?\s+(?:are\s+)?not\s+(?:allowed|permitted)|pet-free\s+(?:property|home|community))\b/i,
+  )?.[0];
+}
+
 const UTILITY_PHRASES: Record<UtilityCategory, RegExp> = {
   electricity:
     /electric(?:ity)?\s+(?:is\s+)?included|rent\s+includes?\s+electric(?:ity)?/i,
@@ -118,7 +124,7 @@ const UTILITY_PHRASES: Record<UtilityCategory, RegExp> = {
 
 export function classifyIncludedUtilities(text: string): UtilityCategory[] {
   if (
-    /all utilities (?:are )?included|includ(?:e|es|ing)\s+all utilities/i.test(
+    /all utilities(?:\s+and\s+[^.;\n]{1,80})?\s+(?:are\s+)?included|includ(?:e|es|ing)\s+all utilities/i.test(
       text,
     )
   )
@@ -133,6 +139,11 @@ export function classifyIncludedUtilities(text: string): UtilityCategory[] {
       found.add('trash');
     if (/\b(?:internet|wi-?fi)\b/i.test(clause)) found.add('internet');
   };
+  for (const match of text.matchAll(
+    /(?:^|[.;\n])\s*([^.;\n]{1,240})\b(?:is|are)\s+included\b/gi,
+  )) {
+    addUtilitiesIn(match[1]);
+  }
   for (const match of text.matchAll(/([^.;\n]{0,120})\bincluded\b/gi)) {
     if (/\bnot\s*$/i.test(match[1])) continue;
     addUtilitiesIn(match[1]);
@@ -162,16 +173,18 @@ export function parseUsAddress(
   | { fullAddress: string; city: string; state: string; zipCode: string }
   | undefined {
   const match = text.match(
-    /(\d{1,6}\s+[^,\n]+),\s*([A-Za-z .'-]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\b/i,
+    /(\d{1,6}\s+[^,\n]+)(?:,\s*((?:#|unit|apt\.?|apartment)\s*[^,\n]+))?,\s*([A-Za-z .'-]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\b/i,
   );
   return match
     ? {
         // RentalListing stores locality fields separately, so fullAddress is
         // the street/unit portion shown in the Address editor.
-        fullAddress: match[1].trim(),
-        city: match[2].trim(),
-        state: match[3].toUpperCase(),
-        zipCode: match[4],
+        fullAddress: [match[1].trim(), match[2]?.trim()]
+          .filter(Boolean)
+          .join(', '),
+        city: match[3].trim(),
+        state: match[4].toUpperCase(),
+        zipCode: match[5],
       }
     : undefined;
 }

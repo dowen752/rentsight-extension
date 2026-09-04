@@ -57,6 +57,7 @@ export function calculateCompleteness(
 
 export interface ComparisonSnapshot {
   id: string;
+  url: string;
   address: string;
   advertisedRent?: number;
   trueMonthlyCost: number;
@@ -74,6 +75,24 @@ export interface ComparisonSnapshot {
   completeness: CompletenessScore;
 }
 
+export function comparisonBest(
+  values: readonly (number | undefined)[],
+  direction: 'lower' | 'higher',
+): number | undefined {
+  const known = values.filter((value): value is number => value !== undefined);
+  const unknownCount = values.length - known.length;
+  if (
+    known.length < 2 ||
+    values.length === 0 ||
+    unknownCount / values.length > 0.5
+  )
+    return undefined;
+  const minimum = Math.min(...known);
+  const maximum = Math.max(...known);
+  if (minimum === maximum) return undefined;
+  return direction === 'lower' ? minimum : maximum;
+}
+
 export function createComparison(
   record: SavedListingRecord,
 ): ComparisonSnapshot {
@@ -83,10 +102,8 @@ export function createComparison(
   const displayName = listing.identity.listingTitle?.value.trim();
   return {
     id: record.id,
-    address:
-      displayName ||
-      listing.identity.fullAddress?.value ||
-      record.url,
+    url: record.url,
+    address: displayName || listing.identity.fullAddress?.value || record.url,
     advertisedRent,
     trueMonthlyCost,
     monthlyDifference:

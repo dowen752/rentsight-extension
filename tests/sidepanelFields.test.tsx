@@ -1,9 +1,14 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { NumberField } from '../src/sidepanel/Fields';
-import { AnalysisEditor } from '../src/sidepanel/App';
+import {
+  AnalysisEditor,
+  GuidedTour,
+  UnavailableWorkspace,
+} from '../src/sidepanel/App';
 import { analysisForNavigation } from '../src/sidepanel/navigationState';
 import {
+  applyExtraction,
   createInitialAnalysis,
   setIdentityValue,
   setRecurringValue,
@@ -28,6 +33,34 @@ describe('side-panel fields', () => {
 });
 
 describe('analysis review workflow', () => {
+  it('warns when a pet household conflicts with an explicit no-pets policy', () => {
+    const analysis = createInitialAnalysis(
+      'https://example.com/rental/no-pets',
+      'No pets rental',
+    );
+    analysis.extraction = emptyExtraction('Test', '1.0.0');
+    analysis.extraction.petPolicy = 'none';
+    analysis.extraction.rawPetPolicyText = 'No Pets';
+    const householdProfile = {
+      occupants: 1,
+      smallDogs: 1,
+      largeDogs: 0,
+      otherPets: false,
+    };
+
+    const markup = renderToStaticMarkup(
+      <AnalysisEditor
+        analysis={analysis}
+        update={() => undefined}
+        householdProfile={householdProfile}
+      />,
+    );
+
+    expect(markup).toContain('Pet policy conflict');
+    expect(markup).toContain('This listing says pets are not allowed');
+    expect(markup).toContain('Listing text: No Pets');
+  });
+
   it('shows editable review fields and withholds results until confirmation', () => {
     const markup = renderToStaticMarkup(
       <AnalysisEditor
@@ -98,5 +131,104 @@ describe('analysis review workflow', () => {
     expect(restored.listing.recurring.advertisedRent?.value).toBe(2_750);
     expect(restored.listing.recurring.advertisedRent?.source).toBe('user');
     expect(restored.listing.identity.listingTitle?.value).toBe('Stored title');
+  });
+
+  it('carries building details into a Zillow child unit navigation', () => {
+    const buildingUrl =
+      'https://www.zillow.com/b/22639-oakcrest-ct-cupertino-ca/example/';
+    const unitUrl =
+      'https://www.zillow.com/homedetails/22639-Oakcrest-Ct-B-Cupertino-CA-95014/example/';
+    let building = setIdentityValue(
+      setIdentityValue(
+        createInitialAnalysis(buildingUrl, 'Oakcrest'),
+        'fullAddress',
+        '22639 Oakcrest Ct',
+      ),
+      'city',
+      'Cupertino',
+    );
+    const buildingExtraction = emptyExtraction('Generic listing page', '1.0.0');
+    buildingExtraction.includedUtilities = ['water'];
+    buildingExtraction.rawUtilityText = 'Water is included.';
+    building = applyExtraction(building, buildingExtraction);
+    const extraction = emptyExtraction('Zillow', '1.1.0');
+    extraction.listing.recurring.advertisedRent = {
+      value: 3_000,
+      source: 'listing',
+      confidence: 0.9,
+    };
+    extraction.listing.identity.squareFootage = {
+      value: 300,
+      source: 'listing',
+      confidence: 0.9,
+    };
+
+    const unit = analysisForNavigation(
+      building,
+      unitUrl,
+      'Unit B',
+      extraction,
+      undefined,
+    );
+
+    expect(unit.listing.identity.url?.value).toBe(unitUrl);
+    expect(unit.listing.identity.fullAddress?.value).toBe('22639 Oakcrest Ct');
+    expect(unit.listing.identity.city?.value).toBe('Cupertino');
+    expect(unit.listing.recurring.advertisedRent?.value).toBe(3_000);
+    expect(unit.listing.identity.squareFootage?.value).toBe(300);
+    expect(unit.utilityIncluded.water).toBe(true);
+    expect(unit.extraction?.includedUtilities).toContain('water');
+  });
+});
+
+describe('guided tour', () => {
+  it('identifies the active step and offers accessible navigation', () => {
+    const markup = renderToStaticMarkup(
+      <GuidedTour
+        step={0}
+        setStep={() => undefined}
+        finish={async () => undefined}
+      />,
+    );
+
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('aria-modal="true"');
+    expect(markup).toContain('Quick tour · 1 of 5');
+    expect(markup).toContain('Review the current listing');
+    expect(markup).toContain('Skip tour');
+    expect(markup).toContain('>Next</button>');
+    expect(markup).toContain('disabled=""');
+  });
+
+  it('finishes with a clear start action', () => {
+    const markup = renderToStaticMarkup(
+      <GuidedTour
+        step={4}
+        setStep={() => undefined}
+        finish={async () => undefined}
+      />,
+    );
+
+    expect(markup).toContain('Quick tour · 5 of 5');
+    expect(markup).toContain('Personalize your estimates');
+    expect(markup).toContain('Start using RentSight');
+  });
+});
+
+describe('unavailable listing workspace', () => {
+  it('keeps the saved, compare, and about tabs accessible', () => {
+    const markup = renderToStaticMarkup(
+      <UnavailableWorkspace clearAllData={async () => undefined}>
+        <main>
+          <p>Current page cannot be inspected.</p>
+        </main>
+      </UnavailableWorkspace>,
+    );
+
+    expect(markup).toContain('Current page cannot be inspected.');
+    expect(markup).toContain('>Current</button>');
+    expect(markup).toContain('>Saved (0)</button>');
+    expect(markup).toContain('>Compare (0)</button>');
+    expect(markup).toContain('>About</button>');
   });
 });

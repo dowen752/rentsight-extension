@@ -12,6 +12,12 @@ import type {
 import { estimateUtilities } from '../calculations';
 import type { ListingExtraction } from '../extractors';
 import type { LocationEstimate } from '../location';
+import {
+  DEFAULT_HOUSEHOLD_PROFILE,
+  householdHasPets,
+  normalizeHouseholdProfile,
+  type HouseholdProfile,
+} from './household';
 
 export interface CustomFee {
   id: string;
@@ -32,6 +38,7 @@ export interface RentalAnalysis {
   baselineUtilityIncluded: Record<UtilityCategory, boolean>;
   utilityIncludedSource: Record<UtilityCategory, ValueSource>;
   occupants: number;
+  householdProfile: HouseholdProfile;
   laundryType: LaundryType;
   paidLaundry: PaidLaundryDetails;
   customRecurringFees: CustomFee[];
@@ -110,6 +117,7 @@ export function createInitialAnalysis(
       internet: 'default',
     },
     occupants: 1,
+    householdProfile: { ...DEFAULT_HOUSEHOLD_PROFILE },
     laundryType: 'unknown',
     paidLaundry: { washPrice: 2, dryPrice: 2, loadsPerWeek: 2 },
     customRecurringFees: [],
@@ -121,8 +129,13 @@ export function createInitialAnalysis(
 
 export function materializeListing(analysis: RentalAnalysis): RentalListing {
   const listing = structuredClone(analysis.listing);
+  const household = normalizeHouseholdProfile(
+    analysis.householdProfile
+      ? { ...analysis.householdProfile, occupants: analysis.occupants }
+      : { occupants: analysis.occupants },
+  );
   const utilityEstimates = estimateUtilities({
-    occupants: analysis.occupants,
+    occupants: household.occupants,
     housingType: 'apartment',
     bedrooms: listing.identity.bedrooms?.value,
     squareFootage: listing.identity.squareFootage?.value,
@@ -179,6 +192,20 @@ export function materializeListing(analysis: RentalAnalysis): RentalListing {
       note: 'Includes custom one-time fees.',
     };
   }
+  if (!householdHasPets(household)) {
+    listing.recurring.petRent = {
+      value: 0,
+      source: 'user',
+      confidence: 1,
+      note: 'Listing pet rent does not apply because the household profile has no pets.',
+    };
+    listing.upfront.petDeposit = {
+      value: 0,
+      source: 'user',
+      confidence: 1,
+      note: 'Listing pet deposit does not apply because the household profile has no pets.',
+    };
+  }
   if (analysis.laundryType === 'shared_paid') {
     const monthlyLaundry =
       ((analysis.paidLaundry.washPrice + analysis.paidLaundry.dryPrice) *
@@ -203,6 +230,19 @@ export function materializeListing(analysis: RentalAnalysis): RentalListing {
     };
   }
   return listing;
+}
+
+export function applyHouseholdProfile(
+  analysis: RentalAnalysis,
+  profile: HouseholdProfile,
+): RentalAnalysis {
+  const next = structuredClone(analysis);
+  const household = normalizeHouseholdProfile(profile);
+  next.householdProfile = household;
+  next.occupants = household.occupants;
+  const applied = applyInternetPreference(next, household.internetMonthlyCost);
+  applied.updatedAt = new Date().toISOString();
+  return applied;
 }
 
 export function applyLocationEstimate(

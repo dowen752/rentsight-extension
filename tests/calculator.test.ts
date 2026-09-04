@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   calculateCostPerSquareFoot,
+  calculateEffectiveMonthlyCostAfterConcessions,
   calculateEffectiveMonthlyRent,
   calculateEstimatedTrueMonthlyCost,
   calculateFirstYearHousingCost,
@@ -118,6 +119,20 @@ describe('rental calculator', () => {
       concessions: { monthsFree: value(1), oneTimeCredit: value(600) },
     });
     expect(calculateEffectiveMonthlyRent(concession)).toBe(1_783.3333333333333);
+    expect(
+      calculateEffectiveMonthlyCostAfterConcessions(concession, {
+        utilityEstimation: utilityInput({ laundryType: 'in_unit' }),
+      }),
+    ).toBe(2_078.333333333333);
+  });
+
+  it('keeps effective monthly cost equal to true cost without concessions', () => {
+    const context = {
+      utilityEstimation: utilityInput({ laundryType: 'in_unit' }),
+    };
+    expect(
+      calculateEffectiveMonthlyCostAfterConcessions(listing(), context),
+    ).toBe(calculateEstimatedTrueMonthlyCost(listing(), context));
   });
 
   it('separates refundable deposits from expenses and first-year cost', () => {

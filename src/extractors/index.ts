@@ -3,9 +3,11 @@ import { apartmentsExtractor } from './apartments';
 import { apartmentListExtractor } from './apartmentList';
 import { extractEmbeddedData } from './embeddedData';
 import { genericExtractor } from './generic';
+import { homesExtractor } from './homes';
 import { extractJsonLd } from './jsonLd';
 import { zillowExtractor } from './zillow';
 import { redfinExtractor } from './redfin';
+import { rentExtractor } from './rent';
 import {
   emptyExtraction,
   type ListingExtraction,
@@ -18,6 +20,8 @@ const SITE_EXTRACTORS: readonly ListingExtractor[] = [
   apartmentsExtractor,
   apartmentListExtractor,
   redfinExtractor,
+  homesExtractor,
+  rentExtractor,
 ];
 
 function mergeGroup(
@@ -90,7 +94,8 @@ export function extractListing(
     extractor.matches(url, document),
   );
   const siteLayer = site?.extract(document, url);
-  const selectedZillowUnit = /(?:^|#)rentsight-unit=/i.test(url.hash);
+  const selectedUnit = /(?:^|#)rentsight-unit=/i.test(url.hash);
+  const restoreGenericHomesFallback = site === homesExtractor && !selectedUnit;
   const layers = (
     site
       ? [
@@ -98,7 +103,18 @@ export function extractListing(
           // the user. JSON-LD is listing-scoped, while embedded application
           // state and generic page text can contain background search cards.
           siteLayer,
-          selectedZillowUnit ? undefined : extractJsonLd(document),
+          // Redfin's structured payload can retain stale sale facts on rental
+          // pages (including 0 beds or an unrelated floor size). Its visible,
+          // labeled stats are the authoritative source for the current home.
+          selectedUnit || site === redfinExtractor
+            ? undefined
+            : extractJsonLd(document),
+          restoreGenericHomesFallback
+            ? extractEmbeddedData(document)
+            : undefined,
+          restoreGenericHomesFallback
+            ? genericExtractor.extract(document, url)
+            : undefined,
         ]
       : [
           extractJsonLd(document),
@@ -123,14 +139,21 @@ export function extractListing(
       result.listing.upfront as Record<string, unknown>,
       layer.listing.upfront as Record<string, unknown>,
     );
-    if (!result.listing.concessions && layer.listing.concessions)
-      result.listing.concessions = structuredClone(layer.listing.concessions);
+    if (layer.listing.concessions) {
+      result.listing.concessions ??= {};
+      mergeGroup(
+        result.listing.concessions as Record<string, unknown>,
+        layer.listing.concessions as Record<string, unknown>,
+      );
+    }
     result.includedUtilities = [
       ...new Set([...result.includedUtilities, ...layer.includedUtilities]),
     ];
     result.laundryType ??= layer.laundryType;
     result.rawUtilityText ??= layer.rawUtilityText;
     result.rawLaundryText ??= layer.rawLaundryText;
+    result.petPolicy ??= layer.petPolicy;
+    result.rawPetPolicyText ??= layer.rawPetPolicyText;
     result.warnings.push(...layer.warnings);
   }
   result.rent =
@@ -166,6 +189,8 @@ export {
   apartmentListExtractor,
   apartmentsExtractor,
   genericExtractor,
+  homesExtractor,
   redfinExtractor,
+  rentExtractor,
   zillowExtractor,
 };

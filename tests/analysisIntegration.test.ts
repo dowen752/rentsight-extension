@@ -5,6 +5,7 @@ import {
 } from '../src/calculations';
 import {
   applyExtraction,
+  applyHouseholdProfile,
   applyInternetPreference,
   clearField,
   createInitialAnalysis,
@@ -86,6 +87,38 @@ describe('manual listing analysis integration', () => {
     expect(listing.recurring.electricity?.value).toBe(104);
     expect(listing.recurring.internet?.value).toBe(40);
     expect(listing.recurring.internet?.source).toBe('user');
+  });
+
+  it('reuses household details and applies pet costs only to pet owners', () => {
+    let analysis = createInitialAnalysis('https://example.com/pets', 'Pets');
+    analysis = setRecurringValue(analysis, 'petRent', 50);
+    analysis = setUpfrontValue(analysis, 'petDeposit', 300);
+
+    const withoutPets = materializeListing(
+      applyHouseholdProfile(analysis, {
+        occupants: 2,
+        smallDogs: 0,
+        largeDogs: 0,
+        otherPets: false,
+        internetMonthlyCost: 65,
+      }),
+    );
+    expect(withoutPets.recurring.petRent?.value).toBe(0);
+    expect(withoutPets.upfront.petDeposit?.value).toBe(0);
+    expect(withoutPets.recurring.internet?.value).toBe(65);
+    expect(withoutPets.recurring.electricity?.value).toBe(104);
+
+    const withLargeDog = materializeListing(
+      applyHouseholdProfile(analysis, {
+        occupants: 2,
+        smallDogs: 0,
+        largeDogs: 1,
+        otherPets: false,
+        internetMonthlyCost: 65,
+      }),
+    );
+    expect(withLargeDog.recurring.petRent?.value).toBe(50);
+    expect(withLargeDog.upfront.petDeposit?.value).toBe(300);
   });
 
   it('never overwrites a user-edited value during re-extraction', () => {

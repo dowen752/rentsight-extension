@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite build --watch --mode development",
     "build": "tsc -b && vite build && node scripts/verify-extension-build.mjs",
+    "postbuild": "node scripts/build-auth-assets.mjs",
+    "deploy:auth": "npm run build && wrangler deploy",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -14,6 +16,7 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "firebase": "^12.18.0",
     "react": "latest",
     "react-dom": "latest"
   },
@@ -34,6 +37,7 @@
     "typescript": "latest",
     "typescript-eslint": "latest",
     "vite": "latest",
-    "vitest": "latest"
+    "vitest": "latest",
+    "wrangler": "latest"
   }
 }

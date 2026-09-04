@@ -34,6 +34,8 @@ export interface ListingExtraction {
   laundryType?: LaundryType;
   rawUtilityText?: string;
   rawLaundryText?: string;
+  petPolicy?: 'none';
+  rawPetPolicyText?: string;
   siteName: string;
   extractorVersion: string;
   warnings: string[];

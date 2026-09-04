@@ -1,6 +1,7 @@
 import {
   classifyIncludedUtilities,
   classifyLaundry,
+  classifyNoPetsPolicy,
   listingValue,
   parseMoney,
   parseNumberNear,
@@ -157,6 +158,8 @@ export const genericExtractor: ListingExtractor = {
     result.rawLaundryText = body.match(
       /[^\n.]*(?:laundry|washer|dryer)[^\n.]*/i,
     )?.[0];
+    result.rawPetPolicyText = classifyNoPetsPolicy(body);
+    if (result.rawPetPolicyText) result.petPolicy = 'none';
     return result;
   },
 };

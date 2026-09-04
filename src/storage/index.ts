@@ -1,6 +1,7 @@
 import type { RentalAnalysisMap } from '../shared/analysis';
 import type { SavedListingRecord } from '../saved';
 import type { LocationEstimate } from '../location';
+import type { HouseholdProfile } from '../shared/household';
 
 export interface StorageSchema {
   lastInspectedUrl: string;
@@ -10,6 +11,8 @@ export interface StorageSchema {
   savedListingsSchemaVersion: number;
   locationCache: Record<string, LocationEstimate>;
   internetMonthlyCost: number;
+  householdProfile: HouseholdProfile;
+  onboardingCompleted: boolean;
 }
 
 type StorageKey = keyof StorageSchema;
@@ -32,7 +35,15 @@ export const extensionStorage = {
   async remove(key: StorageKey): Promise<void> {
     await chrome.storage.local.remove(key);
   },
+
+  async clear(): Promise<void> {
+    await chrome.storage.local.clear();
+  },
 };
+
+export async function clearAllRentSightData(): Promise<void> {
+  await extensionStorage.clear();
+}
 
 const analysisStorageKey = (url: string): string =>
   `rentalAnalysis:${encodeURIComponent(url)}`;

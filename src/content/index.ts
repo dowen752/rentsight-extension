@@ -1,8 +1,19 @@
 import { appearsToBeRentalListing } from '../shared/listing';
 import { extractListing } from '../extractors';
+import type { ListingExtraction } from '../extractors';
 import { emptyExtraction } from '../extractors/types';
 import { observeListingNavigation } from './navigation';
-import { requiresZillowUnitSelection, selectedZillowUnitId } from './pageState';
+import {
+  appearsToBeHomesRental,
+  appearsToBeSupportedSiteRental,
+  requiresHomesUnitSelection,
+  requiresRedfinUnitSelection,
+  requiresZillowUnitSelection,
+  selectedHomesUnitId,
+  selectedApartmentsUnitId,
+  selectedRedfinUnitId,
+  selectedZillowUnitId,
+} from './pageState';
 import type {
   ExtensionRequest,
   ExtensionResponse,
@@ -18,36 +29,55 @@ const isExtensionRequest = (value: unknown): value is ExtensionRequest =>
 function getPageInfo(): PageInfo {
   const browserUrl = window.location.href;
   const parsedUrl = new URL(browserUrl);
-  const selectedUnitId = selectedZillowUnitId(document, parsedUrl);
+  const selectedUnitId =
+    selectedApartmentsUnitId(document, parsedUrl) ??
+    selectedZillowUnitId(document, parsedUrl) ??
+    selectedHomesUnitId(document, parsedUrl) ??
+    selectedRedfinUnitId(document, parsedUrl);
   const url = selectedUnitId
     ? `${browserUrl.split('#')[0]}#rentsight-unit=${encodeURIComponent(selectedUnitId)}`
     : browserUrl;
   const title = document.title;
-
-  const page: PageInfo = {
-    url,
-    title,
-    appearsToBeRentalListing: appearsToBeRentalListing(url, title),
-    requiresUnitSelection: requiresZillowUnitSelection(document, parsedUrl),
-    selectedUnitId,
-  };
-  if (page.requiresUnitSelection) return page;
+  const requiresUnitSelection =
+    requiresZillowUnitSelection(document, parsedUrl) ||
+    requiresHomesUnitSelection(document, parsedUrl) ||
+    requiresRedfinUnitSelection(document, parsedUrl);
+  let extraction: ListingExtraction;
+  if (requiresUnitSelection) {
+    return {
+      url,
+      title,
+      appearsToBeRentalListing: true,
+      requiresUnitSelection: true,
+      selectedUnitId,
+    };
+  }
   try {
     const extractionUrl = new URL(parsedUrl);
     if (selectedUnitId)
       extractionUrl.hash = `rentsight-unit=${encodeURIComponent(selectedUnitId)}`;
-    page.extraction = extractListing(document, extractionUrl);
+    extraction = extractListing(document, extractionUrl);
   } catch (error: unknown) {
     console.warn(
       '[RentSight] Listing extraction failed; manual entry remains available',
       error,
     );
-    page.extraction = emptyExtraction('Manual fallback', '1.0.0');
-    page.extraction.warnings.push(
+    extraction = emptyExtraction('Manual fallback', '1.0.0');
+    extraction.warnings.push(
       'Automatic extraction failed. You can still enter the listing manually.',
     );
   }
-  return page;
+  return {
+    url,
+    title,
+    appearsToBeRentalListing:
+      appearsToBeRentalListing(url, title) ||
+      appearsToBeHomesRental(document, parsedUrl) ||
+      appearsToBeSupportedSiteRental(document, parsedUrl, extraction),
+    requiresUnitSelection: false,
+    selectedUnitId,
+    extraction,
+  };
 }
 
 const contentWindow = window as Window & { __rentSightInitialized?: boolean };
@@ -82,18 +112,30 @@ if (!contentWindow.__rentSightInitialized) {
 
   const apartmentUrl = new URL(window.location.href);
   if (
-    /(^|\.)zillow\.com$/i.test(apartmentUrl.hostname) &&
-    /\/apartments\//i.test(apartmentUrl.pathname)
+    (/(^|\.)zillow\.com$/i.test(apartmentUrl.hostname) &&
+      /\/apartments\//i.test(apartmentUrl.pathname)) ||
+    /(^|\.)apartments\.com$/i.test(apartmentUrl.hostname) ||
+    (/(^|\.)homes\.com$/i.test(apartmentUrl.hostname) &&
+      /\/property\//i.test(apartmentUrl.pathname)) ||
+    (/(^|\.)redfin\.com$/i.test(apartmentUrl.hostname) &&
+      requiresRedfinUnitSelection(document, apartmentUrl))
   ) {
     let unitTimer: number | undefined;
+    let previousUnitId: string | undefined;
     const detectUnit = () => {
-      const unitId = selectedZillowUnitId(
-        document,
-        new URL(window.location.href),
-      );
-      if (!unitId) return;
+      const currentUrl = new URL(window.location.href);
+      const unitId =
+        selectedApartmentsUnitId(document, currentUrl) ??
+        selectedZillowUnitId(document, currentUrl) ??
+        selectedHomesUnitId(document, currentUrl) ??
+        selectedRedfinUnitId(document, currentUrl);
+      if (!unitId) {
+        previousUnitId = undefined;
+        return;
+      }
+      if (unitId === previousUnitId) return;
+      previousUnitId = unitId;
       window.clearTimeout(unitTimer);
-      observer.disconnect();
       const browserUrl = window.location.href.split('#')[0];
       const payload: PageInfo = {
         url: `${browserUrl}#rentsight-unit=${encodeURIComponent(unitId)}`,

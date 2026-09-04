@@ -1,5 +1,9 @@
 node_modules/
 dist/
+dist-auth/
+.wrangler/
+.wrangler-dry-run/
+dist.zip
 .DS_Store
 coverage/
 *.log

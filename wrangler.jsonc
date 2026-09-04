@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "rentsight-auth",
+  "main": "./worker/auth-assets.js",
+  "compatibility_date": "2026-09-02",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "auth.umbrellabrand.co",
+      "custom_domain": true,
+    },
+  ],
+  "assets": {
+    "directory": "./dist-auth",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "run_worker_first": ["/rentsight/auth-host.html"],
+  },
+}

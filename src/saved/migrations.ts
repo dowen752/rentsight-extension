@@ -94,6 +94,9 @@ const CONCESSION_FIELDS = {
   monthsFree: 'number',
   oneTimeCredit: 'number',
   leaseMonths: 'number',
+  // Accepted only so the short-lived minimum-stay field can be removed from
+  // saved records without making those records unimportable.
+  minimumStayDays: 'number',
 } as const;
 
 function isListing(value: unknown): boolean {
@@ -143,7 +146,7 @@ function normalizeAnalysis(
   url: string,
 ): RentalAnalysis {
   const defaults = createInitialAnalysis(url, 'Saved listing');
-  return {
+  const normalized = {
     ...defaults,
     ...analysis,
     listing: analysis.listing,
@@ -166,6 +169,11 @@ function normalizeAnalysis(
         )
       : [],
   };
+  for (const listing of [normalized.listing, normalized.baseline]) {
+    if (listing.concessions)
+      delete (listing.concessions as Record<string, unknown>).minimumStayDays;
+  }
+  return normalized;
 }
 
 export function migrateSavedRecord(value: unknown): SavedListingRecord {

@@ -45,11 +45,55 @@ Run `npm run dev` for a watched development build. Vite rebuilds `dist/` when so
 - `src/extractors`: adapters for individual listing sites
 - `src/saved`: saved-record migrations, CRUD, comparison, and import/export
 - `src/location`: geocoding, regional utility, benchmark, cache, and mock-backend provider interfaces
+- `src/backend`: typed RentSight Cloud entitlement and billing client
 - `tests`: unit tests and sanitized HTML fixtures
 
 Data flows from the active tab's layered extractor into a normalized, metadata-bearing listing. The side panel merges extraction into a persisted draft without replacing user values. Pure calculation functions materialize that analysis for results. Saving creates a separately versioned snapshot; comparisons recalculate snapshots rather than persisting derived totals. Location resolution is optional, cached, and provider-based, and unresolved locations leave national assumptions in place.
 
-The manifest intentionally has no host permissions. Opening the extension grants temporary `activeTab` access, allowing the service worker to inject `content.js` only into the page the user chose to inspect. Chrome-internal pages cannot be inspected and surface a friendly error in the panel.
+The manifest grants the RentSight API origin only (`https://api.rentsight.app/*`) and no broad listing-site host permissions. Opening the extension grants temporary `activeTab` access, allowing the service worker to inject `content.js` only into the page the user chose to inspect. Chrome-internal pages cannot be inspected and surface a friendly error in the panel.
+
+## RentSight Cloud and billing integration
+
+Set `VITE_RENTSIGHT_API_ORIGIN` to the public Cloudflare API origin when building. This public value must match the narrow origin in `public/manifest.json`. With no value, the extension stays usable in local/free mode and the upgrade control explains that purchasing is not connected.
+
+The extension expects this versioned API contract:
+
+- `GET /v1/account/entitlements` returns `{ entitlements: [{ key: "plus", active: boolean, status: "active" | "trialing" | "past_due" | "canceled" | "none", source?: "pass", expiresAt?: string }] }`.
+- `POST /v1/billing/checkout` creates checkout for one 30-day pass and returns `{ url: "https://checkout.stripe.com/..." }`.
+- `POST /v1/billing/portal` returns `{ url: "https://billing.stripe.com/..." }`.
+
+Authenticated calls use `Authorization: Bearer <Firebase ID token>`. Immediately before every backend request, the client calls `currentUser.getIdToken()`, which refreshes an expired Firebase ID token. RentSight never creates or stores a custom JWT. The backend must verify the Firebase ID token with the Firebase Admin SDK, use its `uid` claim as the stable account identity, and derive entitlements from its database or verified Stripe webhook state—never from client-supplied identity or plan values. A one-time pass grants the `plus` entitlement for 30 days. Checkout and portal return URLs should lead to an HTTPS page that tells users to return to the extension.
+
+Stripe secret keys, webhook signing secrets, Firebase Admin credentials, Cloudflare credentials, database credentials, and OpenAI API keys belong only in encrypted backend secrets. The extension needs none of them. Firebase web configuration is a public project identifier and remains separate from backend credentials.
+
+### Firebase Authentication setup (Manifest V3)
+
+Firebase Web SDK 10.8.0 or newer is required; this project imports extension-side APIs from `firebase/auth/web-extension`. The registered `rentsight-4222d` Firebase Web app's provided public configuration is defined in `src/auth/config.ts`. Configuration fields such as `storageBucket` and `measurementId` do not initialize those products: RentSight imports and initializes only Firebase Authentication, with no Analytics, Firestore, Storage, Hosting, or other Firebase service APIs.
+
+The canonical production bridge URL and Chrome Web Store-assigned extension ID are built-in defaults:
+
+```text
+VITE_FIREBASE_AUTH_HOST_URL=https://auth.umbrellabrand.co/rentsight/auth-host.html
+VITE_RENTSIGHT_EXTENSION_ID=pkcmgccphdnmmdjhipgiohmolkailema
+```
+
+Both entries are optional for production builds because these values are canonical in `src/auth/config.ts`. The auth-host URL remains configurable for a local bridge deployment. Do not override the extension ID when using the production auth host.
+
+The Google popup cannot run directly in an MV3 extension page. Deploy the generated `dist/auth-host.html` and every asset it references to Cloudflare at `https://auth.umbrellabrand.co/rentsight/auth-host.html`, preserving the generated `/assets/...` URL paths. This does not require or enable Firebase Hosting. The extension opens the page only inside `offscreen.html`; the hosted page uses normal `firebase/auth`, returns a Google OAuth credential through `postMessage` restricted to `chrome-extension://pkcmgccphdnmmdjhipgiohmolkailema` (or the explicit local override), and the extension signs into its own persistent Firebase Auth session with `signInWithCredential`.
+
+Firebase Console setup:
+
+1. Register a Firebase Web app and copy its public web configuration into the variables above.
+2. In Authentication → Sign-in method, enable Google and select a support email.
+3. In Authentication → Settings → Authorized domains, add `chrome-extension://pkcmgccphdnmmdjhipgiohmolkailema` as documented by Firebase and add `auth.umbrellabrand.co` for the hosted popup page.
+4. Keep `public/manifest.json`'s Web Store public `key` intact. Chrome uses it to assign unpacked development builds the same `pkcmgccphdnmmdjhipgiohmolkailema` ID as the Web Store item.
+5. Configure the backend Admin SDK for the same Firebase project and verify every bearer token. Key application accounts exclusively by the verified `uid`.
+
+Cloudflare must return `Content-Security-Policy: frame-ancestors chrome-extension://pkcmgccphdnmmdjhipgiohmolkailema` on `/rentsight/auth-host.html`. Do not send `X-Frame-Options`, because it can block the required extension framing. Do not broaden this policy for unpacked development builds: the manifest `key` gives them the same allowed origin. The JavaScript bridge independently enforces that exact extension origin.
+
+Run `npm run build` to create both the Chrome extension in `dist/` and the deployment-specific auth-host bundle in `dist-auth/`. The post-build step copies only `rentsight/auth-host.html`, `authHost.js`, and the hashed JavaScript assets referenced by that HTML. Deploy the separate `rentsight-auth` Cloudflare Worker with `npx wrangler deploy`. Its Static Assets binding serves `dist-auth/` with `html_handling: "none"` so the required literal `/rentsight/auth-host.html` URL returns the file instead of redirecting to an extensionless path. The minimal Worker handler runs first only for that HTML URL, attaches the required `frame-ancestors` policy, and removes any `X-Frame-Options` header. No Firebase Hosting, Worker API, or extension-package files are involved in this deployment.
+
+`public/manifest.json` includes the Web Store public `key`, required `offscreen` permission, narrow `https://auth.umbrellabrand.co/rentsight/*` auth-host permission, and extension-page `frame-src https://auth.umbrellabrand.co` entry, plus the Firebase Auth endpoints in `connect-src` (`apis.google.com`, `www.gstatic.com`, `www.googleapis.com`, `securetoken.googleapis.com`, and Identity Toolkit). The extension's own `chrome-extension://pkcmgccphdnmmdjhipgiohmolkailema` origin does not need a `host_permissions` entry. A local auth-host override also requires a development manifest whose `host_permissions` and `frame-src` allow that origin. Do not add remote scripts to `script-src`; MV3 extension JavaScript remains bundled locally.
 
 ## Cost model and formulas
 
@@ -107,7 +151,7 @@ To add a real provider, implement the relevant interface in `src/location/types.
 
 ## Privacy considerations
 
-RentSight performs listing extraction locally in the user-selected active tab and does not bulk scrape or automatically browse sites. Drafts, saved listings, and location cache entries stay in `chrome.storage.local` for the current Chrome profile unless the user explicitly exports them. The extension requests no broad host permission and includes no analytics, authentication bypass, CAPTCHA workaround, or production third-party API call. Exported files may contain addresses and financial assumptions; users should store and share them accordingly.
+RentSight performs listing extraction locally in the user-selected active tab and does not bulk scrape or automatically browse sites. Drafts, saved listings, and location cache entries stay in `chrome.storage.local` for the current Chrome profile unless the user explicitly exports them. When RentSight Cloud is configured, the extension contacts only the declared RentSight API origin to check account entitlement and initiate user-requested billing; the current cloud client uploads no listing or financial data. The extension requests no broad listing-site host permission and includes no analytics, authentication bypass, or CAPTCHA workaround. Exported files may contain addresses and financial assumptions; users should store and share them accordingly.
 
 ## Known limitations
 

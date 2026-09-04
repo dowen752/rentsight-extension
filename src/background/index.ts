@@ -1,7 +1,53 @@
 import { isExtensionRequest, type ExtensionResponse } from '../shared/messages';
+import {
+  FIREBASE_AUTH_HOST_URL,
+  federatedAuthIsConfigured,
+} from '../auth/config';
 
 const CONTENT_SCRIPT_FILE = 'content.js';
 const PAGE_INSPECTION_TIMEOUT_MS = 5_000;
+const OFFSCREEN_DOCUMENT_PATH = 'offscreen.html';
+let creatingOffscreenDocument: Promise<void> | undefined;
+
+async function hasOffscreenDocument(): Promise<boolean> {
+  const documentUrl = chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH);
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
+    documentUrls: [documentUrl],
+  });
+  return contexts.length > 0;
+}
+
+async function setupOffscreenDocument(): Promise<void> {
+  if (await hasOffscreenDocument()) return;
+  if (!creatingOffscreenDocument) {
+    creatingOffscreenDocument = chrome.offscreen
+      .createDocument({
+        url: OFFSCREEN_DOCUMENT_PATH,
+        reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
+        justification: 'Complete Firebase federated authentication.',
+      })
+      .finally(() => {
+        creatingOffscreenDocument = undefined;
+      });
+  }
+  await creatingOffscreenDocument;
+}
+
+async function requestGoogleCredential(): Promise<unknown> {
+  if (!federatedAuthIsConfigured() || !FIREBASE_AUTH_HOST_URL)
+    return {
+      error: 'Google sign-in is not configured.',
+    };
+  await setupOffscreenDocument();
+  try {
+    return await chrome.runtime.sendMessage({
+      target: 'firebase-auth-offscreen',
+    });
+  } finally {
+    if (await hasOffscreenDocument()) await chrome.offscreen.closeDocument();
+  }
+}
 
 const isMissingContentScript = (error: unknown): boolean =>
   error instanceof Error &&
@@ -52,9 +98,14 @@ chrome.action.onClicked.addListener((tab) => {
 
 async function getActiveTab(): Promise<chrome.tabs.Tab> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) throw new Error('No active browser tab is available.');
+  if (!tab?.id)
+    throw new Error(
+      'Return to an accessible rental listing tab and click Refresh listing to try again.',
+    );
   if (tab.url && !/^https?:/.test(tab.url)) {
-    throw new Error('RentSight can only inspect HTTP or HTTPS pages.');
+    throw new Error(
+      'Return to an HTTP or HTTPS rental listing tab and click Refresh listing to try again.',
+    );
   }
   return tab;
 }
@@ -80,7 +131,7 @@ async function requestPageInfo(): Promise<ExtensionResponse> {
       } catch (error: unknown) {
         console.error('[RentSight] Content script injection failed', error);
         throw new Error(
-          'RentSight needs access to this tab. Close this panel, then click the RentSight toolbar icon while the listing is active.',
+          'Return to a rental listing tab and click Refresh listing to try again.',
           { cause: error },
         );
       }
@@ -98,6 +149,20 @@ async function requestPageInfo(): Promise<ExtensionResponse> {
 
 chrome.runtime.onMessage.addListener(
   (message: unknown, _sender, sendResponse) => {
+    if (
+      typeof message === 'object' &&
+      message !== null &&
+      'type' in message &&
+      message.type === 'FIREBASE_GOOGLE_SIGN_IN'
+    ) {
+      void requestGoogleCredential().then(sendResponse, (error: unknown) =>
+        sendResponse({
+          error:
+            error instanceof Error ? error.message : 'Google sign-in failed.',
+        }),
+      );
+      return true;
+    }
     if (!isExtensionRequest(message)) return false;
     void requestPageInfo().then(sendResponse);
     return true;

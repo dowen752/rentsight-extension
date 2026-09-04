@@ -125,18 +125,27 @@ export function calculateEffectiveMonthlyRent(
   );
 }
 
+export function calculateEffectiveMonthlyCostAfterConcessions(
+  listing: RentalListing,
+  context?: CalculationContext,
+): number | undefined {
+  assertValidListing(listing);
+  const effectiveRent = calculateEffectiveMonthlyRent(listing);
+  if (effectiveRent === undefined) return undefined;
+  const recurring = resolvedRecurring(listing, context);
+  const advertisedRent = listing.recurring.advertisedRent?.value ?? 0;
+  return effectiveRent + sumKnownCosts(recurring) - advertisedRent;
+}
+
 export function calculateFirstYearHousingCost(
   listing: RentalListing,
   context?: CalculationContext,
 ): number {
   assertValidListing(listing);
-  const recurring = resolvedRecurring(listing, context);
-  const rent = listing.recurring.advertisedRent?.value ?? 0;
-  const nonRentMonthly = sumKnownCosts(recurring) - rent;
-  const effectiveRent = calculateEffectiveMonthlyRent(listing) ?? 0;
+  const effectiveMonthlyCost =
+    calculateEffectiveMonthlyCostAfterConcessions(listing, context) ?? 0;
   return (
-    (effectiveRent + nonRentMonthly) * 12 +
-    calculateNonrefundableMoveInExpenses(listing)
+    effectiveMonthlyCost * 12 + calculateNonrefundableMoveInExpenses(listing)
   );
 }
 

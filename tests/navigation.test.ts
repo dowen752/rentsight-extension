@@ -2,9 +2,16 @@ import { JSDOM } from 'jsdom';
 import { describe, expect, it, vi } from 'vitest';
 import { observeListingNavigation } from '../src/content/navigation';
 import {
+  appearsToBeHomesRental,
+  appearsToBeSupportedSiteRental,
+  requiresRedfinUnitSelection,
+  requiresHomesUnitSelection,
   requiresZillowUnitSelection,
+  selectedHomesUnitId,
+  selectedRedfinUnitId,
   selectedZillowUnitId,
 } from '../src/content/pageState';
+import { extractListing } from '../src/extractors';
 
 describe('SPA listing navigation', () => {
   it('uses Chromium navigation events without starting a permanent poll', async () => {
@@ -158,5 +165,213 @@ describe('Zillow unit selection', () => {
         new URL('https://www.zillow.com/homedetails/example/1_zpid/'),
       ),
     ).toBe(false);
+  });
+});
+
+describe('Homes.com unit selection', () => {
+  const url = new URL(
+    'https://www.homes.com/property/nexen-los-angeles-ca/example/',
+  );
+
+  it('recognizes apartment communities and asks for a floor-plan unit', () => {
+    const dom = new JSDOM(`
+      <html><body><h1>NEXEN</h1><h2>Pricing and Floor Plans</h2></body></html>
+    `);
+    expect(appearsToBeHomesRental(dom.window.document, url)).toBe(true);
+    expect(requiresHomesUnitSelection(dom.window.document, url)).toBe(true);
+  });
+
+  it('recognizes a Homes.com unit modal route', () => {
+    const dom = new JSDOM(`
+      <html><body>
+        <h2>Pricing and Floor Plans</h2>
+        <section class="unit-floorplan-modal">
+          <header class="unit-floorplan-modal-header">535 Change</header>
+        </section>
+      </body></html>
+    `);
+    const selectedUrl = new URL(`${url.href}#kj4v719-2-unit`);
+    expect(selectedHomesUnitId(dom.window.document, selectedUrl)).toBe(
+      'kj4v719-2',
+    );
+    expect(requiresHomesUnitSelection(dom.window.document, selectedUrl)).toBe(
+      false,
+    );
+  });
+
+  it('does not classify an ordinary Homes.com sale property as a rental', () => {
+    const dom = new JSDOM(
+      '<html><body><h1>123 Main Street</h1><h2>Property Details</h2></body></html>',
+    );
+    expect(appearsToBeHomesRental(dom.window.document, url)).toBe(false);
+    expect(requiresHomesUnitSelection(dom.window.document, url)).toBe(false);
+  });
+
+  it('recognizes an individual Homes.com per-month rental', () => {
+    const dom = new JSDOM(`
+      <html><body>
+        <div><strong>$2,695</strong> <span>Per Month</span></div>
+        <h1>700 E Gonzales Rd Unit A</h1>
+      </body></html>
+    `);
+    expect(appearsToBeHomesRental(dom.window.document, url)).toBe(true);
+    expect(requiresHomesUnitSelection(dom.window.document, url)).toBe(false);
+  });
+
+  it('recognizes an individual Homes.com total-monthly-price rental', () => {
+    const dom = new JSDOM(`
+      <html><body>
+        <div><strong>$2,265</strong> <span>Total Monthly Price</span></div>
+        <h1>9184 Cazador St</h1>
+      </body></html>
+    `);
+    expect(appearsToBeHomesRental(dom.window.document, url)).toBe(true);
+    expect(requiresHomesUnitSelection(dom.window.document, url)).toBe(false);
+  });
+});
+
+describe('supported-site rental classification', () => {
+  it('recognizes Rent.com individual rental routes', () => {
+    const url = new URL(
+      'https://www.rent.com/r/177-juniper-trail-sedona-az-lv3247079672',
+    );
+    const dom = new JSDOM(
+      '<html><body><h1>177 Juniper Trail</h1></body></html>',
+    );
+
+    expect(appearsToBeSupportedSiteRental(dom.window.document, url)).toBe(true);
+  });
+
+  it('recognizes an Apartment List community with a marketing-only title', () => {
+    const url = new URL(
+      'https://www.apartmentlist.com/ca/camarillo/mission-hills',
+    );
+    const dom = new JSDOM(
+      '<html><head><title>Mission Hills</title></head><body><h1>Mission Hills</h1></body></html>',
+    );
+
+    expect(appearsToBeSupportedSiteRental(dom.window.document, url)).toBe(true);
+  });
+
+  it('recognizes a Zillow homedetails rental without rental URL or title hints', () => {
+    const url = new URL(
+      'https://www.zillow.com/homedetails/10744-Deep-Cliffe-Dr-Cupertino-CA-95014/19632536_zpid/',
+    );
+    const dom = new JSDOM(`
+      <html><head><title>10744 Deep Cliffe Dr, Cupertino, CA 95014 | Zillow</title></head><body>
+        <span>House for rent</span>
+        <h1>10744 Deep Cliffe Dr, Cupertino, CA 95014</h1>
+        <span data-testid="price">$6,999/mo</span>
+        <div data-testid="bed-bath-sqft-facts">5 beds 3 baths 2,548 sqft</div>
+        <button>Request to apply</button>
+      </body></html>
+    `);
+
+    expect(appearsToBeSupportedSiteRental(dom.window.document, url)).toBe(true);
+  });
+
+  it('does not treat Zillow sale-only monthly estimates as rental evidence', () => {
+    const url = new URL(
+      'https://www.zillow.com/homedetails/123-Main-St/123_zpid/',
+    );
+    const dom = new JSDOM(`
+      <html><body>
+        <h1>123 Main St, Fresno, CA 93701</h1>
+        <span data-testid="price">$825,000</span>
+        <p>Estimated payment $4,900/mo</p>
+        <p>Rent Zestimate $3,200/mo</p>
+      </body></html>
+    `);
+
+    expect(appearsToBeSupportedSiteRental(dom.window.document, url)).toBe(
+      false,
+    );
+  });
+
+  it('recognizes a Redfin rental on its sale-style home URL', () => {
+    const url = new URL(
+      'https://www.redfin.com/CA/Redwood-City/88-Southgate-St-94062/home/1397579',
+    );
+    const dom = new JSDOM(`
+      <html><head><title>88 Southgate St, Redwood City, CA 94062 | Redfin</title></head><body>
+        <span>FOR RENT</span>
+        <div>$6,250/mo</div>
+        <div>3 bd · 2 ba · 1,850 sq ft</div>
+        <div>88 Southgate St, Redwood City, CA 94062</div>
+        <p>Rare opportunity to lease an entire property.</p>
+      </body></html>
+    `);
+    const extraction = extractListing(dom.window.document, url);
+
+    expect(
+      appearsToBeSupportedSiteRental(dom.window.document, url, extraction),
+    ).toBe(true);
+    expect(extraction.listing.recurring.advertisedRent?.value).toBe(6_250);
+  });
+});
+
+describe('Redfin unit selection', () => {
+  const url = new URL(
+    'https://www.redfin.com/CA/Belmont/Belmont-Glen-Residences/apartment/123',
+  );
+
+  it('requires a selection on a community with available units', () => {
+    const dom = new JSDOM(
+      '<html><body><h1>Belmont Glen Residences</h1><h2>Available Units</h2></body></html>',
+    );
+
+    expect(requiresRedfinUnitSelection(dom.window.document, url)).toBe(true);
+  });
+
+  it('identifies and extracts the selected Redfin floor-plan dialog', () => {
+    const dom = new JSDOM(`
+      <html><body>
+        <h1>200 Davey Glen Rd, Belmont, CA 94002</h1>
+        <h2>Available Units</h2>
+        <div>Background unit: 1 bd · 540 sq ft · $3,200/mo</div>
+        <div id="bp-dialog-container" role="dialog" data-rf-test-name="dialogGutsNode">
+          <div class="dialog-title">
+            <div class="name-and-rent">2X1 · $4,033/mo</div>
+            <div class="details">1 Bath · 1,030 Sqft.</div>
+          </div>
+        </div>
+      </body></html>
+    `);
+    const id = selectedRedfinUnitId(dom.window.document, url);
+
+    expect(id).toBe('2X1 · $4,033/mo');
+    expect(requiresRedfinUnitSelection(dom.window.document, url)).toBe(false);
+
+    const selectedUrl = new URL(url);
+    selectedUrl.hash = `rentsight-unit=${encodeURIComponent(id!)}`;
+    const extraction = extractListing(dom.window.document, selectedUrl);
+    expect(extraction.listing.recurring.advertisedRent?.value).toBe(4_033);
+    expect(extraction.listing.identity.bedrooms?.value).toBe(2);
+    expect(extraction.listing.identity.bathrooms?.value).toBe(1);
+    expect(extraction.listing.identity.squareFootage?.value).toBe(1_030);
+  });
+
+  it('reads Redfin bed and bath counts from a dialog without square footage', () => {
+    const dom = new JSDOM(`
+      <html><body>
+        <h1>2382 Camino Capitan Unit D, Santa Fe, NM 87505</h1>
+        <h2>Available Units</h2>
+        <div id="bp-dialog-container" role="dialog" data-rf-test-name="dialogGutsNode">
+          <div class="dialog-title">
+            <div class="name-and-rent">2 bed 1 bath · $1,900/mo</div>
+            <div class="details">1 Bath</div>
+          </div>
+        </div>
+      </body></html>
+    `);
+    const id = selectedRedfinUnitId(dom.window.document, url);
+    const selectedUrl = new URL(url);
+    selectedUrl.hash = `rentsight-unit=${encodeURIComponent(id!)}`;
+
+    const extraction = extractListing(dom.window.document, selectedUrl);
+
+    expect(extraction.listing.identity.bedrooms?.value).toBe(2);
+    expect(extraction.listing.identity.bathrooms?.value).toBe(1);
+    expect(extraction.listing.identity.squareFootage).toBeUndefined();
   });
 });

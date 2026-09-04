@@ -12,6 +12,8 @@ export default defineConfig({
         sidepanel: resolve(import.meta.dirname, 'sidepanel.html'),
         background: resolve(import.meta.dirname, 'src/background/index.ts'),
         content: resolve(import.meta.dirname, 'src/content/index.ts'),
+        offscreen: resolve(import.meta.dirname, 'offscreen.html'),
+        authHost: resolve(import.meta.dirname, 'auth-host.html'),
       },
       output: {
         entryFileNames: '[name].js',

@@ -1,5 +1,13 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import {
+  calculateEffectiveMonthlyCostAfterConcessions,
   calculateEffectiveMonthlyRent,
   calculateEstimatedTrueMonthlyCost,
   calculateFirstYearHousingCost,
@@ -16,7 +24,7 @@ import {
 } from '../calculations';
 import {
   createInitialAnalysis,
-  applyInternetPreference,
+  applyHouseholdProfile,
   applyExtraction,
   applyLocationEstimate,
   clearField,
@@ -32,9 +40,16 @@ import {
   type CustomFee,
   type RentalAnalysis,
 } from '../shared/analysis';
+import {
+  DEFAULT_HOUSEHOLD_PROFILE,
+  householdHasPets,
+  normalizeHouseholdProfile,
+  type HouseholdProfile,
+} from '../shared/household';
 import type { ExtensionResponse } from '../shared/messages';
 import { isExtractionUpdatedMessage } from '../shared/messages';
 import {
+  clearAllRentSightData,
   extensionStorage,
   getRentalAnalysis,
   persistSavedListings,
@@ -43,6 +58,7 @@ import {
 import { NumberField, TextField } from './Fields';
 import {
   createComparison,
+  comparisonBest,
   deleteListing,
   exportListingsCsv,
   exportListingsJson,
@@ -61,18 +77,15 @@ import {
   type LocationCache,
 } from '../location';
 import { analysisForNavigation } from './navigationState';
+import { MembershipBadge } from './MembershipBadge';
+import {
+  preserveReadyViewAfterInspectionFailure,
+  refreshReadyView,
+  type ViewState,
+} from './lifecycle';
 
-type ViewState =
-  | { status: 'loading' }
-  | { status: 'unit-selection-required' }
-  | { status: 'unsupported'; url: string; title: string }
-  | {
-      status: 'ready';
-      url: string;
-      analysis: RentalAnalysis;
-      savedListings: SavedListingRecord[];
-    }
-  | { status: 'error'; message: string };
+const EMPTY_INSPECTION_MESSAGE =
+  'Open a rental listing, then click the RentSight toolbar icon to inspect it.';
 
 const MONEY = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -88,6 +101,54 @@ const UTILITY_LABELS: Record<UtilityCategory, string> = {
   trash: 'Trash',
   internet: 'Internet',
 };
+
+function DefaultedNumberInput({
+  value,
+  defaultValue,
+  min = 0,
+  step = 1,
+  onCommit,
+  ...props
+}: Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  'value' | 'defaultValue' | 'min' | 'step' | 'onChange' | 'onBlur'
+> & {
+  value: number;
+  defaultValue: number;
+  min?: number;
+  step?: number;
+  onCommit: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const focused = useRef(false);
+
+  useEffect(() => {
+    if (!focused.current) setDraft(String(value));
+  }, [value]);
+
+  const commit = () => {
+    focused.current = false;
+    const parsed = draft === '' ? defaultValue : Number(draft);
+    const next = Number.isFinite(parsed) ? Math.max(min, parsed) : defaultValue;
+    setDraft(String(next));
+    onCommit(next);
+  };
+
+  return (
+    <input
+      {...props}
+      type="number"
+      min={min}
+      step={step}
+      value={draft}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+    />
+  );
+}
 
 interface FeeEditorProps {
   title: string;
@@ -120,16 +181,13 @@ function FeeEditor({ title, fees, onChange }: FeeEditorProps) {
           </label>
           <label>
             Amount
-            <input
-              type="number"
-              min="0"
+            <DefaultedNumberInput
               value={fee.amount}
-              onChange={(event) =>
+              defaultValue={0}
+              onCommit={(value) =>
                 onChange(
                   fees.map((item, itemIndex) =>
-                    itemIndex === index
-                      ? { ...item, amount: event.target.valueAsNumber || 0 }
-                      : item,
+                    itemIndex === index ? { ...item, amount: value } : item,
                   ),
                 )
               }
@@ -172,6 +230,7 @@ function ReviewDisclosure({
 
 export function App() {
   const [view, setView] = useState<ViewState>({ status: 'loading' });
+  const clearingDataRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -182,7 +241,12 @@ export function App() {
         })) as ExtensionResponse;
         if (!active) return;
         if (response.type === 'EXTENSION_ERROR') {
-          setView({ status: 'error', message: response.error });
+          setView((current) =>
+            preserveReadyViewAfterInspectionFailure(
+              current,
+              EMPTY_INSPECTION_MESSAGE,
+            ),
+          );
           return;
         }
         if (response.payload.requiresUnitSelection) {
@@ -197,10 +261,18 @@ export function App() {
           });
           return;
         }
-        const [saved, storedRecords, storedInternetCost] = await Promise.all([
+        const [
+          saved,
+          storedRecords,
+          storedInternetCost,
+          storedHouseholdProfile,
+          onboardingCompleted,
+        ] = await Promise.all([
           getRentalAnalysis(response.payload.url),
           extensionStorage.get('savedListings'),
           extensionStorage.get('internetMonthlyCost'),
+          extensionStorage.get('householdProfile'),
+          extensionStorage.get('onboardingCompleted'),
         ]);
         let analysis =
           saved ??
@@ -219,7 +291,15 @@ export function App() {
           legacyInternetCost !== undefined
         )
           await extensionStorage.set('internetMonthlyCost', legacyInternetCost);
-        analysis = applyInternetPreference(analysis, internetCost);
+        const householdProfile = normalizeHouseholdProfile(
+          storedHouseholdProfile ?? {
+            occupants: analysis.occupants,
+            internetMonthlyCost: internetCost,
+          },
+        );
+        analysis = applyHouseholdProfile(analysis, householdProfile);
+        if (storedHouseholdProfile === undefined)
+          await extensionStorage.set('householdProfile', householdProfile);
         let savedListings: SavedListingRecord[] = [];
         try {
           savedListings = migrateSavedRecords(storedRecords);
@@ -236,6 +316,8 @@ export function App() {
             url: response.payload.url,
             analysis,
             savedListings,
+            onboardingCompleted: onboardingCompleted === true,
+            householdProfile,
           });
       } catch (error: unknown) {
         if (!active) return;
@@ -244,7 +326,9 @@ export function App() {
             ? error.message
             : 'Unable to load this listing.';
         console.error('[RentSight] Side panel initialization failed', error);
-        setView({ status: 'error', message });
+        setView((current) =>
+          preserveReadyViewAfterInspectionFailure(current, message),
+        );
       }
     }
     void load();
@@ -284,25 +368,23 @@ export function App() {
           const revision = ++navigationRevision;
           void Promise.all([
             getRentalAnalysis(message.payload.url),
-            extensionStorage.get('internetMonthlyCost'),
-          ]).then(([stored, internetCost]) => {
+            extensionStorage.get('householdProfile'),
+          ]).then(([stored, storedProfile]) => {
             if (!active || revision !== navigationRevision) return;
             setView((current) =>
               current.status === 'ready'
                 ? {
                     ...current,
                     url: message.payload.url,
-                    analysis: applyInternetPreference(
+                    analysis: applyHouseholdProfile(
                       analysisForNavigation(
-                        current.url === message.payload.url
-                          ? current.analysis
-                          : undefined,
+                        current.analysis,
                         message.payload.url,
                         message.payload.title,
                         message.payload.extraction,
                         stored ? { [message.payload.url]: stored } : undefined,
                       ),
-                      internetCost,
+                      normalizeHouseholdProfile(storedProfile),
                     ),
                   }
                 : current,
@@ -311,24 +393,16 @@ export function App() {
         });
     };
     chrome.runtime.onMessage.addListener(listener);
-    const activeTabListener = (activeInfo: { tabId: number }) => {
-      void chrome.tabs
-        .query({ active: true, currentWindow: true })
-        .then(([tab]) => {
-          if (tab?.id === activeInfo.tabId) window.location.reload();
-        });
-    };
-    chrome.tabs.onActivated.addListener(activeTabListener);
     return () => {
       active = false;
       chrome.runtime.onMessage.removeListener(listener);
-      chrome.tabs.onActivated.removeListener(activeTabListener);
     };
   }, []);
 
   useEffect(() => {
     if (view.status !== 'ready') return;
     const timeout = window.setTimeout(() => {
+      if (clearingDataRef.current) return;
       void setRentalAnalysis(view.url, view.analysis).catch((error: unknown) =>
         console.error('[RentSight] Could not save listing analysis', error),
       );
@@ -436,6 +510,45 @@ export function App() {
     });
   };
 
+  const updateHouseholdProfile = (profile: HouseholdProfile) => {
+    const normalized = normalizeHouseholdProfile(profile);
+    void extensionStorage
+      .set('householdProfile', normalized)
+      .catch((error) =>
+        console.error('[RentSight] Could not save household profile', error),
+      );
+    setView((current) =>
+      current.status === 'ready'
+        ? {
+            ...current,
+            householdProfile: normalized,
+            analysis: applyHouseholdProfile(current.analysis, normalized),
+          }
+        : current,
+    );
+  };
+
+  const refreshCurrent = async (): Promise<void> => {
+    const response = (await chrome.runtime.sendMessage({
+      type: 'GET_PAGE_INFO',
+    })) as ExtensionResponse;
+    if (response.type === 'EXTENSION_ERROR') throw new Error(response.error);
+    if (response.payload.requiresUnitSelection)
+      throw new Error('Select a specific unit, then refresh again.');
+    if (!response.payload.appearsToBeRentalListing)
+      throw new Error('The active page does not look like a rental listing.');
+
+    const stored = await getRentalAnalysis(response.payload.url);
+    setView((current) => {
+      if (current.status !== 'ready') return current;
+      return refreshReadyView(
+        current,
+        response.payload,
+        stored ? { [response.payload.url]: stored } : undefined,
+      );
+    });
+  };
+
   const setSavedListings = async (
     savedListings: SavedListingRecord[],
   ): Promise<void> => {
@@ -460,6 +573,17 @@ export function App() {
     );
   };
 
+  const clearAllData = async () => {
+    clearingDataRef.current = true;
+    try {
+      await clearAllRentSightData();
+      setView({ status: 'data-cleared' });
+    } catch (error: unknown) {
+      clearingDataRef.current = false;
+      throw error;
+    }
+  };
+
   if (view.status === 'loading') {
     return (
       <main>
@@ -469,50 +593,84 @@ export function App() {
   }
   if (view.status === 'error') {
     return (
-      <main>
-        <p className="status error">{view.message}</p>
+      <UnavailableWorkspace clearAllData={clearAllData}>
+        <main>
+          <p className="status error">{view.message}</p>
+        </main>
+      </UnavailableWorkspace>
+    );
+  }
+  if (view.status === 'data-cleared') {
+    return (
+      <main className="data-cleared">
+        <span className="eyebrow">Local data removed</span>
+        <h1>RentSight has been reset</h1>
+        <p>
+          Drafts, saved listings, preferences, and cached estimates were deleted
+          from this Chrome profile.
+        </p>
+        <button
+          type="button"
+          className="primary-action"
+          onClick={() => window.location.reload()}
+        >
+          Start again
+        </button>
       </main>
     );
   }
   if (view.status === 'unit-selection-required') {
     return (
-      <main>
-        <section className="warning">
-          <h1>Select a unit first</h1>
-          <p>
-            Zillow community pages can contain many units with different rents,
-            dimensions, fees, and availability. Choose a listing before using
-            RentSight.
-          </p>
-          <button
-            type="button"
-            className="primary-action"
-            onClick={() => window.location.reload()}
-          >
-            Check again
-          </button>
-        </section>
-      </main>
+      <UnavailableWorkspace clearAllData={clearAllData}>
+        <main>
+          <section className="warning">
+            <h1>Select a unit first</h1>
+            <p>
+              Community pages can contain many units with different rents,
+              dimensions, fees, and availability. Open a specific unit before
+              using the Current view.
+            </p>
+            <button
+              type="button"
+              className="primary-action"
+              onClick={() => window.location.reload()}
+            >
+              Check again
+            </button>
+          </section>
+        </main>
+      </UnavailableWorkspace>
     );
   }
   if (view.status === 'unsupported') {
     const openManualEntry = async () => {
       try {
-        const [storedAnalysis, storedRecords, internetCost] = await Promise.all(
-          [
-            getRentalAnalysis(view.url),
-            extensionStorage.get('savedListings'),
-            extensionStorage.get('internetMonthlyCost'),
-          ],
+        const [
+          storedAnalysis,
+          storedRecords,
+          internetCost,
+          storedHouseholdProfile,
+          onboardingCompleted,
+        ] = await Promise.all([
+          getRentalAnalysis(view.url),
+          extensionStorage.get('savedListings'),
+          extensionStorage.get('internetMonthlyCost'),
+          extensionStorage.get('householdProfile'),
+          extensionStorage.get('onboardingCompleted'),
+        ]);
+        const householdProfile = normalizeHouseholdProfile(
+          storedHouseholdProfile ?? { internetMonthlyCost: internetCost },
         );
         setView({
           status: 'ready',
           url: view.url,
-          analysis: applyInternetPreference(
+          analysis: applyHouseholdProfile(
             storedAnalysis ?? createInitialAnalysis(view.url, view.title),
-            internetCost,
+            householdProfile,
           ),
           savedListings: migrateSavedRecords(storedRecords),
+          onboardingCompleted: onboardingCompleted === true,
+          householdProfile,
         });
       } catch (error: unknown) {
         setView({
@@ -525,19 +683,21 @@ export function App() {
       }
     };
     return (
-      <main>
-        <section className="warning">
-          <h1>This does not look like a rental listing</h1>
-          <p>Open a rental listing, or start with a blank analysis.</p>
-          <button
-            type="button"
-            className="primary-action"
-            onClick={() => void openManualEntry()}
-          >
-            Enter details manually
-          </button>
-        </section>
-      </main>
+      <UnavailableWorkspace clearAllData={clearAllData}>
+        <main>
+          <section className="warning">
+            <h1>This does not look like a rental listing</h1>
+            <p>Open a rental listing, or start with a blank analysis.</p>
+            <button
+              type="button"
+              className="primary-action"
+              onClick={() => void openManualEntry()}
+            >
+              Enter details manually
+            </button>
+          </section>
+        </main>
+      </UnavailableWorkspace>
     );
   }
 
@@ -547,30 +707,195 @@ export function App() {
       savedListings={view.savedListings}
       update={update}
       setSavedListings={setSavedListings}
+      onboardingCompleted={view.onboardingCompleted}
+      householdProfile={view.householdProfile}
+      updateHouseholdProfile={updateHouseholdProfile}
+      refreshCurrent={refreshCurrent}
+      clearAllData={clearAllData}
     />
   );
 }
 
-type WorkspaceTab = 'current' | 'saved' | 'compare';
+type WorkspaceTab = 'current' | 'saved' | 'compare' | 'about';
+
+export function UnavailableWorkspace({
+  children,
+  clearAllData,
+}: {
+  children: ReactNode;
+  clearAllData: () => Promise<void>;
+}) {
+  const [tab, setTab] = useState<WorkspaceTab>('current');
+  const [savedListings, setSavedListings] = useState<SavedListingRecord[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [notice, setNotice] = useState('');
+  const [householdProfile, setHouseholdProfile] = useState<HouseholdProfile>({
+    ...DEFAULT_HOUSEHOLD_PROFILE,
+  });
+
+  useEffect(() => {
+    let active = true;
+    void extensionStorage
+      .get('savedListings')
+      .then((records) => {
+        if (active) setSavedListings(migrateSavedRecords(records));
+      })
+      .catch((error: unknown) => {
+        if (active)
+          setNotice(
+            error instanceof Error
+              ? error.message
+              : 'Could not load saved listings.',
+          );
+      });
+    void extensionStorage
+      .get('householdProfile')
+      .then((profile) => {
+        if (active) setHouseholdProfile(normalizeHouseholdProfile(profile));
+      })
+      .catch((error: unknown) => {
+        if (active)
+          setNotice(
+            error instanceof Error
+              ? error.message
+              : 'Could not load the household profile.',
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const setRecords = async (records: SavedListingRecord[]) => {
+    await persistSavedListings(records);
+    setSavedListings(records);
+  };
+
+  return (
+    <>
+      <MembershipBadge />
+      <nav className="workspace-tabs" aria-label="RentSight views">
+        {(['current', 'saved', 'compare', 'about'] as const).map((item) => (
+          <button
+            key={item}
+            type="button"
+            aria-current={tab === item ? 'page' : undefined}
+            onClick={() => setTab(item)}
+          >
+            {item === 'current'
+              ? 'Current'
+              : item === 'saved'
+                ? `Saved (${savedListings.length})`
+                : item === 'compare'
+                  ? `Compare (${selected.length})`
+                  : 'About'}
+          </button>
+        ))}
+      </nav>
+      {notice && (
+        <p className="workspace-notice" role="status">
+          {notice}
+        </p>
+      )}
+      {tab === 'current' && children}
+      {tab === 'saved' && (
+        <SavedListingsView
+          records={savedListings}
+          selected={selected}
+          setSelected={setSelected}
+          setRecords={setRecords}
+          setNotice={setNotice}
+          onDelete={async (record) => {
+            await setRecords(deleteListing(savedListings, record.id));
+            setSelected((current) => current.filter((id) => id !== record.id));
+            setNotice('Saved listing deleted.');
+          }}
+          openCompare={() => setTab('compare')}
+        />
+      )}
+      {tab === 'compare' && (
+        <ComparisonView
+          records={savedListings.filter((record) =>
+            selected.includes(record.id),
+          )}
+          householdProfile={householdProfile}
+        />
+      )}
+      {tab === 'about' && (
+        <AboutPrivacy
+          clearAllData={clearAllData}
+          replayTour={() => {
+            setTab('current');
+            setNotice('Open a rental listing to replay the guided tour.');
+          }}
+        />
+      )}
+    </>
+  );
+}
 
 function Workspace({
   analysis,
   savedListings,
   update,
   setSavedListings,
+  clearAllData,
+  onboardingCompleted,
+  householdProfile,
+  updateHouseholdProfile,
+  refreshCurrent,
 }: {
   analysis: RentalAnalysis;
   savedListings: SavedListingRecord[];
   update: (transform: (analysis: RentalAnalysis) => RentalAnalysis) => void;
   setSavedListings: (records: SavedListingRecord[]) => Promise<void>;
+  clearAllData: () => Promise<void>;
+  onboardingCompleted: boolean;
+  householdProfile: HouseholdProfile;
+  updateHouseholdProfile: (profile: HouseholdProfile) => void;
+  refreshCurrent: () => Promise<void>;
 }) {
   const [tab, setTab] = useState<WorkspaceTab>('current');
   const [selected, setSelected] = useState<string[]>([]);
   const [notice, setNotice] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [tourStep, setTourStep] = useState<number | undefined>(
+    onboardingCompleted ? undefined : 0,
+  );
+  const [deletedRecord, setDeletedRecord] = useState<{
+    record: SavedListingRecord;
+    index: number;
+  }>();
   const currentUrl = analysis.listing.identity.url?.value;
   const currentSaved = savedListings.find(
     (record) => record.url === currentUrl,
   );
+
+  useEffect(() => {
+    if (notice !== 'Listing saved.') return;
+    const timeout = window.setTimeout(() => setNotice(''), 3500);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
+
+  const startTour = () => {
+    setTab('current');
+    setTourStep(0);
+  };
+
+  const refresh = async () => {
+    setRefreshing(true);
+    setNotice('');
+    try {
+      await refreshCurrent();
+      setNotice('Current listing refreshed.');
+    } catch (error: unknown) {
+      setNotice(
+        error instanceof Error ? error.message : 'Could not refresh listing.',
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const saveCurrent = async () => {
     try {
@@ -584,33 +909,87 @@ function Workspace({
     }
   };
 
+  const removeSavedListing = async (record: SavedListingRecord) => {
+    const index = savedListings.findIndex((item) => item.id === record.id);
+    await setSavedListings(deleteListing(savedListings, record.id));
+    setSelected((current) => current.filter((id) => id !== record.id));
+    setDeletedRecord({ record, index });
+    setNotice('Saved listing deleted.');
+  };
+
+  const undoDelete = async () => {
+    if (!deletedRecord) return;
+    try {
+      const restored = [...savedListings];
+      restored.splice(deletedRecord.index, 0, deletedRecord.record);
+      await setSavedListings(restored);
+      setDeletedRecord(undefined);
+      setNotice('Saved listing restored.');
+    } catch (error: unknown) {
+      setNotice(
+        error instanceof Error ? error.message : 'Could not restore listing.',
+      );
+    }
+  };
+
   return (
     <>
-      <nav className="workspace-tabs" aria-label="RentSight views">
-        {(['current', 'saved', 'compare'] as const).map((item) => (
+      <MembershipBadge />
+      <nav
+        className={`workspace-tabs${tourStep !== undefined ? ' tour-active' : ''}`}
+        aria-label="RentSight views"
+      >
+        {(['current', 'saved', 'compare', 'about'] as const).map((item) => (
           <button
             key={item}
             type="button"
             aria-current={tab === item ? 'page' : undefined}
+            className={
+              tourStep !== undefined && tab === item
+                ? 'tour-highlight'
+                : undefined
+            }
             onClick={() => setTab(item)}
           >
             {item === 'current'
               ? 'Current'
               : item === 'saved'
                 ? `Saved (${savedListings.length})`
-                : `Compare (${selected.length})`}
+                : item === 'compare'
+                  ? `Compare (${selected.length})`
+                  : 'About'}
           </button>
         ))}
       </nav>
+      {tab === 'current' && tourStep === undefined && (
+        <div className="current-actions">
+          <button
+            type="button"
+            className="refresh-listing"
+            disabled={refreshing}
+            onClick={() => void refresh()}
+          >
+            <span aria-hidden="true">↻</span>{' '}
+            {refreshing ? 'Refreshing…' : 'Refresh listing'}
+          </button>
+        </div>
+      )}
       {notice && (
         <p className="workspace-notice" role="status">
           {notice}
+          {deletedRecord && notice === 'Saved listing deleted.' && (
+            <button type="button" onClick={() => void undoDelete()}>
+              Undo
+            </button>
+          )}
         </p>
       )}
       {tab === 'current' && (
         <AnalysisEditor
           analysis={analysis}
           update={update}
+          householdProfile={householdProfile}
+          updateHouseholdProfile={updateHouseholdProfile}
           toolbar={
             <button
               type="button"
@@ -629,6 +1008,7 @@ function Workspace({
           setSelected={setSelected}
           setRecords={setSavedListings}
           setNotice={setNotice}
+          onDelete={removeSavedListing}
           openCompare={() => setTab('compare')}
         />
       )}
@@ -637,9 +1017,321 @@ function Workspace({
           records={savedListings.filter((record) =>
             selected.includes(record.id),
           )}
+          householdProfile={householdProfile}
+        />
+      )}
+      {tab === 'about' && (
+        <AboutPrivacy clearAllData={clearAllData} replayTour={startTour} />
+      )}
+      {tourStep !== undefined && (
+        <GuidedTour
+          step={tourStep}
+          setStep={(nextStep) => {
+            setTourStep(nextStep);
+            setTab(TOUR_STEPS[nextStep].tab);
+          }}
+          finish={async () => {
+            await extensionStorage.set('onboardingCompleted', true);
+            setTourStep(undefined);
+          }}
+          householdProfile={householdProfile}
+          updateHouseholdProfile={updateHouseholdProfile}
         />
       )}
     </>
+  );
+}
+
+const TOUR_STEPS: readonly {
+  tab: WorkspaceTab;
+  title: string;
+  description: string;
+  profile?: boolean;
+}[] = [
+  {
+    tab: 'current',
+    title: 'Review the current listing',
+    description:
+      'Check the details RentSight found, correct any assumptions, and confirm the inputs to see the estimated costs for a listing.',
+  },
+  {
+    tab: 'saved',
+    title: 'Build your shortlist',
+    description:
+      'Save promising listings here so you can return to them later.',
+  },
+  {
+    tab: 'compare',
+    title: 'Compare total costs',
+    description:
+      'Select at least two saved listings to compare rent, recurring expenses, move-in cash, and data completeness side by side.',
+  },
+  {
+    tab: 'about',
+    title: 'Privacy and controls',
+    description:
+      'Learn how RentSight keeps data local, replay this tour, send feedback, or delete all stored RentSight data.',
+  },
+  {
+    tab: 'current',
+    title: 'Personalize your estimates',
+    description:
+      'Optional: save a few household details so RentSight can apply relevant utilities and pet costs to every property.',
+    profile: true,
+  },
+];
+
+export function GuidedTour({
+  step,
+  setStep,
+  finish,
+  householdProfile = { ...DEFAULT_HOUSEHOLD_PROFILE },
+  updateHouseholdProfile = () => undefined,
+}: {
+  step: number;
+  setStep: (step: number) => void;
+  finish: () => Promise<void>;
+  householdProfile?: HouseholdProfile;
+  updateHouseholdProfile?: (profile: HouseholdProfile) => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const finishRef = useRef(finish);
+  const [finishError, setFinishError] = useState('');
+  const current = TOUR_STEPS[step];
+
+  useEffect(() => {
+    finishRef.current = finish;
+  }, [finish]);
+
+  const complete = async () => {
+    try {
+      await finish();
+    } catch (error: unknown) {
+      setFinishError(
+        error instanceof Error ? error.message : 'Could not save tour status.',
+      );
+    }
+  };
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const focusable = () =>
+      Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled)'));
+    focusable()[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        void finishRef
+          .current()
+          .catch((error: unknown) =>
+            setFinishError(
+              error instanceof Error
+                ? error.message
+                : 'Could not save tour status.',
+            ),
+          );
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const controls = focusable();
+      if (!controls.length) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [step]);
+
+  return (
+    <div className="tour-layer">
+      <div className="tour-overlay" aria-hidden="true" />
+      <div
+        className="tour-dialog"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tour-title"
+        aria-describedby="tour-description"
+      >
+        <span className="eyebrow">
+          Quick tour · {step + 1} of {TOUR_STEPS.length}
+        </span>
+        <h2 id="tour-title">{current.title}</h2>
+        <p id="tour-description">{current.description}</p>
+        {current.profile && (
+          <HouseholdProfileFields
+            profile={householdProfile}
+            onChange={updateHouseholdProfile}
+            compact
+          />
+        )}
+        {finishError && (
+          <p className="tour-error" role="alert">
+            {finishError}
+          </p>
+        )}
+        <div className="tour-actions">
+          <button
+            type="button"
+            className="tour-skip"
+            onClick={() => void complete()}
+          >
+            Skip tour
+          </button>
+          <div>
+            <button
+              type="button"
+              disabled={step === 0}
+              onClick={() => setStep(step - 1)}
+            >
+              Back
+            </button>
+            {step === TOUR_STEPS.length - 1 ? (
+              <button
+                type="button"
+                className="primary-action"
+                onClick={() => void complete()}
+              >
+                Start using RentSight
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="primary-action"
+                onClick={() => setStep(step + 1)}
+              >
+                Next
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AboutPrivacy({
+  clearAllData,
+  replayTour,
+}: {
+  clearAllData: () => Promise<void>;
+  replayTour: () => void;
+}) {
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearError, setClearError] = useState('');
+  const version =
+    typeof chrome !== 'undefined' && chrome.runtime?.getManifest
+      ? chrome.runtime.getManifest().version
+      : '0.1.0';
+
+  const clear = async () => {
+    try {
+      await clearAllData();
+    } catch (error: unknown) {
+      setConfirmClear(false);
+      setClearError(
+        error instanceof Error ? error.message : 'Could not delete local data.',
+      );
+    }
+  };
+
+  return (
+    <main className="about-privacy">
+      <header>
+        <span className="eyebrow">RentSight {version}</span>
+        <h1>About &amp; Privacy</h1>
+        <p>
+          RentSight helps you review the estimated total cost of rental
+          listings. Estimates are informational, not quotes or financial advice.
+        </p>
+      </header>
+
+      <section aria-labelledby="privacy-heading">
+        <h2 id="privacy-heading">Your listing data stays local</h2>
+        <p>
+          Listing details, drafts, financial assumptions, saved listings, and
+          cached location estimates are processed and stored locally in this
+          Chrome profile. RentSight does not upload them or use analytics or
+          advertising trackers. When cloud services are connected, the extension
+          may contact RentSight to check your plan or open a billing page.
+        </p>
+        <p>
+          RentSight inspects only the active page after you click its toolbar
+          icon. JSON and CSV exports may contain property addresses and your
+          financial assumptions, so store and share them carefully.
+        </p>
+        <a href="privacy.html" target="_blank" rel="noreferrer">
+          Read the full privacy policy
+        </a>
+        <a
+          href="https://github.com/dowen752/rentsight-extension/issues"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Report a problem or share feedback
+        </a>
+      </section>
+
+      <section className="data-controls" aria-labelledby="data-heading">
+        <h2 id="data-heading">Manage local data</h2>
+        <p>
+          Delete every RentSight draft, saved listing, preference, and cached
+          estimate from this Chrome profile. Export saved listings first if you
+          want a backup.
+        </p>
+        {clearError && (
+          <p className="status error" role="alert">
+            {clearError}
+          </p>
+        )}
+        {confirmClear ? (
+          <div className="clear-confirmation">
+            <p>
+              <strong>Delete all local RentSight data?</strong>
+            </p>
+            <p>This cannot be undone.</p>
+            <button
+              type="button"
+              className="remove"
+              onClick={() => void clear()}
+            >
+              Delete all data
+            </button>
+            <button type="button" onClick={() => setConfirmClear(false)}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="remove"
+            onClick={() => setConfirmClear(true)}
+          >
+            Delete all local data
+          </button>
+        )}
+      </section>
+      <section aria-labelledby="help-heading">
+        <h2 id="help-heading">Need a refresher?</h2>
+        <p>Walk through the four main RentSight views again.</p>
+        <button type="button" className="replay-tour" onClick={replayTour}>
+          Replay guided tour
+        </button>
+      </section>
+    </main>
   );
 }
 
@@ -658,6 +1350,7 @@ function SavedListingsView({
   setSelected,
   setRecords,
   setNotice,
+  onDelete,
   openCompare,
 }: {
   records: SavedListingRecord[];
@@ -665,6 +1358,7 @@ function SavedListingsView({
   setSelected: (ids: string[]) => void;
   setRecords: (records: SavedListingRecord[]) => Promise<void>;
   setNotice: (notice: string) => void;
+  onDelete: (record: SavedListingRecord) => Promise<void>;
   openCompare: () => void;
 }) {
   const selectedRecords = records.filter((record) =>
@@ -706,7 +1400,7 @@ function SavedListingsView({
           disabled={selected.length < 2}
           onClick={openCompare}
         >
-          Compare selected
+          Compare Selected
         </button>
         <button
           type="button"
@@ -740,6 +1434,13 @@ function SavedListingsView({
             onChange={(event) => void importFile(event.target.files?.[0])}
           />
         </label>
+        <button
+          type="button"
+          disabled={records.length === 0 || selected.length === records.length}
+          onClick={() => setSelected(records.map((record) => record.id))}
+        >
+          Select all
+        </button>
       </div>
       {records.length === 0 ? (
         <section>
@@ -779,9 +1480,7 @@ function SavedListingsView({
                   className="remove"
                   onClick={async () => {
                     try {
-                      await setRecords(deleteListing(records, record.id));
-                      setSelected(selected.filter((id) => id !== record.id));
-                      setNotice('Saved listing deleted.');
+                      await onDelete(record);
                     } catch (error: unknown) {
                       setNotice(
                         error instanceof Error
@@ -806,32 +1505,71 @@ const comparisonRows: readonly [
   string,
   keyof ReturnType<typeof createComparison>,
   'money' | 'number' | 'score',
+  'lower' | 'higher',
 ][] = [
-  ['Advertised rent', 'advertisedRent', 'money'],
-  ['True monthly cost', 'trueMonthlyCost', 'money'],
-  ['Difference', 'monthlyDifference', 'money'],
-  ['Move-in cash', 'moveInCash', 'money'],
-  ['First-year total', 'firstYearTotal', 'money'],
-  ['Bedrooms', 'bedrooms', 'number'],
-  ['Bathrooms', 'bathrooms', 'number'],
-  ['Square feet', 'squareFootage', 'number'],
-  ['Cost / sq. ft.', 'costPerSquareFoot', 'money'],
-  ['Utilities', 'utilities', 'money'],
-  ['Parking', 'parking', 'money'],
-  ['Laundry', 'laundry', 'money'],
-  ['Pet expenses', 'petExpenses', 'money'],
-  ['Data completeness', 'completeness', 'score'],
+  ['Advertised rent', 'advertisedRent', 'money', 'lower'],
+  ['True monthly cost', 'trueMonthlyCost', 'money', 'lower'],
+  ['Move-in cash', 'moveInCash', 'money', 'lower'],
+  ['First-year total', 'firstYearTotal', 'money', 'lower'],
+  ['Bedrooms', 'bedrooms', 'number', 'higher'],
+  ['Bathrooms', 'bathrooms', 'number', 'higher'],
+  ['Square feet', 'squareFootage', 'number', 'higher'],
+  ['Utilities', 'utilities', 'money', 'lower'],
+  ['Pet expenses', 'petExpenses', 'money', 'lower'],
 ];
 
-function ComparisonView({ records }: { records: SavedListingRecord[] }) {
+function comparableValue(value: unknown): number | undefined {
+  if (typeof value === 'number') return value;
+  if (
+    typeof value === 'object' &&
+    value &&
+    'score' in value &&
+    typeof value.score === 'number'
+  )
+    return value.score;
+  return undefined;
+}
+
+function ComparisonView({
+  records,
+  householdProfile,
+}: {
+  records: SavedListingRecord[];
+  householdProfile: HouseholdProfile;
+}) {
   const items = records.map(createComparison);
+  const rows = householdHasPets(householdProfile)
+    ? comparisonRows
+    : comparisonRows.filter(([, key]) => key !== 'petExpenses');
+  const comparisonScrollRef = useRef<HTMLDivElement>(null);
+  const [comparisonOverflows, setComparisonOverflows] = useState(false);
+
+  useEffect(() => {
+    const scrollContainer = comparisonScrollRef.current;
+    if (!scrollContainer || items.length < 2) return;
+
+    const updateOverflow = () => {
+      setComparisonOverflows(
+        scrollContainer.scrollWidth > scrollContainer.clientWidth + 1,
+      );
+    };
+
+    updateOverflow();
+    const resizeObserver = new ResizeObserver(updateOverflow);
+    resizeObserver.observe(scrollContainer);
+    const table = scrollContainer.querySelector('table');
+    if (table) resizeObserver.observe(table);
+
+    return () => resizeObserver.disconnect();
+  }, [items.length]);
+
   return (
     <main className="comparison-page">
       <header>
         <span className="eyebrow">Side-by-side</span>
         <h1>Compare listings</h1>
         <p>
-          Data completeness reflects known versus estimated fields. It is not a
+          Compare known listing costs and features side by side. It is not a
           financial recommendation.
         </p>
       </header>
@@ -841,48 +1579,91 @@ function ComparisonView({ records }: { records: SavedListingRecord[] }) {
           <p>Use the Saved view to choose listings for comparison.</p>
         </section>
       ) : (
-        <div
-          className="comparison-scroll"
-          tabIndex={0}
-          aria-label="Listing comparison table"
-        >
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Metric</th>
-                {items.map((item) => (
-                  <th scope="col" key={item.id}>
-                    {item.address}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {comparisonRows.map(([label, key, format]) => (
-                <tr key={key}>
-                  <th scope="row">{label}</th>
-                  {items.map((item) => {
-                    const value = item[key];
-                    let display = 'Unknown';
-                    if (
-                      format === 'score' &&
-                      typeof value === 'object' &&
-                      value &&
-                      'score' in value
-                    )
-                      display = `${value.score}%`;
-                    else if (typeof value === 'number')
-                      display =
-                        format === 'money'
-                          ? MONEY.format(value)
-                          : String(value);
-                    return <td key={item.id}>{display}</td>;
-                  })}
+        <>
+          {comparisonOverflows && (
+            <p
+              className="comparison-overflow-hint"
+              id="comparison-overflow-hint"
+              role="status"
+            >
+              <span aria-hidden="true">↔</span>
+              Widen the panel or scroll sideways to see all listings
+            </p>
+          )}
+          <div
+            className="comparison-scroll"
+            ref={comparisonScrollRef}
+            tabIndex={0}
+            aria-label="Listing comparison table"
+            aria-describedby={
+              comparisonOverflows ? 'comparison-overflow-hint' : undefined
+            }
+          >
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Metric</th>
+                  {items.map((item) => (
+                    <th scope="col" key={item.id}>
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={item.address}
+                        aria-label={`Open ${item.address} listing`}
+                      >
+                        {item.address}
+                      </a>
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {rows.map(([label, key, format, direction]) => {
+                  const values = items.map((item) =>
+                    comparableValue(item[key]),
+                  );
+                  const best = comparisonBest(values, direction);
+                  return (
+                    <tr key={key}>
+                      <th scope="row">{label}</th>
+                      {items.map((item, index) => {
+                        const value = item[key];
+                        const comparable = values[index];
+                        let display = 'Unknown';
+                        if (
+                          format === 'score' &&
+                          typeof value === 'object' &&
+                          value &&
+                          'score' in value
+                        )
+                          display = `${value.score}%`;
+                        else if (typeof value === 'number')
+                          display =
+                            format === 'money'
+                              ? MONEY.format(value)
+                              : String(value);
+                        const isBest =
+                          best !== undefined && comparable === best;
+                        return (
+                          <td
+                            className={isBest ? 'comparison-best' : undefined}
+                            key={item.id}
+                            aria-label={
+                              isBest ? `${display}, favorable value` : undefined
+                            }
+                          >
+                            {display}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </main>
   );
@@ -892,12 +1673,130 @@ interface AnalysisEditorProps {
   analysis: RentalAnalysis;
   update: (transform: (analysis: RentalAnalysis) => RentalAnalysis) => void;
   toolbar?: ReactNode;
+  householdProfile?: HouseholdProfile;
+  updateHouseholdProfile?: (profile: HouseholdProfile) => void;
+}
+
+function HouseholdProfileFields({
+  profile,
+  onChange,
+  compact = false,
+}: {
+  profile: HouseholdProfile;
+  onChange: (profile: HouseholdProfile) => void;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`household-fields${compact ? ' compact' : ''}`}>
+      <label>
+        Occupants
+        <DefaultedNumberInput
+          value={profile.occupants}
+          defaultValue={1}
+          min={1}
+          onCommit={(value) => onChange({ ...profile, occupants: value })}
+        />
+      </label>
+      <label>
+        Internet / month
+        <span className="input-row">
+          <span className="prefix">$</span>
+          <input
+            type="number"
+            min="0"
+            placeholder="Not included"
+            value={profile.internetMonthlyCost ?? ''}
+            onChange={(event) =>
+              onChange({
+                ...profile,
+                internetMonthlyCost: Number.isNaN(event.target.valueAsNumber)
+                  ? undefined
+                  : Math.max(0, event.target.valueAsNumber),
+              })
+            }
+          />
+        </span>
+      </label>
+      <label className="pet-presence">
+        <input
+          type="checkbox"
+          checked={profile.smallDogs > 0}
+          onChange={(event) =>
+            onChange({ ...profile, smallDogs: event.target.checked ? 1 : 0 })
+          }
+        />
+        Small dog
+      </label>
+      <label className="pet-presence">
+        <input
+          type="checkbox"
+          checked={profile.largeDogs > 0}
+          onChange={(event) =>
+            onChange({ ...profile, largeDogs: event.target.checked ? 1 : 0 })
+          }
+        />
+        Large dog
+      </label>
+      <label className="pet-presence">
+        <input
+          type="checkbox"
+          checked={profile.otherPets}
+          onChange={(event) =>
+            onChange({ ...profile, otherPets: event.target.checked })
+          }
+        />
+        Other pet
+      </label>
+    </div>
+  );
+}
+
+function householdSummary(profile: HouseholdProfile): string {
+  const details = [
+    `${profile.occupants} occupant${profile.occupants === 1 ? '' : 's'}`,
+  ];
+  if (profile.smallDogs) details.push('small dog');
+  if (profile.largeDogs) details.push('large dog');
+  if (profile.otherPets) details.push('other pet');
+  if (!householdHasPets(profile)) details.push('no pets');
+  details.push(
+    profile.internetMonthlyCost === undefined
+      ? 'internet not included'
+      : `${MONEY.format(profile.internetMonthlyCost)}/mo internet`,
+  );
+  return details.join(' · ');
+}
+
+function HouseholdProfileCard({
+  profile,
+  onChange,
+}: {
+  profile: HouseholdProfile;
+  onChange: (profile: HouseholdProfile) => void;
+}) {
+  return (
+    <details className="household-card">
+      <summary>
+        <span>
+          <strong>Your household</strong>
+          <small>{householdSummary(profile)}</small>
+        </span>
+        <span className="household-edit">Edit</span>
+      </summary>
+      <div className="household-card-content">
+        <HouseholdProfileFields profile={profile} onChange={onChange} />
+        <p>Saved locally and reused for every property.</p>
+      </div>
+    </details>
+  );
 }
 
 export function AnalysisEditor({
   analysis,
   update: updateAnalysis,
   toolbar,
+  householdProfile = normalizeHouseholdProfile(analysis.householdProfile),
+  updateHouseholdProfile = () => undefined,
 }: AnalysisEditorProps) {
   const [confirmedRevision, setConfirmedRevision] = useState<
     string | undefined
@@ -914,6 +1813,8 @@ export function AnalysisEditor({
       nonrefundable: calculateNonrefundableMoveInExpenses(listing),
       firstYear: calculateFirstYearHousingCost(listing),
       effective: calculateEffectiveMonthlyRent(listing),
+      effectiveMonthlyCost:
+        calculateEffectiveMonthlyCostAfterConcessions(listing),
       missing: listMissingCostCategories(listing),
     };
   }, [confirmed, listing, validation.valid]);
@@ -983,6 +1884,26 @@ export function AnalysisEditor({
         <div className="analysis-toolbar">{toolbar}</div>
       )}
 
+      {analysis.extraction?.petPolicy === 'none' &&
+        householdHasPets(householdProfile) && (
+          <section
+            className="warning pet-policy-warning"
+            aria-labelledby="pet-policy-heading"
+          >
+            <h2 id="pet-policy-heading">Pet policy conflict</h2>
+            <p>
+              This listing says pets are not allowed, but your household profile
+              includes a pet. Confirm the policy with the property before
+              applying.
+            </p>
+            {analysis.extraction.rawPetPolicyText && (
+              <span className="source source-listing">
+                Listing text: {analysis.extraction.rawPetPolicyText}
+              </span>
+            )}
+          </section>
+        )}
+
       {!confirmed && analysis.locationEstimate && (
         <section className="location-note" aria-labelledby="location-heading">
           <h2 id="location-heading">Local estimate context</h2>
@@ -1028,6 +1949,11 @@ export function AnalysisEditor({
           </p>
         </section>
       )}
+
+      <HouseholdProfileCard
+        profile={householdProfile}
+        onChange={updateHouseholdProfile}
+      />
 
       {!confirmed && (
         <section aria-labelledby="summary-heading">
@@ -1126,9 +2052,21 @@ export function AnalysisEditor({
                   baseline={analysis.baseline.recurring[category]}
                   disabled={analysis.utilityIncluded[category]}
                   allowReset={category === 'internet'}
-                  onChange={(value) => recurring(category, value)}
+                  onChange={(value) =>
+                    category === 'internet'
+                      ? updateHouseholdProfile({
+                          ...householdProfile,
+                          internetMonthlyCost: value,
+                        })
+                      : recurring(category, value)
+                  }
                   onReset={() =>
-                    update((current) => resetUtility(current, category))
+                    category === 'internet'
+                      ? updateHouseholdProfile({
+                          ...householdProfile,
+                          internetMonthlyCost: undefined,
+                        })
+                      : update((current) => resetUtility(current, category))
                   }
                 />
                 <label className="included">
@@ -1229,17 +2167,16 @@ export function AnalysisEditor({
                         : key === 'dryPrice'
                           ? 'Dry price'
                           : 'Loads per week'}
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.25"
+                      <DefaultedNumberInput
                         value={analysis.paidLaundry[key]}
-                        onChange={(event) =>
+                        defaultValue={0}
+                        step={0.25}
+                        onCommit={(value) =>
                           update((current) => ({
                             ...current,
                             paidLaundry: {
                               ...current.paidLaundry,
-                              [key]: event.target.valueAsNumber || 0,
+                              [key]: value,
                             },
                           }))
                         }
@@ -1320,22 +2257,6 @@ export function AnalysisEditor({
             onChange={(value) => concession('oneTimeCredit', value)}
             onReset={() => reset('concessions', 'oneTimeCredit')}
           />
-          <label className="select-field">
-            Number of occupants
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={analysis.occupants}
-              onChange={(event) =>
-                update((current) => ({
-                  ...current,
-                  occupants: event.target.valueAsNumber || 1,
-                }))
-              }
-            />
-            <span className="source source-user">Entered by user</span>
-          </label>
         </ReviewDisclosure>
       )}
 
@@ -1375,22 +2296,43 @@ export function AnalysisEditor({
               <Result
                 label="Advertised rent"
                 value={listing.recurring.advertisedRent?.value}
+                description="The monthly rent shown by the listing before utilities, recurring fees, or discounts. This is the starting point for the other monthly calculations."
               />
               <Result
                 label="Estimated true monthly cost"
                 value={results.monthly}
+                description="Advertised rent plus known or estimated utilities, insurance, and other recurring expenses. Refundable deposits and one-time move-in costs are not included."
                 featured
               />
-              <Result label="Move-in cash required" value={results.moveIn} />
-              <Result label="Refundable deposits" value={results.deposits} />
+              <Result
+                label="Move-in cash required"
+                value={results.moveIn}
+                description="The total of all known upfront amounts due around move-in, including deposits, entered rent payments, and fees. Missing upfront charges are not assumed, so confirm this amount with the landlord."
+              />
+              <Result
+                label="Refundable deposits"
+                value={results.deposits}
+                description="Security, pet, and utility deposits that are expected to be returned if their conditions are met. They affect cash needed at move-in but are not treated as a housing expense."
+              />
               <Result
                 label="Nonrefundable move-in expenses"
                 value={results.nonrefundable}
+                description="Known application, administrative, and other nonrefundable move-in fees. These are expenses rather than deposits and are included in the first-year total."
               />
-              <Result label="First-year total" value={results.firstYear} />
               <Result
-                label="Effective rent after concessions"
+                label="First-year total"
+                value={results.firstYear}
+                description="Twelve months of effective monthly cost after concessions, plus known nonrefundable move-in expenses. Refundable deposits are excluded because they may be returned."
+              />
+              <Result
+                label="Effective rent"
                 value={results.effective}
+                description="Advertised rent after spreading free months or a one-time credit across the lease term. It covers rent only and does not include utilities or other recurring costs."
+              />
+              <Result
+                label="Effective monthly cost after concessions"
+                value={results.effectiveMonthlyCost}
+                description="Effective rent plus utilities, insurance, and other known or estimated recurring expenses. With no concessions, this equals the estimated true monthly cost."
               />
             </dl>
           </section>
@@ -1419,15 +2361,33 @@ export function AnalysisEditor({
 function Result({
   label,
   value,
+  description,
   featured = false,
 }: {
   label: string;
   value?: number;
+  description: string;
   featured?: boolean;
 }) {
+  const tooltipId = useId();
   return (
-    <div className={featured ? 'featured' : undefined}>
-      <dt>{label}</dt>
+    <div className={`result-row${featured ? ' featured' : ''}`}>
+      <dt>
+        {label}
+        <span className="result-help">
+          <button
+            type="button"
+            className="result-help-icon"
+            aria-label={`Explain ${label}`}
+            aria-describedby={tooltipId}
+          >
+            ?
+          </button>
+          <span className="result-tooltip" id={tooltipId} role="tooltip">
+            {description}
+          </span>
+        </span>
+      </dt>
       <dd>{value === undefined ? 'Unknown' : MONEY.format(value)}</dd>
     </div>
   );
