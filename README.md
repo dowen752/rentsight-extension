@@ -50,7 +50,7 @@ Run `npm run dev` for a watched development build. Vite rebuilds `dist/` when so
 
 Data flows from the active tab's layered extractor into a normalized, metadata-bearing listing. The side panel merges extraction into a persisted draft without replacing user values. Pure calculation functions materialize that analysis for results. Saving creates a separately versioned snapshot; comparisons recalculate snapshots rather than persisting derived totals. Location resolution is optional, cached, and provider-based, and unresolved locations leave national assumptions in place.
 
-The manifest grants the RentSight API origin only (`https://api.rentsight.app/*`) and no broad listing-site host permissions. Opening the extension grants temporary `activeTab` access, allowing the service worker to inject `content.js` only into the page the user chose to inspect. Chrome-internal pages cannot be inspected and surface a friendly error in the panel.
+The manifest grants the RentSight API origin only (`https://api.umbrellabrand.co/*`) and no broad listing-site host permissions. Opening the extension grants temporary `activeTab` access, allowing the service worker to inject `content.js` only into the page the user chose to inspect. Chrome-internal pages cannot be inspected and surface a friendly error in the panel.
 
 ## RentSight Cloud and billing integration
 

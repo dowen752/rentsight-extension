@@ -18,11 +18,11 @@
     "sidePanel"
   ],
   "host_permissions": [
-    "https://api.rentsight.app/*",
+    "https://api.umbrellabrand.co/*",
     "https://auth.umbrellabrand.co/rentsight/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; frame-src https://auth.umbrellabrand.co; connect-src 'self' https://api.rentsight.app https://apis.google.com https://www.gstatic.com https://www.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com"
+    "extension_pages": "script-src 'self'; object-src 'self'; frame-src https://auth.umbrellabrand.co; connect-src 'self' https://api.umbrellabrand.co https://apis.google.com https://www.gstatic.com https://www.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com"
   },
   "background": {
     "service_worker": "background.js",
