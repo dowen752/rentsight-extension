@@ -1,6 +1,8 @@
 import type { ListingExtraction } from '../extractors';
 
 export interface PageInfo {
+  aiCapture?: import('../ai/types').CaptureContext;
+  eligibility?: import('../ai/eligibility').ListingEligibility;
   url: string;
   title: string;
   appearsToBeRentalListing: boolean;
@@ -28,7 +30,7 @@ export interface ExtractionUpdatedMessage {
   payload: PageInfo;
 }
 
-export type ExtensionRequest = GetPageInfoMessage;
+export type ExtensionRequest = GetPageInfoMessage | { type: 'GET_AI_CAPTURE' };
 export type ExtensionResponse = PageInfoResponseMessage | ExtensionErrorMessage;
 export type ExtensionEvent = ExtractionUpdatedMessage;
 
@@ -44,5 +46,8 @@ export const isExtensionRequest = (
   value: unknown,
 ): value is ExtensionRequest => {
   if (typeof value !== 'object' || value === null) return false;
-  return 'type' in value && value.type === 'GET_PAGE_INFO';
+  return (
+    'type' in value &&
+    (value.type === 'GET_PAGE_INFO' || value.type === 'GET_AI_CAPTURE')
+  );
 };

@@ -1,0 +1,13 @@
+{
+  "normal": 200,
+  "unknown-fees": 200,
+  "rent-range": 200,
+  "conditional-promotion": 200,
+  "failure-model-refusal": 422,
+  "failure-model-output-truncated": 502,
+  "failure-model-output-invalid": 502,
+  "failure-unusable-capture": 422,
+  "failure-extraction-in-progress": 409,
+  "failure-idempotency-conflict": 409,
+  "failure-unauthenticated": 401
+}

@@ -1,3 +1,4 @@
+import validateAiResponse from '../ai/contracts/response.validator.js';
 import { createInitialAnalysis, type RentalAnalysis } from '../shared/analysis';
 import { SAVED_LISTING_SCHEMA_VERSION, type SavedListingRecord } from './types';
 import { compactAnalysisForStorage } from './repository';
@@ -131,6 +132,15 @@ function isCustomFee(value: unknown): boolean {
 export function isRentalAnalysis(value: unknown): value is RentalAnalysis {
   if (!isObject(value)) return false;
   return (
+    (value.aiExtraction === undefined ||
+      (validateAiResponse(value.aiExtraction) &&
+        isObject(value.aiExtraction) &&
+        value.aiExtraction.status === 'succeeded')) &&
+    (value.aiReviewDecisions === undefined ||
+      (isObject(value.aiReviewDecisions) &&
+        Object.values(value.aiReviewDecisions).every(
+          (decision) => decision === 'entered' || decision === 'excluded',
+        ))) &&
     isListing(value.listing) &&
     isListing(value.baseline) &&
     isBooleanRecord(value.utilityIncluded) &&

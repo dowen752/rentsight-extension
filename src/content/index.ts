@@ -1,3 +1,6 @@
+import { captureListing, readSelectedLeaseTermMonths } from '../ai/capture';
+import { scoreListingPage } from '../ai/eligibility';
+import { developmentDiagnostic } from '../ai/cache';
 import { appearsToBeRentalListing } from '../shared/listing';
 import { extractListing } from '../extractors';
 import type { ListingExtraction } from '../extractors';
@@ -24,7 +27,7 @@ const isExtensionRequest = (value: unknown): value is ExtensionRequest =>
   typeof value === 'object' &&
   value !== null &&
   'type' in value &&
-  value.type === 'GET_PAGE_INFO';
+  (value.type === 'GET_PAGE_INFO' || value.type === 'GET_AI_CAPTURE');
 
 function getPageInfo(): PageInfo {
   const browserUrl = window.location.href;
@@ -67,16 +70,26 @@ function getPageInfo(): PageInfo {
       'Automatic extraction failed. You can still enter the listing manually.',
     );
   }
+  const eligibility = scoreListingPage(document, parsedUrl, extraction);
+  developmentDiagnostic('eligibility', {
+    classification: eligibility.classification,
+    score: eligibility.score,
+    positiveSignals: eligibility.positiveSignals,
+    negativeSignals: eligibility.negativeSignals,
+  });
+  const listingSignal =
+    appearsToBeRentalListing(url, title) ||
+    appearsToBeHomesRental(document, parsedUrl) ||
+    appearsToBeSupportedSiteRental(document, parsedUrl, extraction);
   return {
     url,
     title,
     appearsToBeRentalListing:
-      appearsToBeRentalListing(url, title) ||
-      appearsToBeHomesRental(document, parsedUrl) ||
-      appearsToBeSupportedSiteRental(document, parsedUrl, extraction),
+      listingSignal && eligibility.classification !== 'low',
     requiresUnitSelection: false,
     selectedUnitId,
     extraction,
+    eligibility,
   };
 }
 
@@ -87,9 +100,19 @@ if (!contentWindow.__rentSightInitialized) {
     (message: unknown, _sender, sendResponse) => {
       if (!isExtensionRequest(message)) return false;
 
+      const payload = getPageInfo();
+      if (message.type === 'GET_AI_CAPTURE' && payload.extraction) {
+        try {
+          payload.aiCapture = captureListing(document, payload.extraction);
+        } catch {
+          console.warn(
+            '[RentSight] AI capture failed; local extraction remains available',
+          );
+        }
+      }
       const response: ExtensionResponse = {
         type: 'PAGE_INFO_RESPONSE',
-        payload: getPageInfo(),
+        payload,
       };
       sendResponse(response);
       return false;
@@ -108,6 +131,47 @@ if (!contentWindow.__rentSightInitialized) {
           error,
         ),
       );
+  });
+
+  // Detail drawers and client-rendered listing facts may appear without a URL
+  // change. Re-publish only when a compact, listing-relevant signature changes.
+  let settleTimer: number | undefined;
+  let previousDetailSignature = '';
+  const detailObserver = new MutationObserver(() => {
+    window.clearTimeout(settleTimer);
+    settleTimer = window.setTimeout(() => {
+      const payload = getPageInfo();
+      const root =
+        document.querySelector('main, [role="main"]') ?? document.body;
+      const text = root?.textContent ?? '';
+      const signature = JSON.stringify([
+        window.location.href,
+        payload.selectedUnitId,
+        payload.eligibility?.classification,
+        document.querySelector('h1')?.textContent?.trim(),
+        (text.match(/\$\s?[\d,]+/g) ?? []).slice(0, 12),
+      ]);
+      if (signature === previousDetailSignature) return;
+      previousDetailSignature = signature;
+      void chrome.runtime
+        .sendMessage({ type: 'EXTRACTION_UPDATED', payload })
+        .catch(() => undefined);
+    }, 1_200);
+  });
+  detailObserver.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+
+  let previousLease = readSelectedLeaseTermMonths(document);
+  document.addEventListener('change', () => {
+    const lease = readSelectedLeaseTermMonths(document);
+    if (lease === previousLease) return;
+    previousLease = lease;
+    void chrome.runtime
+      .sendMessage({ type: 'EXTRACTION_UPDATED', payload: getPageInfo() })
+      .catch(() => undefined);
   });
 
   const apartmentUrl = new URL(window.location.href);

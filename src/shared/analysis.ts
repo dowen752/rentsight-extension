@@ -32,6 +32,8 @@ export interface PaidLaundryDetails {
 }
 
 export interface RentalAnalysis {
+  aiExtraction?: import('../ai/types').ExtractionSuccess;
+  aiReviewDecisions?: Record<string, 'entered' | 'excluded'>;
   listing: RentalListing;
   baseline: RentalListing;
   utilityIncluded: Record<UtilityCategory, boolean>;
@@ -151,7 +153,11 @@ export function materializeListing(analysis: RentalAnalysis): RentalListing {
   });
   for (const category of UTILITY_CATEGORIES) {
     if (category === 'internet' && !listing.recurring.internet) continue;
-    if (listing.recurring[category]?.source !== 'user') {
+    if (
+      listing.recurring[category]?.source !== 'user' &&
+      listing.recurring[category]?.source !== 'listing' &&
+      !analysis.userClearedFields?.includes(`recurring.${category}`)
+    ) {
       const estimate = utilityEstimates[category];
       if (estimate && analysis.locationEstimate && estimate.value > 0) {
         listing.recurring[category] = {
@@ -269,6 +275,8 @@ export function applyLocationEstimate(
       base &&
       base.value > 0 &&
       current?.source !== 'user' &&
+      current?.source !== 'listing' &&
+      !next.userClearedFields?.includes(`recurring.${category}`) &&
       next.utilityIncludedSource[category] !== 'listing'
     ) {
       const adjusted: SourcedValue<number> = {
@@ -317,7 +325,8 @@ export function applyInternetPreference(
     next.utilityIncludedSource.internet === 'listing';
   if (listingIncludesInternet) return next;
   if (monthlyCost === undefined) {
-    delete next.listing.recurring.internet;
+    if (next.listing.recurring.internet?.source !== 'listing')
+      delete next.listing.recurring.internet;
   } else {
     next.listing.recurring.internet = userValue(monthlyCost);
   }
@@ -661,6 +670,8 @@ export function applyExtraction(
   if (extraction.laundryType && next.laundryType === 'unknown') {
     next.laundryType = extraction.laundryType;
   }
+  delete next.aiExtraction;
+  delete next.aiReviewDecisions;
   next.extraction = structuredClone(extraction);
   next.updatedAt = new Date().toISOString();
   return next;

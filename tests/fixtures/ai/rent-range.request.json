@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1.0.0",
+  "identity": {
+    "requestId": "33333333-3333-4333-8333-333333333333",
+    "captureRevision": "capture-1",
+    "listingUrl": "https://example.com/listings/pine-court",
+    "selectedUnit": {
+      "id": "204",
+      "label": "Unit 204"
+    },
+    "selectedLeaseTermMonths": 12
+  },
+  "capture": {
+    "capturedAt": "2026-09-05T18:00:00Z",
+    "truncated": false,
+    "unavailableSections": [],
+    "blocks": [
+      {
+        "id": "listing",
+        "kind": "paragraph",
+        "sectionPath": ["Pine Court", "Unit 204"],
+        "text": "Pine Court, 100 Example Avenue, Example City, CA 90000. Unit 204: 2 bedrooms, 1 bathroom, 850 square feet. Base rent $2,400\u2013$2,600 per month for a 12-month lease. Available October 1, 2026. Required refundable security deposit: $1,000 once. No other fees. Water included in rent. Tenant pays electricity directly to provider; amount varies. No promotions."
+      }
+    ]
+  },
+  "preliminaryValues": [
+    {
+      "fieldPath": "/property/baseRent",
+      "value": {
+        "kind": "exact",
+        "minMinor": 220000,
+        "maxMinor": 220000,
+        "currency": "USD",
+        "frequency": "monthly",
+        "basis": "per_unit"
+      }
+    }
+  ]
+}

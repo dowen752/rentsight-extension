@@ -23,10 +23,16 @@ const floorPlanModal = (document: Document): Element | null =>
     '#floor-plan-modal, [data-tid="floorplan-modal"], [data-tid="floor-plan-modal"]',
   );
 
-const moneyFor = (text: string, label: RegExp): [number, string] | undefined => {
+const moneyFor = (
+  text: string,
+  label: RegExp,
+): [number, string] | undefined => {
   const match =
     text.match(
-    new RegExp(`${label.source}[^$]{0,80}\\$\\s*[\\d,]+(?:\\.\\d{1,2})?`, 'i'),
+      new RegExp(
+        `${label.source}[^$]{0,80}\\$\\s*[\\d,]+(?:\\.\\d{1,2})?`,
+        'i',
+      ),
     )?.[0] ??
     text.match(
       new RegExp(
@@ -116,10 +122,7 @@ export const rentExtractor: ListingExtractor = {
         .filter(Boolean)
         .join(' · ');
     const beds = parseNumberNear(facts, /(\d+(?:\.\d+)?)\s*(?:bd|beds?)\b/i);
-    const baths = parseNumberNear(
-      facts,
-      /(\d+(?:\.\d+)?)\s*(?:ba|baths?)\b/i,
-    );
+    const baths = parseNumberNear(facts, /(\d+(?:\.\d+)?)\s*(?:ba|baths?)\b/i);
     const sqft = parseNumberNear(facts, /([\d,]+)\s*sqft\b/i);
     if (beds !== undefined)
       result.listing.identity.bedrooms = listingValue(beds, 0.96, facts);
@@ -142,7 +145,7 @@ export const rentExtractor: ListingExtractor = {
     result.includedUtilities = classifyIncludedUtilities(body);
     result.laundryType = /washer\s*(?:\/|and|&)\s*dryer/i.test(amenitiesText)
       ? 'in_unit'
-      : classifyLaundry(amenitiesText) ?? classifyLaundry(body);
+      : (classifyLaundry(amenitiesText) ?? classifyLaundry(body));
     result.rawLaundryText = amenitiesText.match(
       /[^·]*(?:laundry|washer|dryer)[^·]*/i,
     )?.[0];

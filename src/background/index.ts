@@ -110,13 +110,15 @@ async function getActiveTab(): Promise<chrome.tabs.Tab> {
   return tab;
 }
 
-async function requestPageInfo(): Promise<ExtensionResponse> {
+async function requestPageInfo(
+  type: 'GET_PAGE_INFO' | 'GET_AI_CAPTURE',
+): Promise<ExtensionResponse> {
   try {
     const tab = await getActiveTab();
 
     try {
       return (await withInspectionTimeout(
-        chrome.tabs.sendMessage(tab.id!, { type: 'GET_PAGE_INFO' }),
+        chrome.tabs.sendMessage(tab.id!, { type }),
       )) as ExtensionResponse;
     } catch (error: unknown) {
       // A timeout or extractor failure means the existing content script is
@@ -136,7 +138,7 @@ async function requestPageInfo(): Promise<ExtensionResponse> {
         );
       }
       return (await withInspectionTimeout(
-        chrome.tabs.sendMessage(tab.id!, { type: 'GET_PAGE_INFO' }),
+        chrome.tabs.sendMessage(tab.id!, { type }),
       )) as ExtensionResponse;
     }
   } catch (error: unknown) {
@@ -164,7 +166,7 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
     if (!isExtensionRequest(message)) return false;
-    void requestPageInfo().then(sendResponse);
+    void requestPageInfo(message.type).then(sendResponse);
     return true;
   },
 );

@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rentsight:extraction:1.0.0:request",
+  "title": "RentSight extraction v1 request",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "enum": ["1.0.0"]
+    },
+    "identity": {
+      "$ref": "#/$defs/identity"
+    },
+    "capture": {
+      "type": "object",
+      "properties": {
+        "capturedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "unavailableSections": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "heading",
+                  "paragraph",
+                  "table",
+                  "json_ld",
+                  "footnote",
+                  "other"
+                ]
+              },
+              "sectionPath": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 200000
+              }
+            },
+            "required": ["id", "kind", "sectionPath", "text"],
+            "additionalProperties": false
+          },
+          "maxItems": 200
+        }
+      },
+      "required": ["capturedAt", "truncated", "unavailableSections", "blocks"],
+      "additionalProperties": false
+    },
+    "preliminaryValues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "fieldPath": {
+            "type": "string",
+            "pattern": "^/property/"
+          },
+          "value": {}
+        },
+        "required": ["fieldPath", "value"],
+        "additionalProperties": false
+      },
+      "maxItems": 100
+    }
+  },
+  "required": ["schemaVersion", "identity", "capture", "preliminaryValues"],
+  "additionalProperties": false,
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "maxLength": 200
+        },
+        "captureRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "listingUrl": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "selectedUnit": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "label"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selectedLeaseTermMonths": {
+          "anyOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "requestId",
+        "captureRevision",
+        "listingUrl",
+        "selectedUnit",
+        "selectedLeaseTermMonths"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

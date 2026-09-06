@@ -7,3 +7,6 @@ dist.zip
 .DS_Store
 coverage/
 *.log
+.env
+.env.local
+.env.*.local

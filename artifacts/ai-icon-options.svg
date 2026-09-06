@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="150" viewBox="0 0 520 150">
+<rect width="520" height="150" rx="14" fill="#f6faf7"/>
+<g transform="translate(30 28)"><circle cx="25" cy="25" r="25" fill="#dcefe5"/><g transform="translate(13 13)" fill="none" stroke="#33745d" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H4a1 1 0 0 0-1 1v4M16 3h4a1 1 0 0 1 1 1v4M21 16v4a1 1 0 0 1-1 1h-4M8 21H4a1 1 0 0 1-1-1v-4M8 10h8M8 14h5"/></g></g>
+<g transform="translate(290 28)"><circle cx="25" cy="25" r="25" fill="#dcefe5"/><g transform="translate(13 13)" fill="none" stroke="#33745d" stroke-width="1.65" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></g></g>
+<g font-family="Arial, sans-serif" fill="#213c35"><text x="30" y="108" font-size="15" font-weight="600">A · Scan frame</text><text x="30" y="130" font-size="12" fill="#62756e">Listing details, under review</text><text x="290" y="108" font-size="15" font-weight="600">B · Simple lens</text><text x="290" y="130" font-size="12" fill="#62756e">A closer look at the property</text></g>
+</svg>

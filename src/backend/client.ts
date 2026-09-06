@@ -1,3 +1,5 @@
+import { acceptResponse, assertRequest } from '../ai/validation';
+import type { ExtractionRequest, ExtractionResponse } from '../ai/types';
 import { RENT_SIGHT_API_ORIGIN } from './config';
 import {
   isAccountEntitlements,
@@ -87,6 +89,104 @@ export class RentSightBackendClient {
       { method: 'POST' },
       isBillingLink,
     );
+  }
+
+  async extractListing(
+    request: ExtractionRequest,
+  ): Promise<ExtractionResponse> {
+    const started = Date.now();
+    let httpStatus: number | null = null;
+    let code = 'NETWORK_OUTCOME_UNKNOWN';
+    let retryMode = 'same_request';
+    try {
+      try {
+        assertRequest(request);
+      } catch {
+        code = 'INVALID_REQUEST';
+        retryMode = 'none';
+        return {
+          schemaVersion: '1.0.0',
+          status: 'failed',
+          identity: null,
+          error: {
+            code: 'INVALID_REQUEST',
+            message: '',
+            retryable: false,
+            retryMode: 'none',
+            retryAfterSeconds: null,
+          },
+        };
+      }
+      if (!this.configured) throw new BackendNotConfiguredError();
+      const token = await this.options.getAccessToken();
+      if (!token) {
+        code = 'UNAUTHENTICATED';
+        retryMode = 'none';
+        return {
+          schemaVersion: '1.0.0',
+          status: 'failed',
+          identity: null,
+          error: {
+            code: 'UNAUTHENTICATED',
+            message: '',
+            retryable: false,
+            retryMode: 'none',
+            retryAfterSeconds: null,
+          },
+        };
+      }
+      const response = await this.fetcher(
+        `${this.apiOrigin}/v1/listings/extract`,
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            'Idempotency-Key': request.identity.requestId,
+          },
+          body: JSON.stringify(request),
+          // Longer than the provider deadline and backend reservation lifecycle.
+          // Abort is an uncertain outcome: the session retains the same body/key.
+          signal: AbortSignal.timeout(150000),
+        },
+      );
+      httpStatus = response.status;
+      const accepted = acceptResponse(await response.json(), request);
+      if (response.ok !== (accepted.status === 'succeeded'))
+        throw new UnexpectedBackendResponseError();
+      code = accepted.status === 'failed' ? accepted.error.code : 'SUCCEEDED';
+      retryMode =
+        accepted.status === 'failed' ? accepted.error.retryMode : 'none';
+      if (accepted.status === 'failed') {
+        const header = response.headers.get('Retry-After');
+        const seconds =
+          header === null
+            ? 0
+            : /^\d+$/.test(header)
+              ? Number(header)
+              : Math.max(
+                  0,
+                  Math.ceil((Date.parse(header) - Date.now()) / 1000),
+                );
+        if (Number.isFinite(seconds))
+          accepted.error.retryAfterSeconds = Math.max(
+            seconds,
+            accepted.error.retryAfterSeconds ?? 0,
+          );
+      }
+      return accepted;
+    } finally {
+      if (import.meta.env.DEV)
+        console.debug('[RentSight] AI extraction', {
+          requestId: request.identity.requestId,
+          captureRevision: request.identity.captureRevision,
+          httpStatus,
+          errorCode: code,
+          retryMode,
+          elapsedMs: Date.now() - started,
+        });
+    }
   }
 
   private async request<T>(

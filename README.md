@@ -151,7 +151,7 @@ To add a real provider, implement the relevant interface in `src/location/types.
 
 ## Privacy considerations
 
-RentSight performs listing extraction locally in the user-selected active tab and does not bulk scrape or automatically browse sites. Drafts, saved listings, and location cache entries stay in `chrome.storage.local` for the current Chrome profile unless the user explicitly exports them. When RentSight Cloud is configured, the extension contacts only the declared RentSight API origin to check account entitlement and initiate user-requested billing; the current cloud client uploads no listing or financial data. The extension requests no broad listing-site host permission and includes no analytics, authentication bypass, or CAPTCHA workaround. Exported files may contain addresses and financial assumptions; users should store and share them accordingly.
+RentSight performs listing extraction locally in the user-selected active tab and does not bulk scrape or automatically browse sites. Drafts, saved listings, and location cache entries stay in `chrome.storage.local` for the current Chrome profile unless the user explicitly exports them. When RentSight Cloud is configured, the extension contacts only the declared RentSight API origin to check account entitlement and initiate user-requested billing; AI review uploads relevant listing content and preliminary values to the backend and OpenAI, excluding customer overrides and household assumptions. The extension requests no broad listing-site host permission and includes no analytics, authentication bypass, or CAPTCHA workaround. Exported files may contain addresses and financial assumptions; users should store and share them accordingly.
 
 ## Known limitations
 
@@ -171,3 +171,40 @@ RentSight performs listing extraction locally in the user-selected active tab an
 - Encrypted or account-based synchronization
 - Accessibility and manual cross-browser UI testing
 - Home-purchase calculations covering mortgage payments, taxes, insurance, HOA fees, maintenance, closing cash, and rent-versus-buy comparisons
+
+## AI listing extraction (initial frontend)
+
+Signed-in RentSight+ accounts automatically request `POST /v1/listings/extract`
+after local extraction. Standard page inspection returns immediately; a separate
+`GET_AI_CAPTURE` request prepares optional AI input after preliminary values are
+displayed. Capture failures cannot prevent local inspection. The backend remains responsible for entitlement, atomic
+usage accounting, idempotency, and the OpenAI call. No provider key is used here.
+Live review requires the backend extraction service and provider configuration.
+A placeholder or legacy response produces a visible failure and explicit fallback.
+Frontend validation uses contract fixtures and mocked transport; it does not make
+live provider calls.
+
+`src/ai/contracts` vendors the shared 1.0.0 schemas. `npm run contract:generate`
+generates TypeScript wire types and CSP-compatible standalone validators (no
+runtime schema compilation). Refresh the vendored schemas deliberately when the
+shared contract changes. Fixtures in `tests/fixtures/ai` come from that contract.
+
+Captures are bounded, preserve JSON-LD and text/table/footnote blocks, report
+missing sections/truncation, and never contain customer overrides. This initial
+generic capture does not expand collapsed sections, inspect cross-origin frames,
+or infer unstated lease selections. Explicit month selections from labeled lease
+selectors are captured; missing lease-selection context is sent as null.
+
+The side panel shows an animated AI progress card after preliminary extraction.
+Edits remain enabled; Confirm waits for success or explicit continuation after
+failure. Network retries reuse the frozen body/key. Typed terminal retries follow
+`retryMode`; late responses are discarded on navigation, recapture, or account
+changes. Closing the panel drops pending captures; reopening intentionally starts
+a fresh capture/request. Successful abandoned backend work may still count once.
+
+The calculator adapter replaces the preliminary baseline completely, then applies
+current user-sourced values and explicit deletions. Supported exact USD amounts
+are mapped; qualified charges and promotions require an explicit manual decision.
+The original AI response retains all ranges, conditions, source scope, evidence,
+notes, identity, and metadata alongside saved analyses. Source notes are labeled
+as baseline context so they do not claim to support customer overrides.

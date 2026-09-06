@@ -1,5 +1,16 @@
+import { accountSession, rentSightApi } from '../backend/services';
+import { ExtractionSession } from '../ai/session';
+import { canonicalizeListingUrl } from '../ai/identity';
+import { applyAiExtraction, adaptExtraction } from '../ai/adapter';
+import {
+  AiExtractionCard,
+  AiSourceReview,
+  type AiControls,
+} from './AiExtractionCard';
+import { formatReviewIssue } from './reviewIssueLabels';
 import {
   useEffect,
+  useSyncExternalStore,
   useId,
   useMemo,
   useRef,
@@ -231,6 +242,99 @@ function ReviewDisclosure({
 export function App() {
   const [view, setView] = useState<ViewState>({ status: 'loading' });
   const clearingDataRef = useRef(false);
+  const account = useSyncExternalStore(
+    accountSession.subscribe,
+    accountSession.getSnapshot,
+    accountSession.getSnapshot,
+  );
+  const [aiSession] = useState(
+    () =>
+      new ExtractionSession(
+        rentSightApi,
+        (response) => {
+          setView((current) =>
+            current.status === 'ready' &&
+            canonicalizeListingUrl(current.url) ===
+              canonicalizeListingUrl(response.identity.listingUrl)
+              ? {
+                  ...current,
+                  analysis: applyHouseholdProfile(
+                    applyAiExtraction(current.analysis, response),
+                    current.householdProfile,
+                  ),
+                }
+              : current,
+          );
+        },
+        async () => {
+          const response: ExtensionResponse = await chrome.runtime.sendMessage({
+            type: 'GET_AI_CAPTURE',
+          });
+          if (
+            response.type !== 'PAGE_INFO_RESPONSE' ||
+            !response.payload.aiCapture
+          )
+            throw new Error();
+          return response.payload;
+        },
+      ),
+  );
+  const aiState = useSyncExternalStore(
+    aiSession.subscribe,
+    aiSession.getSnapshot,
+    aiSession.getSnapshot,
+  );
+  const aiPage = view.status === 'ready' ? view.aiPage : undefined;
+  const accountId = account.user?.uid;
+  const accountStatus = account.status;
+  useEffect(() => {
+    if (accountStatus !== 'plus' || !aiPage || aiPage.aiCapture) return;
+    let active = true;
+    // Local extraction is already displayed. Capture and backend work are optional.
+    void chrome.runtime
+      .sendMessage({ type: 'GET_AI_CAPTURE' })
+      .then((response: ExtensionResponse) => {
+        if (!active) return;
+        if (
+          response.type !== 'PAGE_INFO_RESPONSE' ||
+          !response.payload.aiCapture
+        ) {
+          aiSession.captureFailed();
+          return;
+        }
+        if (
+          response.payload.url !== aiPage.url ||
+          response.payload.selectedUnitId !== aiPage.selectedUnitId
+        )
+          return;
+        setView((current) =>
+          current.status === 'ready' && current.aiPage === aiPage
+            ? {
+                ...current,
+                aiPage: { ...aiPage, aiCapture: response.payload.aiCapture },
+              }
+            : current,
+        );
+      })
+      .catch(() => {
+        if (active) aiSession.captureFailed();
+      });
+    return () => {
+      active = false;
+    };
+  }, [accountStatus, aiPage, aiSession]);
+
+  useEffect(() => {
+    if (accountStatus === 'plus' && accountId && aiPage?.aiCapture)
+      aiSession.activate(aiPage, accountId);
+    else if (accountStatus !== 'loading' || !aiPage) aiSession.invalidate();
+  }, [aiSession, aiPage, accountStatus, accountId]);
+  useEffect(() => () => aiSession.invalidate(), [aiSession]);
+  const aiControls: AiControls = {
+    state: aiState,
+    retry: () => aiSession.retry(),
+    continueWithPreliminary: () => aiSession.continueWithPreliminary(),
+  };
 
   useEffect(() => {
     let active = true;
@@ -314,6 +418,7 @@ export function App() {
           setView({
             status: 'ready',
             url: response.payload.url,
+            aiPage: response.payload,
             analysis,
             savedListings,
             onboardingCompleted: onboardingCompleted === true,
@@ -349,6 +454,7 @@ export function App() {
         .query({ active: true, currentWindow: true })
         .then(([tab]) => {
           if (!active || !sender.tab?.id || sender.tab.id !== tab?.id) return;
+          aiSession.invalidate();
           if (message.payload.requiresUnitSelection) {
             setView({ status: 'unit-selection-required' });
             return;
@@ -376,6 +482,7 @@ export function App() {
                 ? {
                     ...current,
                     url: message.payload.url,
+                    aiPage: message.payload,
                     analysis: applyHouseholdProfile(
                       analysisForNavigation(
                         current.analysis,
@@ -397,7 +504,7 @@ export function App() {
       active = false;
       chrome.runtime.onMessage.removeListener(listener);
     };
-  }, []);
+  }, [aiSession]);
 
   useEffect(() => {
     if (view.status !== 'ready') return;
@@ -529,8 +636,9 @@ export function App() {
   };
 
   const refreshCurrent = async (): Promise<void> => {
+    aiSession.invalidate();
     const response = (await chrome.runtime.sendMessage({
-      type: 'GET_PAGE_INFO',
+      type: 'GET_AI_CAPTURE',
     })) as ExtensionResponse;
     if (response.type === 'EXTENSION_ERROR') throw new Error(response.error);
     if (response.payload.requiresUnitSelection)
@@ -547,6 +655,8 @@ export function App() {
         stored ? { [response.payload.url]: stored } : undefined,
       );
     });
+    if (accountStatus === 'plus' && response.payload.aiCapture)
+      aiSession.refresh(response.payload);
   };
 
   const setSavedListings = async (
@@ -575,6 +685,7 @@ export function App() {
 
   const clearAllData = async () => {
     clearingDataRef.current = true;
+    aiSession.invalidate();
     try {
       await clearAllRentSightData();
       setView({ status: 'data-cleared' });
@@ -703,6 +814,7 @@ export function App() {
 
   return (
     <Workspace
+      aiControls={aiControls}
       analysis={view.analysis}
       savedListings={view.savedListings}
       update={update}
@@ -835,6 +947,7 @@ export function UnavailableWorkspace({
 }
 
 function Workspace({
+  aiControls,
   analysis,
   savedListings,
   update,
@@ -845,6 +958,7 @@ function Workspace({
   updateHouseholdProfile,
   refreshCurrent,
 }: {
+  aiControls: AiControls;
   analysis: RentalAnalysis;
   savedListings: SavedListingRecord[];
   update: (transform: (analysis: RentalAnalysis) => RentalAnalysis) => void;
@@ -986,6 +1100,7 @@ function Workspace({
       )}
       {tab === 'current' && (
         <AnalysisEditor
+          aiControls={aiControls}
           analysis={analysis}
           update={update}
           householdProfile={householdProfile}
@@ -1260,13 +1375,16 @@ function AboutPrivacy({
       </header>
 
       <section aria-labelledby="privacy-heading">
-        <h2 id="privacy-heading">Your listing data stays local</h2>
+        <h2 id="privacy-heading">Listing data and AI review</h2>
         <p>
-          Listing details, drafts, financial assumptions, saved listings, and
-          cached location estimates are processed and stored locally in this
-          Chrome profile. RentSight does not upload them or use analytics or
-          advertising trackers. When cloud services are connected, the extension
-          may contact RentSight to check your plan or open a billing page.
+          Drafts, customer edits, saved listings, and estimates are stored in
+          this Chrome profile. For signed-in RentSight+ accounts, AI review
+          automatically sends captured listing text, structured listing data,
+          the listing URL, selected unit, and preliminary values to RentSight’s
+          backend and OpenAI. Customer overrides and household financial
+          assumptions are not included in extraction requests. Full page
+          captures are not saved locally. RentSight also contacts its backend
+          for account and billing services.
         </p>
         <p>
           RentSight inspects only the active page after you click its toolbar
@@ -1670,6 +1788,7 @@ function ComparisonView({
 }
 
 interface AnalysisEditorProps {
+  aiControls?: AiControls;
   analysis: RentalAnalysis;
   update: (transform: (analysis: RentalAnalysis) => RentalAnalysis) => void;
   toolbar?: ReactNode;
@@ -1792,6 +1911,7 @@ function HouseholdProfileCard({
 }
 
 export function AnalysisEditor({
+  aiControls,
   analysis,
   update: updateAnalysis,
   toolbar,
@@ -1801,9 +1921,33 @@ export function AnalysisEditor({
   const [confirmedRevision, setConfirmedRevision] = useState<
     string | undefined
   >();
-  const confirmed = confirmedRevision === analysis.updatedAt;
+  const aiBlocked =
+    aiControls?.state.status === 'extracting' ||
+    (aiControls?.state.status === 'failed' && !aiControls.state.continued);
+  const unresolvedCharges = analysis.aiExtraction
+    ? adaptExtraction(analysis.aiExtraction).manualCharges.some(
+        (charge) => !analysis.aiReviewDecisions?.[charge.id],
+      )
+    : false;
+  const confirmationKey = `${analysis.updatedAt}:${aiControls && 'requestId' in aiControls.state ? aiControls.state.requestId : ''}`;
+  const confirmed =
+    !aiBlocked && !unresolvedCharges && confirmedRevision === confirmationKey;
   const listing = useMemo(() => materializeListing(analysis), [analysis]);
   const validation = useMemo(() => validateRentalListing(listing), [listing]);
+  const reviewIssues = analysis.aiExtraction?.result.reviewIssues ?? [];
+  const extractionWarnings = analysis.extraction?.warnings ?? [];
+  const reviewMessagesAreWarningSuffix = reviewIssues.every(
+    (issue, index) =>
+      extractionWarnings[
+        extractionWarnings.length - reviewIssues.length + index
+      ] === issue.message,
+  );
+  const standaloneExtractionWarnings = reviewMessagesAreWarningSuffix
+    ? extractionWarnings.slice(
+        0,
+        extractionWarnings.length - reviewIssues.length,
+      )
+    : extractionWarnings;
   const results = useMemo(() => {
     if (!confirmed || !validation.valid) return undefined;
     return {
@@ -1880,6 +2024,8 @@ export function AnalysisEditor({
             : 'Check every extracted or estimated value. You can edit any field before calculating.'}
         </p>
       </header>
+      {aiControls && <AiExtractionCard controls={aiControls} />}
+      {!confirmed && <AiSourceReview analysis={analysis} update={update} />}
       {confirmed && toolbar && (
         <div className="analysis-toolbar">{toolbar}</div>
       )}
@@ -1929,12 +2075,18 @@ export function AnalysisEditor({
         </section>
       )}
 
-      {!confirmed && analysis.extraction?.warnings.length ? (
+      {!confirmed &&
+      (standaloneExtractionWarnings.length > 0 || reviewIssues.length > 0) ? (
         <section className="warning" aria-labelledby="extraction-heading">
           <h2 id="extraction-heading">Extraction needs review</h2>
           <ul>
-            {analysis.extraction.warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
+            {standaloneExtractionWarnings.map((warning, index) => (
+              <li key={`extraction-warning:${index}:${warning}`}>{warning}</li>
+            ))}
+            {reviewIssues.map((issue) => (
+              <li key={`review-issue:${issue.id}`}>
+                {formatReviewIssue(issue)}
+              </li>
             ))}
           </ul>
         </section>
@@ -2270,11 +2422,15 @@ export function AnalysisEditor({
           <button
             type="button"
             className="primary-action confirm-action"
-            disabled={!validation.valid}
+            disabled={!validation.valid || aiBlocked || unresolvedCharges}
             aria-describedby="confirm-help"
-            onClick={() => setConfirmedRevision(analysis.updatedAt)}
+            onClick={() => setConfirmedRevision(confirmationKey)}
           >
-            Confirm
+            {aiBlocked
+              ? 'Waiting for AI review'
+              : unresolvedCharges
+                ? 'Review charges above'
+                : 'Confirm'}
           </button>
         </section>
       )}

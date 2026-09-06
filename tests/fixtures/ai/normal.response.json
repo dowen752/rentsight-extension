@@ -1,0 +1,277 @@
+{
+  "schemaVersion": "1.0.0",
+  "status": "succeeded",
+  "identity": {
+    "requestId": "11111111-1111-4111-8111-111111111111",
+    "captureRevision": "capture-1",
+    "listingUrl": "https://example.com/listings/pine-court",
+    "selectedUnit": {
+      "id": "204",
+      "label": "Unit 204"
+    },
+    "selectedLeaseTermMonths": 12
+  },
+  "metadata": {
+    "extractionId": "ex_example_normal",
+    "capturedAt": "2026-09-05T18:00:00Z",
+    "completedAt": "2026-09-05T18:00:04Z",
+    "promptVersion": "listing-extraction-1",
+    "model": "fixture-model-not-a-deployment-selection",
+    "captureSha256": "2dc737cbb975ded938b58a78f2ee35e0a098adcf44d2ab0ecaa1fe8a25baf2dc"
+  },
+  "result": {
+    "property": {
+      "propertyName": {
+        "status": "known",
+        "value": "Pine Court",
+        "candidates": [],
+        "scope": "building",
+        "evidenceIds": ["e1"]
+      },
+      "address": {
+        "status": "known",
+        "value": "100 Example Avenue, Example City, CA 90000",
+        "candidates": [],
+        "scope": "building",
+        "evidenceIds": ["e2"]
+      },
+      "unitLabel": {
+        "status": "known",
+        "value": "Unit 204",
+        "candidates": [],
+        "scope": "selected_unit",
+        "evidenceIds": ["e3"]
+      },
+      "bedrooms": {
+        "status": "known",
+        "value": 2,
+        "candidates": [],
+        "scope": "selected_unit",
+        "evidenceIds": ["e3"]
+      },
+      "bathrooms": {
+        "status": "known",
+        "value": 1,
+        "candidates": [],
+        "scope": "selected_unit",
+        "evidenceIds": ["e3"]
+      },
+      "floorArea": {
+        "status": "known",
+        "value": {
+          "kind": "exact",
+          "min": 850,
+          "max": 850,
+          "unit": "sq_ft"
+        },
+        "candidates": [],
+        "scope": "selected_unit",
+        "evidenceIds": ["e3"]
+      },
+      "baseRent": {
+        "status": "known",
+        "value": {
+          "kind": "exact",
+          "minMinor": 240000,
+          "maxMinor": 240000,
+          "currency": "USD",
+          "frequency": "monthly",
+          "basis": "per_unit"
+        },
+        "candidates": [],
+        "scope": "selected_unit",
+        "evidenceIds": ["e4"]
+      },
+      "fees": {
+        "status": "known",
+        "value": [
+          {
+            "id": "security-deposit",
+            "label": "Security deposit",
+            "category": "security_deposit",
+            "amount": {
+              "status": "known",
+              "value": {
+                "kind": "exact",
+                "minMinor": 100000,
+                "maxMinor": 100000,
+                "currency": "USD",
+                "frequency": "one_time",
+                "basis": "per_unit"
+              },
+              "candidates": [],
+              "scope": "selected_unit",
+              "evidenceIds": ["e6"]
+            },
+            "applicability": {
+              "kind": "required",
+              "conditions": [],
+              "evidenceIds": ["e6"]
+            },
+            "refundable": {
+              "status": "known",
+              "value": true,
+              "candidates": [],
+              "scope": "selected_unit",
+              "evidenceIds": ["e6"]
+            }
+          }
+        ],
+        "candidates": [],
+        "scope": "selected_unit",
+        "evidenceIds": ["e6", "e7"]
+      },
+      "utilities": {
+        "status": "known",
+        "value": [
+          {
+            "id": "water",
+            "kind": "water",
+            "label": "Water",
+            "responsibility": {
+              "status": "known",
+              "value": "included_in_rent",
+              "candidates": [],
+              "scope": "selected_unit",
+              "evidenceIds": ["e8"]
+            },
+            "amount": {
+              "status": "not_applicable",
+              "value": null,
+              "candidates": [],
+              "scope": "unknown",
+              "evidenceIds": ["e8"]
+            },
+            "applicability": {
+              "kind": "required",
+              "conditions": [],
+              "evidenceIds": ["e8"]
+            }
+          },
+          {
+            "id": "electricity",
+            "kind": "electricity",
+            "label": "Electricity",
+            "responsibility": {
+              "status": "known",
+              "value": "tenant_pays_provider",
+              "candidates": [],
+              "scope": "selected_unit",
+              "evidenceIds": ["e9"]
+            },
+            "amount": {
+              "status": "unknown",
+              "value": null,
+              "candidates": [],
+              "scope": "unknown",
+              "evidenceIds": ["e9"]
+            },
+            "applicability": {
+              "kind": "required",
+              "conditions": [],
+              "evidenceIds": ["e9"]
+            }
+          }
+        ],
+        "candidates": [],
+        "scope": "selected_unit",
+        "evidenceIds": ["e8", "e9"]
+      },
+      "leaseTerm": {
+        "status": "known",
+        "value": {
+          "kind": "exact",
+          "min": 12,
+          "max": 12,
+          "unit": "months"
+        },
+        "candidates": [],
+        "scope": "selected_unit",
+        "evidenceIds": ["e4"]
+      },
+      "availableOn": {
+        "status": "known",
+        "value": "2026-10-01",
+        "candidates": [],
+        "scope": "selected_unit",
+        "evidenceIds": ["e5"]
+      },
+      "promotions": {
+        "status": "known",
+        "value": [],
+        "candidates": [],
+        "scope": "selected_unit",
+        "evidenceIds": ["e10"]
+      }
+    },
+    "evidence": [
+      {
+        "id": "e1",
+        "blockId": "listing",
+        "quote": "Pine Court"
+      },
+      {
+        "id": "e2",
+        "blockId": "listing",
+        "quote": "100 Example Avenue, Example City, CA 90000"
+      },
+      {
+        "id": "e3",
+        "blockId": "listing",
+        "quote": "Unit 204: 2 bedrooms, 1 bathroom, 850 square feet."
+      },
+      {
+        "id": "e4",
+        "blockId": "listing",
+        "quote": "Base rent $2,400 per month for a 12-month lease."
+      },
+      {
+        "id": "e5",
+        "blockId": "listing",
+        "quote": "Available October 1, 2026."
+      },
+      {
+        "id": "e6",
+        "blockId": "listing",
+        "quote": "Required refundable security deposit: $1,000 once."
+      },
+      {
+        "id": "e7",
+        "blockId": "listing",
+        "quote": "No other fees."
+      },
+      {
+        "id": "e8",
+        "blockId": "listing",
+        "quote": "Water included in rent."
+      },
+      {
+        "id": "e9",
+        "blockId": "listing",
+        "quote": "Tenant pays electricity directly to provider; amount varies."
+      },
+      {
+        "id": "e10",
+        "blockId": "listing",
+        "quote": "No promotions."
+      }
+    ],
+    "notes": [
+      {
+        "id": "n1",
+        "fieldPaths": ["/property/baseRent"],
+        "text": "The listing states base rent of $2,400 per month.",
+        "evidenceIds": ["e4"]
+      }
+    ],
+    "reviewIssues": [
+      {
+        "id": "i1",
+        "code": "UNKNOWN_VALUE",
+        "fieldPaths": ["/property/utilities/value/1/amount"],
+        "message": "Electricity cost is not stated.",
+        "evidenceIds": ["e9"]
+      }
+    ]
+  }
+}

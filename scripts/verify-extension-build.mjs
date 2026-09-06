@@ -1,3 +1,4 @@
+import { Script } from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { URL } from 'node:url';
@@ -9,9 +10,12 @@ const contentScript = await readFile(
   'utf8',
 );
 
-if (/^\s*import\s/m.test(contentScript)) {
+try {
+  new Script(contentScript, { filename: 'dist/content.js' });
+} catch (cause) {
   throw new Error(
-    'dist/content.js contains an ES module import and cannot be injected as a classic Chrome content script.',
+    'dist/content.js must parse as a classic Chrome content script, without module imports or exports.',
+    { cause },
   );
 }
 

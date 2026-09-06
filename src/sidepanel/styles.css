@@ -1064,3 +1064,147 @@ fieldset label {
 .comparison-scroll tbody tr:last-child > * {
   border-bottom: 0;
 }
+
+.ai-extraction-card {
+  margin: 0 0 20px;
+  padding: 20px;
+  border: 1px solid #bfddd2;
+  border-radius: 16px;
+  background: linear-gradient(125deg, #f0f8f3 0%, #f5f8fc 100%);
+  color: #213c35;
+}
+.ai-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+.ai-eyebrow {
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.16em;
+  color: #487767;
+}
+.ai-card-heading h2 {
+  font-size: 17px;
+  margin: 4px 0 0;
+  line-height: 1.35;
+}
+.ai-orbit {
+  display: grid;
+  place-items: center;
+  flex: 0 0 39px;
+  height: 39px;
+  border-radius: 50%;
+  background: #dcefe5;
+  color: #33745d;
+  font-size: 24px;
+}
+.ai-extracting .ai-orbit {
+  animation: ai-breathe 2.4s ease-in-out infinite;
+}
+.ai-extraction-card p {
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 13px 0;
+}
+.ai-scan-track {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #dce8e3;
+  margin-top: 18px;
+}
+.ai-scan-track span {
+  display: block;
+  width: 38%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8fbfac, #36775e);
+  animation: ai-scan 2.4s ease-in-out infinite;
+}
+.ai-stages {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  margin-top: 10px;
+  color: #637970;
+}
+.ai-stages strong {
+  color: #26654c;
+}
+.ai-extraction-card .ai-card-hint {
+  font-size: 11px;
+  color: #62756e;
+  margin-bottom: 0;
+}
+.ai-failed {
+  border-color: #e1c994;
+  background: #fffbf2;
+}
+.ai-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ai-card-actions button {
+  font-size: 12px;
+  padding: 9px 12px;
+}
+.ai-charge {
+  border-top: 1px solid #ddcfad;
+  padding: 14px 0;
+}
+.ai-charge label {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+.ai-charge select {
+  width: 100%;
+  min-width: 0;
+  white-space: normal;
+}
+.ai-source-review blockquote {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-left: 3px solid #bfddd2;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.ai-facts {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+@keyframes ai-scan {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(360%);
+  }
+}
+@keyframes ai-breathe {
+  50% {
+    box-shadow: 0 0 0 6px #dcefe560;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-extracting .ai-orbit,
+  .ai-scan-track span {
+    animation: none;
+  }
+}
+.ai-facts > div {
+  padding: 10px 0;
+  border-bottom: 1px solid #dce8e3;
+}
+.ai-facts dt {
+  font-weight: 700;
+  text-transform: capitalize;
+}
+.ai-facts dd {
+  margin: 5px 0 0;
+  line-height: 1.6;
+}

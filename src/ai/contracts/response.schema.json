@@ -1,0 +1,1214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rentsight:extraction:1.0.0:response",
+  "title": "RentSight extraction v1 response",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "enum": ["1.0.0"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["succeeded"]
+        },
+        "identity": {
+          "$ref": "#/$defs/identity"
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "extractionId": {
+              "type": "string"
+            },
+            "capturedAt": {
+              "type": "string"
+            },
+            "completedAt": {
+              "type": "string"
+            },
+            "promptVersion": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "captureSha256": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "extractionId",
+            "capturedAt",
+            "completedAt",
+            "promptVersion",
+            "model",
+            "captureSha256"
+          ],
+          "additionalProperties": false
+        },
+        "result": {
+          "$ref": "#/$defs/result"
+        }
+      },
+      "required": ["schemaVersion", "status", "identity", "metadata", "result"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "enum": ["1.0.0"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["failed"]
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/identity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "INVALID_REQUEST",
+                "UNAUTHENTICATED",
+                "ENTITLEMENT_REQUIRED",
+                "USAGE_LIMIT_EXCEEDED",
+                "RATE_LIMITED",
+                "IDEMPOTENCY_CONFLICT",
+                "EXTRACTION_IN_PROGRESS",
+                "UNUSABLE_CAPTURE",
+                "MODEL_REFUSAL",
+                "MODEL_OUTPUT_TRUNCATED",
+                "MODEL_OUTPUT_INVALID",
+                "MODEL_EVIDENCE_INVALID",
+                "UPSTREAM_TIMEOUT",
+                "UPSTREAM_UNAVAILABLE",
+                "INTERNAL_ERROR"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "retryMode": {
+              "type": "string",
+              "enum": ["none", "same_request", "new_request"]
+            },
+            "retryAfterSeconds": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "retryable",
+            "retryMode",
+            "retryAfterSeconds"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": ["schemaVersion", "status", "identity", "error"],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "money": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["exact", "range"]
+        },
+        "minMinor": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maxMinor": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currency": {
+          "type": "string"
+        },
+        "frequency": {
+          "type": "string",
+          "enum": [
+            "monthly",
+            "weekly",
+            "daily",
+            "yearly",
+            "one_time",
+            "per_occurrence",
+            "unknown"
+          ]
+        },
+        "basis": {
+          "type": "string",
+          "enum": [
+            "per_unit",
+            "per_person",
+            "per_pet",
+            "per_vehicle",
+            "per_application",
+            "unknown"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "minMinor",
+        "maxMinor",
+        "currency",
+        "frequency",
+        "basis"
+      ],
+      "additionalProperties": false
+    },
+    "textField": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["known", "unknown", "not_applicable", "conflict"]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "selected_unit",
+            "floor_plan",
+            "building",
+            "listing",
+            "unknown"
+          ]
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["status", "value", "candidates", "scope", "evidenceIds"],
+      "additionalProperties": false
+    },
+    "numberField": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["known", "unknown", "not_applicable", "conflict"]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "selected_unit",
+            "floor_plan",
+            "building",
+            "listing",
+            "unknown"
+          ]
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["status", "value", "candidates", "scope", "evidenceIds"],
+      "additionalProperties": false
+    },
+    "dateField": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["known", "unknown", "not_applicable", "conflict"]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "selected_unit",
+            "floor_plan",
+            "building",
+            "listing",
+            "unknown"
+          ]
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["status", "value", "candidates", "scope", "evidenceIds"],
+      "additionalProperties": false
+    },
+    "areaField": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["known", "unknown", "not_applicable", "conflict"]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["exact", "range"]
+                },
+                "min": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "max": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": ["sq_ft", "sq_m"]
+                }
+              },
+              "required": ["kind", "min", "max", "unit"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["exact", "range"]
+              },
+              "min": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "max": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "unit": {
+                "type": "string",
+                "enum": ["sq_ft", "sq_m"]
+              }
+            },
+            "required": ["kind", "min", "max", "unit"],
+            "additionalProperties": false
+          }
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "selected_unit",
+            "floor_plan",
+            "building",
+            "listing",
+            "unknown"
+          ]
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["status", "value", "candidates", "scope", "evidenceIds"],
+      "additionalProperties": false
+    },
+    "durationField": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["known", "unknown", "not_applicable", "conflict"]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["exact", "range"]
+                },
+                "min": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "max": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": ["months", "weeks", "days"]
+                }
+              },
+              "required": ["kind", "min", "max", "unit"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["exact", "range"]
+              },
+              "min": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "max": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "unit": {
+                "type": "string",
+                "enum": ["months", "weeks", "days"]
+              }
+            },
+            "required": ["kind", "min", "max", "unit"],
+            "additionalProperties": false
+          }
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "selected_unit",
+            "floor_plan",
+            "building",
+            "listing",
+            "unknown"
+          ]
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["status", "value", "candidates", "scope", "evidenceIds"],
+      "additionalProperties": false
+    },
+    "moneyField": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["known", "unknown", "not_applicable", "conflict"]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/money"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/money"
+          }
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "selected_unit",
+            "floor_plan",
+            "building",
+            "listing",
+            "unknown"
+          ]
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["status", "value", "candidates", "scope", "evidenceIds"],
+      "additionalProperties": false
+    },
+    "booleanField": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["known", "unknown", "not_applicable", "conflict"]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "boolean"
+          }
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "selected_unit",
+            "floor_plan",
+            "building",
+            "listing",
+            "unknown"
+          ]
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["status", "value", "candidates", "scope", "evidenceIds"],
+      "additionalProperties": false
+    },
+    "applicability": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["required", "optional", "conditional", "unknown"]
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["kind", "conditions", "evidenceIds"],
+      "additionalProperties": false
+    },
+    "fee": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "application",
+            "administration",
+            "security_deposit",
+            "holding_deposit",
+            "pet_deposit",
+            "pet_rent",
+            "parking",
+            "amenity",
+            "service",
+            "move_in",
+            "other"
+          ]
+        },
+        "amount": {
+          "$ref": "#/$defs/moneyField"
+        },
+        "applicability": {
+          "$ref": "#/$defs/applicability"
+        },
+        "refundable": {
+          "$ref": "#/$defs/booleanField"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "category",
+        "amount",
+        "applicability",
+        "refundable"
+      ],
+      "additionalProperties": false
+    },
+    "utility": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "water",
+            "sewer",
+            "trash",
+            "electricity",
+            "gas",
+            "internet",
+            "cable",
+            "other"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "responsibility": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["known", "unknown", "not_applicable", "conflict"]
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "included_in_rent",
+                    "tenant_pays_provider",
+                    "tenant_pays_landlord"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "included_in_rent",
+                  "tenant_pays_provider",
+                  "tenant_pays_landlord"
+                ]
+              }
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "selected_unit",
+                "floor_plan",
+                "building",
+                "listing",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["status", "value", "candidates", "scope", "evidenceIds"],
+          "additionalProperties": false
+        },
+        "amount": {
+          "$ref": "#/$defs/moneyField"
+        },
+        "applicability": {
+          "$ref": "#/$defs/applicability"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "responsibility",
+        "amount",
+        "applicability"
+      ],
+      "additionalProperties": false
+    },
+    "promotion": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "benefitType": {
+          "type": "string",
+          "enum": [
+            "free_rent",
+            "rent_discount",
+            "fee_waiver",
+            "other",
+            "unknown"
+          ]
+        },
+        "discount": {
+          "$ref": "#/$defs/moneyField"
+        },
+        "freeRentDuration": {
+          "$ref": "#/$defs/durationField"
+        },
+        "advertisedEffectiveRent": {
+          "$ref": "#/$defs/moneyField"
+        },
+        "requiredLeaseTerm": {
+          "$ref": "#/$defs/durationField"
+        },
+        "applyBy": {
+          "$ref": "#/$defs/dateField"
+        },
+        "moveInBy": {
+          "$ref": "#/$defs/dateField"
+        },
+        "applicability": {
+          "$ref": "#/$defs/applicability"
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "description",
+        "benefitType",
+        "discount",
+        "freeRentDuration",
+        "advertisedEffectiveRent",
+        "requiredLeaseTerm",
+        "applyBy",
+        "moveInBy",
+        "applicability",
+        "evidenceIds"
+      ],
+      "additionalProperties": false
+    },
+    "property": {
+      "type": "object",
+      "properties": {
+        "propertyName": {
+          "$ref": "#/$defs/textField"
+        },
+        "address": {
+          "$ref": "#/$defs/textField"
+        },
+        "unitLabel": {
+          "$ref": "#/$defs/textField"
+        },
+        "bedrooms": {
+          "$ref": "#/$defs/numberField"
+        },
+        "bathrooms": {
+          "$ref": "#/$defs/numberField"
+        },
+        "floorArea": {
+          "$ref": "#/$defs/areaField"
+        },
+        "baseRent": {
+          "$ref": "#/$defs/moneyField"
+        },
+        "fees": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["known", "unknown", "not_applicable", "conflict"]
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/fee"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/fee"
+                }
+              }
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "selected_unit",
+                "floor_plan",
+                "building",
+                "listing",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["status", "value", "candidates", "scope", "evidenceIds"],
+          "additionalProperties": false
+        },
+        "utilities": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["known", "unknown", "not_applicable", "conflict"]
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/utility"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/utility"
+                }
+              }
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "selected_unit",
+                "floor_plan",
+                "building",
+                "listing",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["status", "value", "candidates", "scope", "evidenceIds"],
+          "additionalProperties": false
+        },
+        "leaseTerm": {
+          "$ref": "#/$defs/durationField"
+        },
+        "availableOn": {
+          "$ref": "#/$defs/dateField"
+        },
+        "promotions": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["known", "unknown", "not_applicable", "conflict"]
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/promotion"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/promotion"
+                }
+              }
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "selected_unit",
+                "floor_plan",
+                "building",
+                "listing",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["status", "value", "candidates", "scope", "evidenceIds"],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "propertyName",
+        "address",
+        "unitLabel",
+        "bedrooms",
+        "bathrooms",
+        "floorArea",
+        "baseRent",
+        "fees",
+        "utilities",
+        "leaseTerm",
+        "availableOn",
+        "promotions"
+      ],
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "blockId": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "blockId", "quote"],
+      "additionalProperties": false
+    },
+    "note": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "fieldPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "text": {
+          "type": "string"
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["id", "fieldPaths", "text", "evidenceIds"],
+      "additionalProperties": false
+    },
+    "issue": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "UNKNOWN_VALUE",
+            "CONFLICTING_VALUES",
+            "RENT_RANGE",
+            "CONDITIONAL_CHARGE",
+            "PROMOTION_CONDITIONS",
+            "UNIT_SCOPE_UNCERTAIN",
+            "SOURCE_INCOMPLETE"
+          ]
+        },
+        "fieldPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "message": {
+          "type": "string"
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["id", "code", "fieldPaths", "message", "evidenceIds"],
+      "additionalProperties": false
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "property": {
+          "$ref": "#/$defs/property"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/note"
+          }
+        },
+        "reviewIssues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue"
+          }
+        }
+      },
+      "required": ["property", "evidence", "notes", "reviewIssues"],
+      "additionalProperties": false
+    },
+    "identity": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "captureRevision": {
+          "type": "string"
+        },
+        "listingUrl": {
+          "type": "string"
+        },
+        "selectedUnit": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "label"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selectedLeaseTermMonths": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "requestId",
+        "captureRevision",
+        "listingUrl",
+        "selectedUnit",
+        "selectedLeaseTermMonths"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -42,11 +42,13 @@
   <body>
     <main>
       <h1>RentSight Privacy Policy</h1>
-      <p class="updated">Effective August 31, 2026</p>
+      <p class="updated">Effective September 5, 2026</p>
       <p>
         RentSight estimates the total cost of rental listings. Listing analysis
-        operates locally. If RentSight Cloud is enabled, account and billing
-        requests are sent to RentSight's API and its payment processor.
+        uses local preliminary extraction and, for signed-in RentSight+
+        accounts, automatic AI review through RentSight's backend and OpenAI.
+        Account and billing requests are sent to RentSight's API and its payment
+        processor.
       </p>
       <h2>Information RentSight handles</h2>
       <p>
@@ -66,9 +68,13 @@
       </p>
       <h2>How information is used and shared</h2>
       <p>
-        Listing information is used only for RentSight's local calculations,
-        drafts, saved listings, comparisons, and exports; the current cloud
-        client does not upload it. Account and subscription information is used
+        For AI review, captured listing text, relevant structured data, the
+        listing URL, selected unit, and preliminary extracted values are sent to
+        RentSight's backend and OpenAI. Customer overrides and household
+        financial assumptions are not included in extraction requests. Accepted
+        extraction results, evidence, and notes are stored with local drafts and
+        saved listings; full captures are held temporarily for the request and
+        retries, not saved locally. Account and subscription information is used
         to authenticate users, determine feature access, and provide billing
         through Stripe. RentSight does not sell information or use it for
         advertising or analytics.

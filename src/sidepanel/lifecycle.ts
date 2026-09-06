@@ -7,6 +7,7 @@ import { analysisForNavigation } from './navigationState';
 
 export interface ReadyViewState {
   status: 'ready';
+  aiPage?: PageInfo;
   url: string;
   analysis: RentalAnalysis;
   savedListings: SavedListingRecord[];
@@ -44,6 +45,7 @@ export function refreshReadyView(
   return {
     ...current,
     url: payload.url,
+    aiPage: payload,
     analysis: applyHouseholdProfile(analysis, current.householdProfile),
   };
 }
