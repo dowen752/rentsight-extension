@@ -1,4 +1,4 @@
-export const EXTRACTION_SCHEMA_VERSION = '1.0.0';
+export const EXTRACTION_SCHEMA_VERSION = '1.1.0';
 export const EXTRACTION_PROMPT_VERSION = 'unknown';
 
 const TRACKING_PARAMETER =

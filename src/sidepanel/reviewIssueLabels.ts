@@ -2,7 +2,11 @@ import type { Issue } from '../ai/contracts/response';
 
 const REVIEW_FIELD_LABELS = {
   '/property/propertyName': 'Listing name',
-  '/property/address': 'Address',
+  '/property/streetAddress': 'Address',
+  '/property/city': 'City',
+  '/property/region': 'State or region',
+  '/property/postalCode': 'ZIP or postal code',
+  '/property/country': 'Country',
   '/property/unitLabel': 'Unit',
   '/property/bedrooms': 'Bedrooms',
   '/property/bathrooms': 'Bathrooms',

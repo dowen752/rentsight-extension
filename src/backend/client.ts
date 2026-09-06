@@ -105,7 +105,7 @@ export class RentSightBackendClient {
         code = 'INVALID_REQUEST';
         retryMode = 'none';
         return {
-          schemaVersion: '1.0.0',
+          schemaVersion: '1.1.0',
           status: 'failed',
           identity: null,
           error: {
@@ -123,7 +123,7 @@ export class RentSightBackendClient {
         code = 'UNAUTHENTICATED';
         retryMode = 'none';
         return {
-          schemaVersion: '1.0.0',
+          schemaVersion: '1.1.0',
           status: 'failed',
           identity: null,
           error: {

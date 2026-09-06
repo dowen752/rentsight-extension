@@ -123,7 +123,10 @@ export function captureListing(
   const { identity, recurring, concessions } = extraction.listing;
   const hints = {
     propertyName: identity.listingTitle,
-    address: identity.fullAddress,
+    streetAddress: identity.fullAddress,
+    city: identity.city,
+    region: identity.state,
+    postalCode: identity.zipCode,
     bedrooms: identity.bedrooms,
     bathrooms: identity.bathrooms,
     floorArea: identity.squareFootage,

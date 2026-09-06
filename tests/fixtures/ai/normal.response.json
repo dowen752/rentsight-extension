@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "status": "succeeded",
   "identity": {
     "requestId": "11111111-1111-4111-8111-111111111111",
@@ -27,13 +27,6 @@
         "candidates": [],
         "scope": "building",
         "evidenceIds": ["e1"]
-      },
-      "address": {
-        "status": "known",
-        "value": "100 Example Avenue, Example City, CA 90000",
-        "candidates": [],
-        "scope": "building",
-        "evidenceIds": ["e2"]
       },
       "unitLabel": {
         "status": "known",
@@ -202,6 +195,41 @@
         "candidates": [],
         "scope": "selected_unit",
         "evidenceIds": ["e10"]
+      },
+      "streetAddress": {
+        "status": "known",
+        "value": "100 Example Avenue",
+        "candidates": [],
+        "scope": "building",
+        "evidenceIds": ["e2"]
+      },
+      "city": {
+        "status": "known",
+        "value": "Example City",
+        "candidates": [],
+        "scope": "building",
+        "evidenceIds": ["e2"]
+      },
+      "region": {
+        "status": "known",
+        "value": "CA",
+        "candidates": [],
+        "scope": "building",
+        "evidenceIds": ["e2"]
+      },
+      "postalCode": {
+        "status": "known",
+        "value": "90000",
+        "candidates": [],
+        "scope": "building",
+        "evidenceIds": ["e2"]
+      },
+      "country": {
+        "status": "known",
+        "value": "US",
+        "candidates": [],
+        "scope": "building",
+        "evidenceIds": ["e2"]
       }
     },
     "evidence": [

@@ -2,7 +2,7 @@
 
 export type RentSightExtractionV1Response =
   | {
-      schemaVersion: '1.0.0';
+      schemaVersion: '1.1.0';
       status: 'succeeded';
       identity: Identity;
       metadata: {
@@ -16,7 +16,7 @@ export type RentSightExtractionV1Response =
       result: Result;
     }
   | {
-      schemaVersion: '1.0.0';
+      schemaVersion: '1.1.0';
       status: 'failed';
       identity: Identity | null;
       error: {
@@ -61,7 +61,11 @@ export interface Result {
 }
 export interface Property {
   propertyName: TextField;
-  address: TextField;
+  streetAddress: TextField;
+  city: TextField;
+  region: TextField;
+  postalCode: TextField;
+  country: TextField;
   unitLabel: TextField;
   bedrooms: NumberField;
   bathrooms: NumberField;

@@ -19,7 +19,11 @@ export function assertRequest(request: ExtractionRequest): void {
   const allowed = new Set(
     [
       'propertyName',
-      'address',
+      'streetAddress',
+      'city',
+      'region',
+      'postalCode',
+      'country',
       'unitLabel',
       'bedrooms',
       'bathrooms',

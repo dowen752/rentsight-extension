@@ -1,7 +1,7 @@
 /* Generated from the shared v1 JSON schema. Run npm run contract:generate. */
 
 export interface RentSightExtractionV1Request {
-  schemaVersion: '1.0.0';
+  schemaVersion: '1.1.0';
   identity: Identity;
   capture: {
     capturedAt: string;

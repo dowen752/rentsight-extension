@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:rentsight:extraction:1.0.0:request",
+  "$id": "urn:rentsight:extraction:1.1.0:request",
   "title": "RentSight extraction v1 request",
   "type": "object",
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "enum": ["1.0.0"]
+      "enum": ["1.1.0"]
     },
     "identity": {
       "$ref": "#/$defs/identity"

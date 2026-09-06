@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:rentsight:extraction:1.0.0:response",
+  "$id": "urn:rentsight:extraction:1.1.0:response",
   "title": "RentSight extraction v1 response",
   "anyOf": [
     {
@@ -8,7 +8,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "enum": ["1.0.0"]
+          "enum": ["1.1.0"]
         },
         "status": {
           "type": "string",
@@ -61,7 +61,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "enum": ["1.0.0"]
+          "enum": ["1.1.0"]
         },
         "status": {
           "type": "string",
@@ -857,7 +857,19 @@
         "propertyName": {
           "$ref": "#/$defs/textField"
         },
-        "address": {
+        "streetAddress": {
+          "$ref": "#/$defs/textField"
+        },
+        "city": {
+          "$ref": "#/$defs/textField"
+        },
+        "region": {
+          "$ref": "#/$defs/textField"
+        },
+        "postalCode": {
+          "$ref": "#/$defs/textField"
+        },
+        "country": {
           "$ref": "#/$defs/textField"
         },
         "unitLabel": {
@@ -1031,7 +1043,11 @@
       },
       "required": [
         "propertyName",
-        "address",
+        "streetAddress",
+        "city",
+        "region",
+        "postalCode",
+        "country",
         "unitLabel",
         "bedrooms",
         "bathrooms",

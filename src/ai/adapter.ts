@@ -68,11 +68,18 @@ export function adaptExtraction(response: ExtractionSuccess) {
       p.propertyName.value!,
       p.propertyName,
     );
-  if (known(p.address))
-    extraction.listing.identity.fullAddress = sourced(
-      p.address.value!,
-      p.address,
-    );
+  const addressComponents = [
+    ['streetAddress', 'fullAddress'],
+    ['city', 'city'],
+    ['region', 'state'],
+    ['postalCode', 'zipCode'],
+  ] as const;
+  for (const [propertyKey, identityKey] of addressComponents)
+    if (known(p[propertyKey]))
+      extraction.listing.identity[identityKey] = sourced(
+        p[propertyKey].value!,
+        p[propertyKey],
+      );
   for (const key of ['bedrooms', 'bathrooms'] as const)
     if (known(p[key]) && unitSafe(p[key]))
       extraction.listing.identity[key] = sourced(p[key].value!, p[key]);

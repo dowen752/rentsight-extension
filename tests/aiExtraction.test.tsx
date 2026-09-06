@@ -19,6 +19,7 @@ import {
   setUtilityIncluded,
   materializeListing,
   applyHouseholdProfile,
+  setIdentityValue,
 } from '../src/shared/analysis';
 import { emptyExtraction } from '../src/extractors/types';
 import { compactAnalysisForStorage } from '../src/saved/repository';
@@ -89,6 +90,15 @@ describe('shared extraction contract', () => {
       expect(() => acceptResponse(response, request())).toThrow();
     }
   });
+  it('requires the 1.1.0 component contract and rejects the removed address field', () => {
+    expect(request().schemaVersion).toBe('1.1.0');
+    expect(normal().schemaVersion).toBe('1.1.0');
+    const response = normal() as ExtractionSuccess & {
+      result: { property: Record<string, unknown> };
+    };
+    response.result.property.address = response.result.property.streetAddress;
+    expect(() => acceptResponse(response, request())).toThrow();
+  });
 });
 
 describe('capture and adapter', () => {
@@ -146,6 +156,67 @@ describe('capture and adapter', () => {
     expect(next.utilityIncluded.water).toBe(false);
     expect(compactAnalysisForStorage(next).aiExtraction).toEqual(normal());
     expect(JSON.stringify(next)).not.toContain('"blocks"');
+  });
+  it('maps known address components independently and preserves component edits', () => {
+    const response = normal();
+    response.result.property.country = {
+      status: 'unknown',
+      value: null,
+      candidates: [],
+      scope: 'unknown',
+      evidenceIds: [],
+    };
+    response.result.property.streetAddress = {
+      status: 'conflict',
+      value: null,
+      candidates: ['100 Example Avenue', '102 Example Avenue'],
+      scope: 'building',
+      evidenceIds: ['e2'],
+    };
+    let current = createInitialAnalysis(page().url);
+    current = setIdentityValue(current, 'city', 'Customer City');
+    const next = applyAiExtraction(current, response);
+    expect(next.listing.identity.fullAddress).toBeUndefined();
+    expect(next.listing.identity.city).toMatchObject({
+      value: 'Customer City',
+      source: 'user',
+    });
+    expect(next.listing.identity.state?.value).toBe('CA');
+    expect(next.listing.identity.zipCode?.value).toBe('90000');
+  });
+  it('emits preliminary address hints at component paths', () => {
+    const extraction = emptyExtraction('Test', '1');
+    extraction.listing.identity.fullAddress = {
+      value: '100 Example Avenue',
+      source: 'listing',
+      confidence: 1,
+    };
+    extraction.listing.identity.city = {
+      value: 'Example City',
+      source: 'listing',
+      confidence: 1,
+    };
+    extraction.listing.identity.state = {
+      value: 'CA',
+      source: 'listing',
+      confidence: 1,
+    };
+    extraction.listing.identity.zipCode = {
+      value: '90000',
+      source: 'listing',
+      confidence: 1,
+    };
+    const document = new JSDOM('<main><h1>Example</h1></main>').window.document;
+    const paths = captureListing(document, extraction).preliminaryValues.map(
+      (hint) => hint.fieldPath,
+    );
+    expect(paths).toEqual([
+      '/property/streetAddress',
+      '/property/city',
+      '/property/region',
+      '/property/postalCode',
+    ]);
+    expect(paths).not.toContain('/property/address');
   });
   it('preserves extracted utility amounts through household setup and calculations', () => {
     const response = normal();
@@ -439,7 +510,7 @@ describe('failure regression coverage', () => {
       const session = new ExtractionSession(
         {
           extractListing: async (req) => ({
-            schemaVersion: '1.0.0',
+            schemaVersion: '1.1.0',
             status: 'failed',
             identity: req.identity,
             error: {

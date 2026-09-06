@@ -1,4 +1,4 @@
-# Listing extraction contract 1.0.0
+# Listing extraction contract 1.1.0
 
 **Status: proposed implementation target.** This repository does not yet contain
 an extraction implementation or the frontend's calculator schema. The field set
@@ -16,7 +16,7 @@ must map it explicitly. Publishing these files does not change the live endpoint
 
 JSON schemas use draft 2020-12 and are the canonical wire contract. Required-key
 shape validation is necessary but does not replace the semantic rules below.
-`1.0.0` is exact: reject other versions until explicitly supported. Adding required
+`1.1.0` is exact: reject other versions until explicitly supported. Adding required
 fields or enum values requires a new negotiated contract version; never silently
 change the meaning of v1. Prompt changes can retain the schema version.
 
@@ -33,7 +33,7 @@ Idempotency-Key: <identity.requestId>
 All top-level request keys are required:
 
 ```text
-schemaVersion: "1.0.0"
+schemaVersion: "1.1.0"
 identity:
   requestId: UUID generated for this intentional extraction
   captureRevision: opaque revision of this frozen capture/selection
@@ -84,7 +84,7 @@ page. Checking only the URL is insufficient.
 ## Successful response
 
 ```text
-schemaVersion: "1.0.0"
+schemaVersion: "1.1.0"
 status: "succeeded"
 identity: same validated identity as request
 metadata:
@@ -111,7 +111,7 @@ computes this hash; the client need not reproduce it to apply a response.
 
 | Field                                  | Underlying value                                                                            |
 | -------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `propertyName`, `address`, `unitLabel` | String; address preserves the stated address rather than inventing components               |
+| `propertyName`, `streetAddress`, `city`, `region`, `postalCode`, `country`, `unitLabel` | String; address components are independent and must not be inferred from `propertyName` |
 | `bedrooms`, `bathrooms`                | Nonnegative number; zero bedrooms means explicitly supported studio; half bathrooms allowed |
 | `floorArea`                            | Exact/range quantity in `sq_ft` or `sq_m`                                                   |
 | `baseRent`                             | Money representing contractual base rent, excluding concessions                             |
