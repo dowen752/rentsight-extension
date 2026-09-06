@@ -16,6 +16,17 @@ const capture = (html: string) => {
 };
 
 describe('AI cache identity and fingerprint', () => {
+  it('groups adjacent dynamic text fragments into one evidence block', () => {
+    const result = capture(
+      '<div><span>$3,845</span><span>3 Beds</span><span>1,511 sqft</span></div>',
+    );
+    expect(
+      result.capture.blocks.some(
+        (block) => block.text === '$3,845\n3 Beds\n1,511 sqft',
+      ),
+    ).toBe(true);
+  });
+
   it('drops tracking parameters while preserving listing identifiers', () => {
     expect(
       canonicalizeListingUrl(

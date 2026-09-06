@@ -39,12 +39,23 @@ async function requestGoogleCredential(): Promise<unknown> {
     return {
       error: 'Google sign-in is not configured.',
     };
-  await setupOffscreenDocument();
+  const focusAuthPopup = (window: chrome.windows.Window) => {
+    if (window.type !== 'popup' || window.id === undefined) return;
+    chrome.windows.onCreated.removeListener(focusAuthPopup);
+    void chrome.windows.update(window.id, { focused: true }).catch(() => {
+      // The popup may already have closed or been focused by the window manager.
+    });
+  };
+  chrome.windows.onCreated.addListener(focusAuthPopup, {
+    windowTypes: ['popup'],
+  });
   try {
+    await setupOffscreenDocument();
     return await chrome.runtime.sendMessage({
       target: 'firebase-auth-offscreen',
     });
   } finally {
+    chrome.windows.onCreated.removeListener(focusAuthPopup);
     if (await hasOffscreenDocument()) await chrome.offscreen.closeDocument();
   }
 }

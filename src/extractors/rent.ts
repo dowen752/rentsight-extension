@@ -20,8 +20,49 @@ const compactText = (node: Element | null | undefined): string | undefined =>
 
 const floorPlanModal = (document: Document): Element | null =>
   document.querySelector(
-    '#floor-plan-modal, [data-tid="floorplan-modal"], [data-tid="floor-plan-modal"]',
+    '#floor-plan-modal, [data-tid="floorplan-modal"], [data-tid="floor-plan-modal"], dialog[open], [role="dialog"]',
   );
+
+const exactMoney = /^\$\s*[\d,]+(?:\.\d{1,2})?(?:\s*\/\s*mo(?:nth)?)?$/i;
+const exactSquareFeet = /^[\d,]+\s*(?:sq\.?\s*ft|sqft|square feet)$/i;
+
+function firstAvailableUnit(
+  document: Document,
+  modal: Element | null,
+): { priceText: string; squareFeetText?: string } | undefined {
+  const root = modal ?? document.body;
+  const explicitAvailability = root?.querySelector(
+    '[data-tag_section="availability"], [data-tag_item="content-section"][aria-label*="availability" i]',
+  );
+  const availabilityHeading = [...(root?.querySelectorAll('*') ?? [])].find(
+    (node) =>
+      /^\d+\s+units?\s+available(?:\s+now)?$/i.test(compactText(node) ?? ''),
+  );
+  let availability = explicitAvailability ?? availabilityHeading?.parentElement;
+
+  // Rent.com's current modal does not expose a stable availability selector.
+  // Walk out from its "Units Available" heading until the unit rows appear.
+  while (
+    availability &&
+    availability !== root &&
+    ![...availability.querySelectorAll('*')].some((node) =>
+      exactMoney.test(compactText(node) ?? ''),
+    )
+  )
+    availability = availability.parentElement;
+
+  if (!availability) return undefined;
+  const leafTexts = [...availability.querySelectorAll('*')]
+    .filter((node) => node.children.length === 0)
+    .map((node) => compactText(node))
+    .filter((text): text is string => Boolean(text));
+  const priceText = leafTexts.find((text) => exactMoney.test(text));
+  if (!priceText) return undefined;
+  return {
+    priceText,
+    squareFeetText: leafTexts.find((text) => exactSquareFeet.test(text)),
+  };
+}
 
 const moneyFor = (
   text: string,
@@ -46,7 +87,7 @@ const moneyFor = (
 
 export const rentExtractor: ListingExtractor = {
   siteName: 'Rent.com',
-  version: '1.2.0',
+  version: '1.3.0',
   matches(url) {
     return (
       /(^|\.)rent\.com$/i.test(url.hostname) &&
@@ -56,6 +97,7 @@ export const rentExtractor: ListingExtractor = {
   extract(document) {
     const result = emptyExtraction(this.siteName, this.version);
     const modal = floorPlanModal(document);
+    const availableUnit = firstAvailableUnit(document, modal);
     const title = textOf(
       document,
       '[data-tid="property_title"], [data-tid="property-title"]',
@@ -80,27 +122,12 @@ export const rentExtractor: ListingExtractor = {
       result.listing.identity.zipCode = listingValue(address.zipCode, 0.95);
     }
 
-    const availabilityText = compactText(
-      modal?.querySelector(
-        '[data-tag_section="availability"], [data-tag_item="content-section"][aria-label*="availability" i]',
-      ),
-    );
-    const availabilityPrices = [
-      ...(availabilityText?.matchAll(/\$\s*[\d,]+(?:\.\d{1,2})?/g) ?? []),
-    ]
-      .map((match) => ({ rawText: match[0], amount: parseMoney(match[0]) }))
-      .filter(
-        (item): item is { rawText: string; amount: number } =>
-          item.amount !== undefined,
-      );
-    // A floor plan may contain several available units. RentSight's single
-    // advertised-rent field uses the lowest currently offered unit price,
-    // matching Rent.com's floor-plan summary (for example, "$3,149+").
-    const modalPriceText = availabilityPrices.sort(
-      (left, right) => left.amount - right.amount,
-    )[0]?.rawText;
+    // Rent.com does not provide a selectable unit detail page. Treat the first
+    // displayed availability row as the current unit and read its leaf fields
+    // separately so adjacent rent and square-footage text cannot concatenate.
     const priceText =
-      modalPriceText ?? textOf(document, '[data-tid="pdpKeyInfo_price"]');
+      availableUnit?.priceText ??
+      textOf(document, '[data-tid="pdpKeyInfo_price"]');
     const rent = priceText ? parseMoney(priceText) : undefined;
     if (rent !== undefined) {
       const amount = listingValue(rent, 0.96, priceText);
@@ -123,7 +150,10 @@ export const rentExtractor: ListingExtractor = {
         .join(' · ');
     const beds = parseNumberNear(facts, /(\d+(?:\.\d+)?)\s*(?:bd|beds?)\b/i);
     const baths = parseNumberNear(facts, /(\d+(?:\.\d+)?)\s*(?:ba|baths?)\b/i);
-    const sqft = parseNumberNear(facts, /([\d,]+)\s*sqft\b/i);
+    const sqft = parseNumberNear(
+      availableUnit?.squareFeetText ?? facts,
+      /([\d,]+)\s*(?:sq\.?\s*ft|sqft|square feet)\b/i,
+    );
     if (beds !== undefined)
       result.listing.identity.bedrooms = listingValue(beds, 0.96, facts);
     if (baths !== undefined)

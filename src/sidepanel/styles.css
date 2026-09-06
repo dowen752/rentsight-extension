@@ -1,15 +1,28 @@
 :root {
   /* RentSight palette */
   --color-cream: #fdfbd4;
-  --color-ivory: #ffffe3;
+  --color-ivory: #f5f1df;
   --color-evergreen: #05472a;
   --color-sage: #d9e8d2;
+  --color-mist: #edf3e7;
   --color-eucalyptus: #52675b;
   --color-espresso: #3b3428;
+  --color-espresso-mist: #d2c2ad;
 
   /* Core semantic tokens */
-  --color-background: var(--color-cream);
-  --background-page: var(--color-cream);
+  --color-background: var(--color-mist);
+  --background-page:
+    radial-gradient(
+      circle at 100% 4%,
+      var(--color-espresso-mist) 0,
+      transparent 44%
+    ),
+    radial-gradient(
+      circle at 0% 96%,
+      color-mix(in srgb, var(--color-espresso-mist) 84%, transparent) 0,
+      transparent 48%
+    ),
+    var(--color-mist);
   --color-surface: var(--color-ivory);
   --color-surface-hover: var(--color-cream);
   --color-input: var(--color-ivory);
@@ -632,22 +645,8 @@ fieldset label {
   color: var(--color-text-secondary);
   font-size: 10px;
 }
-.membership-mark {
-  align-items: center;
-  background: var(--color-primary);
-  border-radius: 50%;
-  color: var(--color-on-primary);
-  display: inline-flex;
-  flex: 0 0 28px;
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 16px;
-  height: 28px;
-  justify-content: center;
-}
-.membership-plus .membership-mark {
-  background: var(--color-sage);
-  box-shadow: inset 0 0 0 2px var(--color-evergreen);
-  color: var(--color-evergreen);
+.membership-expiration {
+  display: block;
 }
 .membership-bar button {
   background: var(--color-primary);
@@ -1027,12 +1026,17 @@ fieldset label {
   display: -webkit-box;
   line-clamp: 2;
   overflow: hidden;
-  text-decoration-color: #ffffe38c;
-  text-underline-offset: 3px;
+  text-decoration: none;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
-.comparison-scroll thead a:hover {
+.comparison-scroll thead a span {
+  text-decoration: underline;
+  text-decoration-color: #ffffe38c;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.comparison-scroll thead a:hover span {
   text-decoration-color: currentColor;
 }
 .comparison-scroll thead a:focus-visible {
@@ -1068,10 +1072,10 @@ fieldset label {
 .ai-extraction-card {
   margin: 0 0 20px;
   padding: 20px;
-  border: 1px solid #bfddd2;
+  border: 1px solid var(--color-extraction-card-border);
   border-radius: 16px;
-  background: linear-gradient(125deg, #f0f8f3 0%, #f5f8fc 100%);
-  color: #213c35;
+  background: var(--color-extraction-card-bg);
+  color: var(--color-text);
 }
 .ai-card-heading {
   display: flex;
@@ -1082,7 +1086,7 @@ fieldset label {
   font-size: 10px;
   font-weight: 750;
   letter-spacing: 0.16em;
-  color: #487767;
+  color: var(--color-text-muted);
 }
 .ai-card-heading h2 {
   font-size: 17px;
@@ -1095,10 +1099,11 @@ fieldset label {
   flex: 0 0 39px;
   height: 39px;
   border-radius: 50%;
-  background: #dcefe5;
-  color: #33745d;
+  background: var(--color-sage);
+  color: var(--color-evergreen);
   font-size: 24px;
 }
+.ai-preparing .ai-orbit,
 .ai-extracting .ai-orbit {
   animation: ai-breathe 2.4s ease-in-out infinite;
 }
@@ -1111,7 +1116,7 @@ fieldset label {
   height: 4px;
   overflow: hidden;
   border-radius: 8px;
-  background: #dce8e3;
+  background: var(--color-sage);
   margin-top: 18px;
 }
 .ai-scan-track span {
@@ -1119,7 +1124,7 @@ fieldset label {
   width: 38%;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #8fbfac, #36775e);
+  background: var(--color-evergreen);
   animation: ai-scan 2.4s ease-in-out infinite;
 }
 .ai-stages {
@@ -1128,19 +1133,19 @@ fieldset label {
   gap: 8px;
   font-size: 10px;
   margin-top: 10px;
-  color: #637970;
+  color: var(--color-text-muted);
 }
 .ai-stages strong {
-  color: #26654c;
+  color: var(--color-primary-text);
 }
 .ai-extraction-card .ai-card-hint {
   font-size: 11px;
-  color: #62756e;
+  color: var(--color-text-muted);
   margin-bottom: 0;
 }
 .ai-failed {
-  border-color: #e1c994;
-  background: #fffbf2;
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-bg);
 }
 .ai-card-actions {
   display: flex;
@@ -1152,7 +1157,7 @@ fieldset label {
   padding: 9px 12px;
 }
 .ai-charge {
-  border-top: 1px solid #ddcfad;
+  border-top: 1px solid var(--color-divider);
   padding: 14px 0;
 }
 .ai-charge label {
@@ -1168,7 +1173,7 @@ fieldset label {
 .ai-source-review blockquote {
   margin: 12px 0;
   padding: 8px 12px;
-  border-left: 3px solid #bfddd2;
+  border-left: 3px solid var(--color-sage);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
@@ -1187,10 +1192,11 @@ fieldset label {
 }
 @keyframes ai-breathe {
   50% {
-    box-shadow: 0 0 0 6px #dcefe560;
+    box-shadow: 0 0 0 6px var(--color-sage);
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .ai-preparing .ai-orbit,
   .ai-extracting .ai-orbit,
   .ai-scan-track span {
     animation: none;
@@ -1198,7 +1204,7 @@ fieldset label {
 }
 .ai-facts > div {
   padding: 10px 0;
-  border-bottom: 1px solid #dce8e3;
+  border-bottom: 1px solid var(--color-divider);
 }
 .ai-facts dt {
   font-weight: 700;

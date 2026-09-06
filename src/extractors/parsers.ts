@@ -36,6 +36,13 @@ export function parseRentEvidence(
     if (range) {
       const minimum = Number(range[1].replaceAll(',', ''));
       const maximum = Number(range[2].replaceAll(',', ''));
+      if (minimum === maximum) {
+        return {
+          kind: 'single',
+          amount: listingValue(minimum, confidence, text),
+          rawText: text,
+        };
+      }
       return {
         kind: 'range',
         minimum: listingValue(Math.min(minimum, maximum), confidence, text),

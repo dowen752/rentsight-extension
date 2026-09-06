@@ -8,6 +8,7 @@ import {
   classifyIncludedUtilities,
   classifyLaundry,
   classifyNoPetsPolicy,
+  parseRentEvidence,
 } from '../src/extractors/parsers';
 
 const fixture = (name: string, url = 'https://example.com/rental') => {
@@ -17,6 +18,13 @@ const fixture = (name: string, url = 'https://example.com/rental') => {
 };
 
 describe('listing extraction', () => {
+  it('treats equal advertised rent bounds as one exact rent', () => {
+    expect(parseRentEvidence(['$3,845 - $3,845'], 0.6)).toMatchObject({
+      kind: 'single',
+      amount: { value: 3_845 },
+    });
+  });
+
   it('extracts normalized fields from JSON-LD', () => {
     const result = extractJsonLd(fixture('jsonld-listing.html'));
     expect(result.listing.identity.city?.value).toBe('Sampletown');
@@ -135,6 +143,21 @@ describe('listing extraction', () => {
     expect(result.listing.identity.bedrooms?.value).toBe(1);
     expect(result.listing.identity.bathrooms?.value).toBe(1.5);
     expect(result.listing.identity.squareFootage?.value).toBe(1_023);
+  });
+
+  it('keeps adjacent Zillow modal text nodes separated', () => {
+    const url = new URL(
+      'https://www.zillow.com/apartments/san-francisco-ca/example/abc/',
+    );
+    const document = new JSDOM(
+      '<section role="dialog"><h1>Unit 731</h1><p>2 beds, 1 bath | $2,550</p><div>900 sqft</div></section>',
+    ).window.document;
+
+    const result = extractListing(document, url);
+
+    expect(result.listing.identity.bedrooms?.value).toBe(2);
+    expect(result.listing.identity.bathrooms?.value).toBe(1);
+    expect(result.listing.identity.squareFootage?.value).toBe(900);
   });
 
   it('combines a route-backed Zillow unit with its community details', () => {
@@ -718,10 +741,40 @@ describe('listing extraction', () => {
     expect(result.listing.identity.bedrooms?.value).toBe(1);
     expect(result.listing.identity.bathrooms?.value).toBe(1);
     expect(result.listing.identity.squareFootage?.value).toBe(833);
-    expect(result.listing.recurring.advertisedRent?.value).toBe(3_149);
+    expect(result.listing.recurring.advertisedRent?.value).toBe(3_177);
     expect(result.listing.recurring.petRent?.value).toBe(50);
     expect(result.listing.upfront.petDeposit?.value).toBe(500);
     expect(result.laundryType).toBe('in_unit');
+  });
+
+  it('uses the first Rent.com unit without concatenating rent and square feet', () => {
+    const url = new URL(
+      'https://www.rent.com/apartment/abbotts-run-wilmington-nc-lc5895383?fpld=lc5895383_1029898_1_1_0',
+    );
+    const document = new JSDOM(`
+      <html><body>
+        <div data-tid="pdpKeyInfo_price">$1,135-$1,170/mo</div>
+        <h1 data-tid="property_title">Abbotts Run</h1>
+        <span data-tid="pdpKeyInfo_address">511 Cobblestone Dr, Wilmington, NC 28405</span>
+        <div role="dialog">
+          <header><h2>Topsail-Granite</h2><p>1 Bd, 1 Ba, 475 Sqft</p></header>
+          <section>
+            <h3>2 Units Available Now</h3>
+            <div><p>505-505-113</p><p>$1,170</p><p>475 Sqft</p><p>Today</p></div>
+            <div><p>505-505-216</p><p>$1,135</p><p>475 Sqft</p><p>Today</p></div>
+          </section>
+        </div>
+      </body></html>
+    `).window.document;
+
+    const result = extractListing(document, url);
+
+    expect(result.listing.recurring.advertisedRent?.value).toBe(1_170);
+    expect(result.listing.identity.squareFootage?.value).toBe(475);
+    expect(result.rent).toMatchObject({
+      kind: 'single',
+      rawText: '$1,170',
+    });
   });
 
   it('extracts generic visible text and supporting classifications', () => {

@@ -94,21 +94,20 @@ export function MembershipBadge() {
     if (account.status === 'loading') return 'Checking your account…';
     if (account.status === 'signed-out') return 'Sign in to use cloud features';
     if (account.status === 'backend-error') return account.message;
-    if (isPlus)
-      return expiration
-        ? `Cloud features active · expires ${expiration}`
-        : 'Cloud features active';
+    if (isPlus) return 'Cloud features active';
     return account.user.email ?? `Account ${account.user.uid}`;
   })();
   return (
-    <aside className={`membership-bar ${isPlus ? 'membership-plus' : ''}`}>
+    <aside className="membership-bar">
       <div>
-        <span className="membership-mark" aria-hidden="true">
-          {isPlus ? '+' : 'R'}
-        </span>
         <span>
           <strong>{isPlus ? 'RentSight+ Pass' : 'Free'}</strong>
           <small>{detail}</small>
+          {expiration && (
+            <small className="membership-expiration">
+              Expires {expiration}
+            </small>
+          )}
         </span>
       </div>
       <button

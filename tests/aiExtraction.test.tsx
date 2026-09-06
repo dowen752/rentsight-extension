@@ -465,6 +465,20 @@ describe('AI review UI', () => {
     expect(html).toMatch(/class="primary-action confirm-action" disabled=""/);
     expect(html).toContain('aria-label="Monthly rent"');
   });
+  it('shows progress while the listing capture is being prepared', () => {
+    const html = renderToStaticMarkup(
+      <AiExtractionCard
+        controls={{
+          state: { status: 'preparing' },
+          retry: vi.fn(),
+          continueWithPreliminary: vi.fn(),
+        }}
+      />,
+    );
+    expect(html).toContain('Preparing the listing review');
+    expect(html).toContain('class="ai-scan-track"');
+    expect(html).toContain('aria-busy="true"');
+  });
   it('offers an explicit fallback after failure', () => {
     const html = renderToStaticMarkup(
       <AiExtractionCard

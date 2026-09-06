@@ -218,7 +218,10 @@ describe('guided tour', () => {
 describe('unavailable listing workspace', () => {
   it('keeps the saved, compare, and about tabs accessible', () => {
     const markup = renderToStaticMarkup(
-      <UnavailableWorkspace clearAllData={async () => undefined}>
+      <UnavailableWorkspace
+        clearAllData={async () => undefined}
+        refreshCurrent={() => undefined}
+      >
         <main>
           <p>Current page cannot be inspected.</p>
         </main>
@@ -230,5 +233,7 @@ describe('unavailable listing workspace', () => {
     expect(markup).toContain('>Saved (0)</button>');
     expect(markup).toContain('>Compare (0)</button>');
     expect(markup).toContain('>About</button>');
+    expect(markup.match(/Refresh listing/g)).toHaveLength(1);
+    expect(markup).not.toContain('Check again');
   });
 });

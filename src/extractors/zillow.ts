@@ -15,11 +15,25 @@ interface SelectedUnit {
   name?: string;
 }
 
+function textWithNodeBoundaries(element: Element): string {
+  const parts: string[] = [];
+  const visit = (node: Node) => {
+    if (node.nodeType === node.TEXT_NODE) {
+      const text = node.textContent?.trim();
+      if (text) parts.push(text);
+      return;
+    }
+    for (const child of node.childNodes) visit(child);
+  };
+  visit(element);
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
 function selectedUnit(document: Document): SelectedUnit | undefined {
   for (const dialog of document.querySelectorAll(
     '[role="dialog"], [aria-modal="true"]',
   )) {
-    const text = dialog.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+    const text = textWithNodeBoundaries(dialog);
     if (
       /\$[\d,]+/i.test(text) &&
       /\b(?:beds?|bd|studio)\b/i.test(text) &&

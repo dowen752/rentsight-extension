@@ -23,6 +23,7 @@ import {
 
 export type AiState =
   | { status: 'idle' }
+  | { status: 'preparing' }
   | { status: 'extracting'; requestId: string }
   | { status: 'succeeded'; requestId: string }
   | {
@@ -109,11 +110,15 @@ export class ExtractionSession {
         'The listing capture could not be prepared for AI review. Your preliminary values were kept. Refresh the listing to try again.',
     });
   }
+  prepareCapture() {
+    this.publish({ status: 'preparing' });
+  }
   start(page: PageInfo, options: { bypassCache?: boolean } = {}) {
     if (!page.aiCapture) {
       this.invalidate();
       return;
     }
+    this.prepareCapture();
     const generation = ++this.generation;
     void this.prepare(page, generation, options.bypassCache === true);
   }
@@ -167,6 +172,7 @@ export class ExtractionSession {
       developmentDiagnostic('automatic-suppressed', {
         reason: 'failure-cooldown',
       });
+      this.publish({ status: 'idle' });
       return;
     }
     const owner = crypto.randomUUID();
@@ -176,6 +182,7 @@ export class ExtractionSession {
       !(await this.cache.claim(identity, owner, Date.now()))
     ) {
       developmentDiagnostic('automatic-suppressed', { reason: 'in-flight' });
+      this.publish({ status: 'idle' });
       return;
     }
     if (generation !== this.generation) return;

@@ -40,6 +40,25 @@ export function captureListing(
     bytes += size;
     characters += Array.from(text).length;
   };
+  const coalesceTextBlocks = () => {
+    const grouped: Capture['blocks'] = [];
+    for (const block of capture.blocks) {
+      const previous = grouped.at(-1);
+      const compatible =
+        previous &&
+        previous.kind === 'other' &&
+        block.kind === 'other' &&
+        JSON.stringify(previous.sectionPath) ===
+          JSON.stringify(block.sectionPath) &&
+        previous.text.length + block.text.length + 1 <= 4_000;
+      if (compatible) previous.text += `\n${block.text}`;
+      else grouped.push({ ...block });
+    }
+    capture.blocks = grouped.map((block, index) => ({
+      ...block,
+      id: `block-${index + 1}`,
+    }));
+  };
   const selectedLeaseTermMonths = readSelectedLeaseTermMonths(document);
   for (const section of document.querySelectorAll('[aria-expanded="false"]')) {
     const label = section.textContent?.trim() ?? '';
@@ -96,7 +115,11 @@ export function captureListing(
       element.children.length === 0;
     if (atomic) {
       add(
-        element.tagName === 'SMALL' ? 'footnote' : 'paragraph',
+        element.tagName === 'SMALL'
+          ? 'footnote'
+          : ['P', 'LI', 'DD', 'DT'].includes(element.tagName)
+            ? 'paragraph'
+            : 'other',
         element.textContent?.trim() ?? '',
         headings.filter(Boolean),
       );
@@ -109,6 +132,9 @@ export function captureListing(
     }
   };
   walk(root);
+  // Dynamic, div-heavy sites often render one fact across several adjacent leaf
+  // nodes. Keep their exact text while giving the model a coherent evidence block.
+  coalesceTextBlocks();
   for (const section of ['pricing', 'fees', 'utilities', 'lease']) {
     const pattern = {
       pricing: /rent|price|pricing/i,

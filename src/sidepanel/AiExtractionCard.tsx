@@ -44,7 +44,7 @@ export function AiExtractionCard({ controls }: { controls: AiControls }) {
     return () => window.clearInterval(timer);
   }, [state]);
   if (state.status === 'idle') return null;
-  const running = state.status === 'extracting';
+  const running = state.status === 'preparing' || state.status === 'extracting';
   const failed = state.status === 'failed' && !state.continued;
   const wait = failed
     ? Math.max(0, Math.ceil((state.retryAt - now) / 1000))
@@ -76,7 +76,9 @@ export function AiExtractionCard({ controls }: { controls: AiControls }) {
           <span className="ai-eyebrow">RENTSIGHT AI</span>
           <h2>
             {running
-              ? 'Reviewing the listing details'
+              ? state.status === 'preparing'
+                ? 'Preparing the listing review'
+                : 'Reviewing the listing details'
               : failed
                 ? 'AI review couldn’t finish'
                 : state.status === 'failed' && state.continued
@@ -87,7 +89,9 @@ export function AiExtractionCard({ controls }: { controls: AiControls }) {
       </div>
       <p role="status" aria-live="polite">
         {running
-          ? 'Initial details are ready. AI is checking the listing for rent, fees, and lease conditions.'
+          ? state.status === 'preparing'
+            ? 'Gathering the listing details needed for AI review.'
+            : 'Initial details are ready. AI is checking the listing for rent, fees, and lease conditions.'
           : failed
             ? state.message
             : state.status === 'failed' && state.continued
@@ -101,7 +105,9 @@ export function AiExtractionCard({ controls }: { controls: AiControls }) {
           </div>
           <div className="ai-stages">
             <span>✓ Initial details</span>
-            <strong>AI review</strong>
+            <strong>
+              {state.status === 'preparing' ? 'Preparing review' : 'AI review'}
+            </strong>
             <span>Your confirmation</span>
           </div>
           <p className="ai-card-hint">
@@ -163,13 +169,9 @@ export function AiSourceReview({
                     });
                   }}
                 >
-                  <option value="">Choose after reviewing</option>
-                  <option value="entered">
-                    I entered the applicable amount in the inputs
-                  </option>
-                  <option value="excluded">
-                    Exclude — it does not apply to my calculation
-                  </option>
+                  <option value="">Select an option</option>
+                  <option value="entered">Amount added to inputs</option>
+                  <option value="excluded">Doesn’t apply</option>
                 </select>
               </label>
             </div>

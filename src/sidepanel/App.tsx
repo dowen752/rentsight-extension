@@ -290,6 +290,7 @@ export function App() {
   useEffect(() => {
     if (accountStatus !== 'plus' || !aiPage || aiPage.aiCapture) return;
     let active = true;
+    aiSession.prepareCapture();
     // Local extraction is already displayed. Capture and backend work are optional.
     void chrome.runtime
       .sendMessage({ type: 'GET_AI_CAPTURE' })
@@ -327,7 +328,7 @@ export function App() {
   useEffect(() => {
     if (accountStatus === 'plus' && accountId && aiPage?.aiCapture)
       aiSession.activate(aiPage, accountId);
-    else if (accountStatus !== 'loading' || !aiPage) aiSession.invalidate();
+    else if (accountStatus !== 'plus' || !aiPage) aiSession.invalidate();
   }, [aiSession, aiPage, accountStatus, accountId]);
   useEffect(() => () => aiSession.invalidate(), [aiSession]);
   const aiControls: AiControls = {
@@ -704,7 +705,10 @@ export function App() {
   }
   if (view.status === 'error') {
     return (
-      <UnavailableWorkspace clearAllData={clearAllData}>
+      <UnavailableWorkspace
+        clearAllData={clearAllData}
+        refreshCurrent={() => window.location.reload()}
+      >
         <main>
           <p className="status error">{view.message}</p>
         </main>
@@ -732,7 +736,10 @@ export function App() {
   }
   if (view.status === 'unit-selection-required') {
     return (
-      <UnavailableWorkspace clearAllData={clearAllData}>
+      <UnavailableWorkspace
+        clearAllData={clearAllData}
+        refreshCurrent={() => window.location.reload()}
+      >
         <main>
           <section className="warning">
             <h1>Select a unit first</h1>
@@ -741,13 +748,6 @@ export function App() {
               dimensions, fees, and availability. Open a specific unit before
               using the Current view.
             </p>
-            <button
-              type="button"
-              className="primary-action"
-              onClick={() => window.location.reload()}
-            >
-              Check again
-            </button>
           </section>
         </main>
       </UnavailableWorkspace>
@@ -794,7 +794,10 @@ export function App() {
       }
     };
     return (
-      <UnavailableWorkspace clearAllData={clearAllData}>
+      <UnavailableWorkspace
+        clearAllData={clearAllData}
+        refreshCurrent={() => window.location.reload()}
+      >
         <main>
           <section className="warning">
             <h1>This does not look like a rental listing</h1>
@@ -833,9 +836,11 @@ type WorkspaceTab = 'current' | 'saved' | 'compare' | 'about';
 export function UnavailableWorkspace({
   children,
   clearAllData,
+  refreshCurrent,
 }: {
   children: ReactNode;
   clearAllData: () => Promise<void>;
+  refreshCurrent: () => void;
 }) {
   const [tab, setTab] = useState<WorkspaceTab>('current');
   const [savedListings, setSavedListings] = useState<SavedListingRecord[]>([]);
@@ -904,6 +909,11 @@ export function UnavailableWorkspace({
           </button>
         ))}
       </nav>
+      {tab === 'current' && (
+        <div className="current-actions">
+          <RefreshListingButton onClick={refreshCurrent} />
+        </div>
+      )}
       {notice && (
         <p className="workspace-notice" role="status">
           {notice}
@@ -1075,17 +1085,12 @@ function Workspace({
           </button>
         ))}
       </nav>
-      {tab === 'current' && tourStep === undefined && (
+      {tab === 'current' && (
         <div className="current-actions">
-          <button
-            type="button"
-            className="refresh-listing"
-            disabled={refreshing}
+          <RefreshListingButton
+            refreshing={refreshing}
             onClick={() => void refresh()}
-          >
-            <span aria-hidden="true">↻</span>{' '}
-            {refreshing ? 'Refreshing…' : 'Refresh listing'}
-          </button>
+          />
         </div>
       )}
       {notice && (
@@ -1154,6 +1159,26 @@ function Workspace({
         />
       )}
     </>
+  );
+}
+
+function RefreshListingButton({
+  refreshing = false,
+  onClick,
+}: {
+  refreshing?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="refresh-listing"
+      disabled={refreshing}
+      onClick={onClick}
+    >
+      <span aria-hidden="true">↻</span>{' '}
+      {refreshing ? 'Refreshing…' : 'Refresh listing'}
+    </button>
   );
 }
 
@@ -1730,7 +1755,7 @@ function ComparisonView({
                         title={item.address}
                         aria-label={`Open ${item.address} listing`}
                       >
-                        {item.address}
+                        <span>{item.address}</span>
                       </a>
                     </th>
                   ))}
@@ -1922,6 +1947,7 @@ export function AnalysisEditor({
     string | undefined
   >();
   const aiBlocked =
+    aiControls?.state.status === 'preparing' ||
     aiControls?.state.status === 'extracting' ||
     (aiControls?.state.status === 'failed' && !aiControls.state.continued);
   const unresolvedCharges = analysis.aiExtraction

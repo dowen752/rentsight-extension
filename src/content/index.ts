@@ -29,14 +29,19 @@ const isExtensionRequest = (value: unknown): value is ExtensionRequest =>
   'type' in value &&
   (value.type === 'GET_PAGE_INFO' || value.type === 'GET_AI_CAPTURE');
 
+const selectedUnitIdForPage = (
+  document: Document,
+  url: URL,
+): string | undefined =>
+  selectedApartmentsUnitId(document, url) ??
+  selectedZillowUnitId(document, url) ??
+  selectedHomesUnitId(document, url) ??
+  selectedRedfinUnitId(document, url);
+
 function getPageInfo(): PageInfo {
   const browserUrl = window.location.href;
   const parsedUrl = new URL(browserUrl);
-  const selectedUnitId =
-    selectedApartmentsUnitId(document, parsedUrl) ??
-    selectedZillowUnitId(document, parsedUrl) ??
-    selectedHomesUnitId(document, parsedUrl) ??
-    selectedRedfinUnitId(document, parsedUrl);
+  const selectedUnitId = selectedUnitIdForPage(document, parsedUrl);
   const url = selectedUnitId
     ? `${browserUrl.split('#')[0]}#rentsight-unit=${encodeURIComponent(selectedUnitId)}`
     : browserUrl;
@@ -140,19 +145,19 @@ if (!contentWindow.__rentSightInitialized) {
   const detailObserver = new MutationObserver(() => {
     window.clearTimeout(settleTimer);
     settleTimer = window.setTimeout(() => {
-      const payload = getPageInfo();
+      const currentUrl = new URL(window.location.href);
       const root =
         document.querySelector('main, [role="main"]') ?? document.body;
       const text = root?.textContent ?? '';
       const signature = JSON.stringify([
         window.location.href,
-        payload.selectedUnitId,
-        payload.eligibility?.classification,
+        selectedUnitIdForPage(document, currentUrl),
         document.querySelector('h1')?.textContent?.trim(),
         (text.match(/\$\s?[\d,]+/g) ?? []).slice(0, 12),
       ]);
       if (signature === previousDetailSignature) return;
       previousDetailSignature = signature;
+      const payload = getPageInfo();
       void chrome.runtime
         .sendMessage({ type: 'EXTRACTION_UPDATED', payload })
         .catch(() => undefined);
@@ -188,11 +193,7 @@ if (!contentWindow.__rentSightInitialized) {
     let previousUnitId: string | undefined;
     const detectUnit = () => {
       const currentUrl = new URL(window.location.href);
-      const unitId =
-        selectedApartmentsUnitId(document, currentUrl) ??
-        selectedZillowUnitId(document, currentUrl) ??
-        selectedHomesUnitId(document, currentUrl) ??
-        selectedRedfinUnitId(document, currentUrl);
+      const unitId = selectedUnitIdForPage(document, currentUrl);
       if (!unitId) {
         previousUnitId = undefined;
         return;
