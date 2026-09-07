@@ -20,7 +20,7 @@ export const extractionMessages: Record<
   MODEL_OUTPUT_TRUNCATED:
     'AI could not complete its review. Your preliminary values were kept.',
   MODEL_OUTPUT_INVALID:
-    'AI returned details that could not be verified. Your preliminary values were kept.',
+    'The AI response could not be processed. Your preliminary values were kept. Start a new extraction to try again.',
   MODEL_EVIDENCE_INVALID:
     'AI reviewed the listing, but its supporting details could not be verified. Your preliminary values were kept.',
   UPSTREAM_TIMEOUT:

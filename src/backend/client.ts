@@ -51,6 +51,50 @@ export interface BackendClientOptions {
   fetch?: typeof globalThis.fetch;
 }
 
+const utf8Bytes = (value: string) => new TextEncoder().encode(value).length;
+
+export function summarizeExtractionRequest(request: ExtractionRequest) {
+  const blockKinds: Record<
+    ExtractionRequest['capture']['blocks'][number]['kind'],
+    { blocks: number; textCharacters: number; textBytes: number }
+  > = {
+    heading: { blocks: 0, textCharacters: 0, textBytes: 0 },
+    paragraph: { blocks: 0, textCharacters: 0, textBytes: 0 },
+    table: { blocks: 0, textCharacters: 0, textBytes: 0 },
+    json_ld: { blocks: 0, textCharacters: 0, textBytes: 0 },
+    footnote: { blocks: 0, textCharacters: 0, textBytes: 0 },
+    other: { blocks: 0, textCharacters: 0, textBytes: 0 },
+  };
+  for (const block of request.capture.blocks) {
+    const summary = blockKinds[block.kind];
+    summary.blocks++;
+    summary.textCharacters += Array.from(block.text).length;
+    summary.textBytes += utf8Bytes(block.text);
+  }
+  const serializedRequest = JSON.stringify(request);
+  return {
+    serializedRequest,
+    requestBytes: utf8Bytes(serializedRequest),
+    captureBytes: utf8Bytes(JSON.stringify(request.capture)),
+    preliminaryValuesBytes: utf8Bytes(
+      JSON.stringify(request.preliminaryValues),
+    ),
+    blockCount: request.capture.blocks.length,
+    captureTextCharacters: Object.values(blockKinds).reduce(
+      (sum, item) => sum + item.textCharacters,
+      0,
+    ),
+    captureTextBytes: Object.values(blockKinds).reduce(
+      (sum, item) => sum + item.textBytes,
+      0,
+    ),
+    unavailableSectionCount: request.capture.unavailableSections.length,
+    preliminaryValueCount: request.preliminaryValues.length,
+    truncated: request.capture.truncated,
+    blockKinds,
+  };
+}
+
 export class RentSightBackendClient {
   private readonly apiOrigin: string;
   private readonly fetcher: typeof globalThis.fetch;
@@ -95,6 +139,7 @@ export class RentSightBackendClient {
     request: ExtractionRequest,
   ): Promise<ExtractionResponse> {
     const started = Date.now();
+    const requestSummary = summarizeExtractionRequest(request);
     let httpStatus: number | null = null;
     let code = 'NETWORK_OUTCOME_UNKNOWN';
     let retryMode = 'same_request';
@@ -145,7 +190,7 @@ export class RentSightBackendClient {
             Authorization: `Bearer ${token}`,
             'Idempotency-Key': request.identity.requestId,
           },
-          body: JSON.stringify(request),
+          body: requestSummary.serializedRequest,
           // Longer than the provider deadline and backend reservation lifecycle.
           // Abort is an uncertain outcome: the session retains the same body/key.
           signal: AbortSignal.timeout(150000),
@@ -179,12 +224,20 @@ export class RentSightBackendClient {
     } finally {
       if (import.meta.env.DEV)
         console.debug('[RentSight] AI extraction', {
-          requestId: request.identity.requestId,
-          captureRevision: request.identity.captureRevision,
           httpStatus,
           errorCode: code,
           retryMode,
           elapsedMs: Date.now() - started,
+          requestBytes: requestSummary.requestBytes,
+          captureBytes: requestSummary.captureBytes,
+          preliminaryValuesBytes: requestSummary.preliminaryValuesBytes,
+          blockCount: requestSummary.blockCount,
+          captureTextCharacters: requestSummary.captureTextCharacters,
+          captureTextBytes: requestSummary.captureTextBytes,
+          unavailableSectionCount: requestSummary.unavailableSectionCount,
+          preliminaryValueCount: requestSummary.preliminaryValueCount,
+          truncated: requestSummary.truncated,
+          blockKinds: requestSummary.blockKinds,
         });
     }
   }

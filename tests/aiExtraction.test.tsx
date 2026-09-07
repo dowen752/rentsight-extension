@@ -7,6 +7,14 @@ import { captureListing } from '../src/ai/capture';
 import { acceptResponse, assertRequest } from '../src/ai/validation';
 import { applyAiExtraction, adaptExtraction } from '../src/ai/adapter';
 import { ExtractionSession } from '../src/ai/session';
+import {
+  ChromeExtractionCache,
+  EXTRACTION_TERMINAL_MAX_ENTRIES,
+  EXTRACTION_TERMINAL_TTL_MS,
+  type ExtractionCache,
+  type TerminalExtractionState,
+} from '../src/ai/cache';
+import { listingCacheIdentity, listingCacheKey } from '../src/ai/identity';
 import { RentSightBackendClient } from '../src/backend/client';
 import { AiExtractionCard } from '../src/sidepanel/AiExtractionCard';
 import { formatReviewIssue } from '../src/sidepanel/reviewIssueLabels';
@@ -114,6 +122,107 @@ describe('capture and adapter', () => {
     expect(text).not.toContain('secret');
     expect(text).not.toContain('Private account');
     expect(text).not.toContain('Unrelated');
+  });
+  it('prunes noisy JSON-LD while preserving extraction fields', () => {
+    const document = new JSDOM(
+      `<script type="application/ld+json">${JSON.stringify({
+        '@type': 'Apartment',
+        name: 'Pine Court',
+        address: { streetAddress: '100 Main St' },
+        offers: { price: 2400, priceCurrency: 'USD' },
+        image: ['large-photo-url', 'another-photo-url'],
+        aggregateRating: { ratingValue: 4.8 },
+        review: [{ reviewBody: 'long review copy' }],
+        sameAs: ['social-profile'],
+      })}</script><main><p>Deposit $1,000. Promotion requires 14 months.</p></main>`,
+    ).window.document;
+    const text = captureListing(
+      document,
+      emptyExtraction('Test', '1'),
+    ).capture.blocks.find((block) => block.kind === 'json_ld')!.text;
+    expect(text).toContain('Pine Court');
+    expect(text).toContain('streetAddress');
+    expect(text).toContain('priceCurrency');
+    expect(text).not.toContain('large-photo-url');
+    expect(text).not.toContain('long review copy');
+    expect(text).not.toContain('social-profile');
+  });
+  it('deduplicates normalized blocks only within the same evidence context', () => {
+    const document = new JSDOM(
+      '<main><h2>Unit A</h2><p>Rent $2,400 monthly</p><p> Rent   $2,400 monthly </p><h2>Unit B</h2><p>Rent $2,400 monthly</p></main>',
+    ).window.document;
+    const paragraphs = captureListing(
+      document,
+      emptyExtraction('Test', '1'),
+    ).capture.blocks.filter((block) => block.kind === 'paragraph');
+    expect(paragraphs).toHaveLength(2);
+    expect(paragraphs.map((block) => block.sectionPath.at(-1))).toEqual([
+      'Unit A',
+      'Unit B',
+    ]);
+  });
+  it('deduplicates whitespace and dash variants while preserving the first text and ID', () => {
+    const document = new JSDOM(
+      '<main><h2>Pricing</h2><p>Rent  $2,400 – 12 months</p><p>Rent $2,400 - 12 months</p><p>Deposit $500</p></main>',
+    ).window.document;
+    const blocks = captureListing(document, emptyExtraction('Test', '1'))
+      .capture.blocks;
+    const rent = blocks.filter((block) => block.text.startsWith('Rent'));
+    expect(rent).toEqual([
+      expect.objectContaining({
+        id: 'block-2',
+        kind: 'paragraph',
+        text: 'Rent  $2,400 – 12 months',
+      }),
+    ]);
+    expect(blocks.at(-1)).toMatchObject({
+      id: 'block-4',
+      text: 'Deposit $500',
+    });
+    expect(new Set(blocks.map((block) => block.id)).size).toBe(blocks.length);
+  });
+  it('keeps equivalent text in structurally distinct block kinds and is deterministic', () => {
+    const html =
+      '<main><h2>Fees</h2><p>Deposit $500</p><small>Deposit $500</small><table><tr><td>Deposit $500</td></tr></table></main>';
+    const first = captureListing(
+      new JSDOM(html).window.document,
+      emptyExtraction('Test', '1'),
+    ).capture.blocks;
+    const second = captureListing(
+      new JSDOM(html).window.document,
+      emptyExtraction('Test', '1'),
+    ).capture.blocks;
+    expect(
+      first.map(({ id, kind, sectionPath, text }) => ({
+        id,
+        kind,
+        sectionPath,
+        text,
+      })),
+    ).toEqual(
+      second.map(({ id, kind, sectionPath, text }) => ({
+        id,
+        kind,
+        sectionPath,
+        text,
+      })),
+    );
+    expect(
+      first.filter((block) => block.text.includes('Deposit $500')),
+    ).toHaveLength(3);
+  });
+  it('removes structural boilerplate without removing listing disclosures', () => {
+    const document = new JSDOM(
+      '<header>Site header rent links</header><aside>Related homes</aside><div class="cookie-banner">Cookie preferences</div><div class="chat-widget">Chat with us</div><main><h1>Pine Court</h1><p>Rent $2,400 monthly</p><small>Promotion requires a 14-month lease.</small></main><footer>Copyright and privacy</footer>',
+    ).window.document;
+    const text = captureListing(document, emptyExtraction('Test', '1'))
+      .capture.blocks.map((block) => block.text)
+      .join('\n');
+    expect(text).toContain('Rent $2,400 monthly');
+    expect(text).toContain('14-month lease');
+    expect(text).not.toContain('Cookie preferences');
+    expect(text).not.toContain('Chat with us');
+    expect(text).not.toContain('Related homes');
   });
   it('marks oversized captures as truncated and remains below request limits', () => {
     const document = new JSDOM(
@@ -319,6 +428,19 @@ describe('transport and session', () => {
     await tick();
     expect(client.extractListing).toHaveBeenCalledTimes(2);
   });
+  it('allows only one active request for rapid repeated submissions', async () => {
+    const client = {
+      extractListing: vi.fn(
+        () => new Promise<ExtractionSuccess>(() => undefined),
+      ),
+    };
+    const session = new ExtractionSession(client, vi.fn());
+    session.start(page());
+    session.start(page());
+    session.start(page());
+    expect(client.extractListing).toHaveBeenCalledTimes(1);
+    expect(session.getSnapshot().status).toBe('extracting');
+  });
   it('does not apply late responses, even on the same URL', async () => {
     const resolvers: ((response: ExtractionSuccess) => void)[] = [];
     const requests: ExtractionRequest[] = [];
@@ -356,9 +478,19 @@ describe('transport and session', () => {
     await tick();
     session.retry();
     await tick();
+    expect(client.extractListing.mock.calls[0][0]).toBe(
+      client.extractListing.mock.calls[1][0],
+    );
+    expect(JSON.stringify(client.extractListing.mock.calls[0][0])).toBe(
+      JSON.stringify(client.extractListing.mock.calls[1][0]),
+    );
     expect(client.extractListing.mock.calls[0][0]).toEqual(
       client.extractListing.mock.calls[1][0],
     );
+    expect(session.getSnapshot()).toMatchObject({
+      status: 'failed',
+      retryAction: 'exact',
+    });
     session.continueWithPreliminary();
     expect(session.getSnapshot()).toMatchObject({
       status: 'failed',
@@ -459,7 +591,7 @@ describe('AI review UI', () => {
         aiControls={controls}
       />,
     );
-    expect(html).toContain('Reviewing the listing details');
+    expect(html).toContain('AI review in progress');
     expect(html).toContain('aria-busy="true"');
     expect(html).toContain('Waiting for AI review');
     expect(html).toMatch(/class="primary-action confirm-action" disabled=""/);
@@ -475,7 +607,7 @@ describe('AI review UI', () => {
         }}
       />,
     );
-    expect(html).toContain('Preparing the listing review');
+    expect(html).toContain('AI review in progress');
     expect(html).toContain('class="ai-scan-track"');
     expect(html).toContain('aria-busy="true"');
   });
@@ -488,6 +620,7 @@ describe('AI review UI', () => {
             requestId: 'id',
             message: 'Unavailable',
             retryMode: 'same_request',
+            retryAction: 'exact',
             retryAt: 0,
           },
           retry: vi.fn(),
@@ -498,9 +631,239 @@ describe('AI review UI', () => {
     expect(html).toContain('Continue with preliminary values');
     expect(html).toContain('Retry AI extraction');
   });
+  it('always renders terminal completion feedback after success', () => {
+    const html = renderToStaticMarkup(
+      <AiExtractionCard
+        controls={{
+          state: { status: 'succeeded', requestId: 'id' },
+          retry: vi.fn(),
+          continueWithPreliminary: vi.fn(),
+        }}
+      />,
+    );
+    expect(html).toContain('AI review complete');
+    expect(html).toContain('listing baseline has been updated');
+    expect(html).toContain('role="status"');
+  });
+});
+
+describe('terminal extraction storage', () => {
+  it('removes expired terminal states and bounds retained entries', async () => {
+    const originalChrome = globalThis.chrome;
+    const stored: Record<string, unknown> = {};
+    vi.stubGlobal('chrome', {
+      storage: {
+        local: {
+          get: async (key: string) => ({ [key]: stored[key] }),
+          set: async (values: Record<string, unknown>) =>
+            Object.assign(stored, values),
+        },
+      },
+    });
+    try {
+      const expiredIdentity = listingCacheIdentity({
+        url: 'https://example.com/expired',
+      });
+      const expiredKey = listingCacheKey(expiredIdentity);
+      stored.aiExtractionCacheV1 = {
+        entries: {},
+        inFlight: {},
+        failures: {},
+        terminalStates: {
+          [expiredKey]: {
+            status: 'failed',
+            requestId: 'expired',
+            message: 'Expired',
+            retryMode: 'same_request',
+            retryAt: 0,
+            fingerprint: 'old',
+            completedAt: Date.now() - EXTRACTION_TERMINAL_TTL_MS - 1,
+          },
+        },
+      };
+      const cache = new ChromeExtractionCache();
+      expect(await cache.getTerminal(expiredIdentity)).toBeUndefined();
+      expect(
+        (
+          stored.aiExtractionCacheV1 as {
+            terminalStates: Record<string, unknown>;
+          }
+        ).terminalStates[expiredKey],
+      ).toBeUndefined();
+
+      for (
+        let index = 0;
+        index < EXTRACTION_TERMINAL_MAX_ENTRIES + 5;
+        index++
+      ) {
+        await cache.putTerminal(
+          listingCacheIdentity({ url: `https://example.com/${index}` }),
+          {
+            status: 'failed',
+            requestId: String(index),
+            message: 'Temporary failure',
+            retryMode: 'new_request',
+            retryAt: 0,
+            fingerprint: String(index),
+            completedAt: Date.now() + index,
+          },
+        );
+      }
+      expect(
+        Object.keys(
+          (
+            stored.aiExtractionCacheV1 as {
+              terminalStates: Record<string, unknown>;
+            }
+          ).terminalStates,
+        ),
+      ).toHaveLength(EXTRACTION_TERMINAL_MAX_ENTRIES);
+    } finally {
+      vi.stubGlobal('chrome', originalChrome);
+    }
+  });
 });
 
 describe('failure regression coverage', () => {
+  it.each([
+    {
+      name: 'malformed JSON',
+      fetcher: vi.fn(async () => new Response('{', { status: 200 })),
+    },
+    {
+      name: 'a network exception',
+      fetcher: vi.fn(async () => {
+        throw new Error('private network details');
+      }),
+    },
+  ])('leaves loading and shows failure after $name', async ({ fetcher }) => {
+    const client = new RentSightBackendClient({
+      apiOrigin: 'https://api.example.com',
+      getAccessToken: async () => 'token',
+      fetch: fetcher,
+    });
+    const session = new ExtractionSession(client, vi.fn());
+    session.start(page());
+    await tick();
+    await tick();
+    expect(session.getSnapshot()).toMatchObject({ status: 'failed' });
+    const html = renderToStaticMarkup(
+      <AiExtractionCard
+        controls={{
+          state: session.getSnapshot(),
+          retry: vi.fn(),
+          continueWithPreliminary: vi.fn(),
+        }}
+      />,
+    );
+    expect(html).toContain('AI review couldn’t finish');
+    expect(html).not.toContain('private network details');
+  });
+
+  it('turns a restored same-request failure into an explicit fresh capture', async () => {
+    let terminal: TerminalExtractionState | undefined;
+    const cache: ExtractionCache = {
+      get: async () => undefined,
+      put: async () => undefined,
+      claim: async () => true,
+      release: async () => undefined,
+      suppress: async () => undefined,
+      isSuppressed: async () => false,
+      getTerminal: async () => terminal,
+      putTerminal: async (_identity, state) => {
+        terminal = state;
+      },
+    };
+    const client = {
+      extractListing: vi
+        .fn()
+        .mockImplementationOnce(async (req: ExtractionRequest) => ({
+          schemaVersion: '1.1.0' as const,
+          status: 'failed' as const,
+          identity: req.identity,
+          error: {
+            code: 'UPSTREAM_TIMEOUT' as const,
+            message: '',
+            retryable: true,
+            retryMode: 'same_request' as const,
+            retryAfterSeconds: null,
+          },
+        }))
+        .mockImplementationOnce(async (req: ExtractionRequest) => ({
+          ...normal(),
+          identity: req.identity,
+        })),
+    };
+    const first = new ExtractionSession(client, vi.fn(), undefined, cache);
+    first.start(page());
+    await tick();
+    await tick();
+    expect(first.getSnapshot().status).toBe('failed');
+    first.dispose();
+
+    const fresh = {
+      ...page(),
+      aiCapture: { ...page().aiCapture!, captureRevision: 'fresh-capture' },
+    };
+    const recapture = vi.fn(async () => fresh);
+    const reopened = new ExtractionSession(client, vi.fn(), recapture, cache);
+    reopened.start(page());
+    await tick();
+    expect(reopened.getSnapshot()).toMatchObject({
+      status: 'failed',
+      retryMode: 'same_request',
+      retryAction: 'refresh',
+    });
+    const html = renderToStaticMarkup(
+      <AiExtractionCard
+        controls={{
+          state: reopened.getSnapshot(),
+          retry: () => reopened.retry(),
+          continueWithPreliminary: () => reopened.continueWithPreliminary(),
+        }}
+      />,
+    );
+    expect(html).toContain('Refresh listing and try again');
+    expect(client.extractListing).toHaveBeenCalledTimes(1);
+    const original = client.extractListing.mock.calls[0][0];
+    await reopened.retry();
+    await tick();
+    await tick();
+    expect(recapture).toHaveBeenCalledTimes(1);
+    const refreshed = client.extractListing.mock.calls[1][0];
+    expect(refreshed.identity.requestId).not.toBe(original.identity.requestId);
+    expect(refreshed.identity.captureRevision).toBe('fresh-capture');
+    expect(refreshed.identity.requestId).not.toBe(terminal?.requestId);
+  });
+
+  it('clears obsolete terminal failures after success', async () => {
+    const clearTerminal = vi.fn(async () => undefined);
+    const cache: ExtractionCache = {
+      get: async () => undefined,
+      put: async () => undefined,
+      claim: async () => true,
+      release: async () => undefined,
+      suppress: async () => undefined,
+      isSuppressed: async () => false,
+      clearTerminal,
+    };
+    const session = new ExtractionSession(
+      {
+        extractListing: async (req) => ({
+          ...normal(),
+          identity: req.identity,
+        }),
+      },
+      vi.fn(),
+      undefined,
+      cache,
+    );
+    session.start(page());
+    await tick();
+    expect(session.getSnapshot().status).toBe('succeeded');
+    expect(clearTerminal).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     'MODEL_EVIDENCE_INVALID',
     'UNAUTHENTICATED',
@@ -625,16 +988,41 @@ describe('failure regression coverage', () => {
         60,
       );
       expect(log.mock.calls[0][1]).toEqual({
-        requestId: req.identity.requestId,
-        captureRevision: req.identity.captureRevision,
         httpStatus: 409,
         errorCode: 'EXTRACTION_IN_PROGRESS',
         retryMode: 'same_request',
         elapsedMs: expect.any(Number),
+        requestBytes: expect.any(Number),
+        captureBytes: expect.any(Number),
+        preliminaryValuesBytes: expect.any(Number),
+        blockCount: req.capture.blocks.length,
+        captureTextCharacters: expect.any(Number),
+        captureTextBytes: expect.any(Number),
+        unavailableSectionCount: req.capture.unavailableSections.length,
+        preliminaryValueCount: req.preliminaryValues.length,
+        truncated: req.capture.truncated,
+        blockKinds: expect.objectContaining({
+          json_ld: expect.objectContaining({
+            blocks: expect.any(Number),
+            textBytes: expect.any(Number),
+          }),
+        }),
       });
       expect(JSON.stringify(log.mock.calls)).not.toContain('PRIVATE_TOKEN');
       expect(JSON.stringify(log.mock.calls)).not.toContain(
+        req.identity.requestId,
+      );
+      expect(JSON.stringify(log.mock.calls)).not.toContain(
+        req.identity.captureRevision,
+      );
+      expect(JSON.stringify(log.mock.calls)).not.toContain(
         req.capture.blocks[0].text,
+      );
+      expect(JSON.stringify(log.mock.calls)).not.toContain(
+        req.identity.listingUrl,
+      );
+      expect(JSON.stringify(log.mock.calls)).not.toContain(
+        JSON.stringify(req.preliminaryValues),
       );
     } finally {
       log.mockRestore();

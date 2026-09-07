@@ -31,6 +31,7 @@ export type AiState =
       requestId: string;
       message: string;
       retryMode: 'none' | 'same_request' | 'new_request';
+      retryAction: 'exact' | 'refresh' | 'none';
       retryAt: number;
       continued?: boolean;
     };
@@ -42,6 +43,12 @@ export class ExtractionSession {
   private generation = 0;
   private activationKey?: string;
   private startedAt = 0;
+  private activeCaptureKey?: string;
+  private retryContext?: {
+    listingUrl: string;
+    selectedUnitId: string | null;
+    selectedLeaseTermMonths: number | null;
+  };
   private cache: ExtractionCache | undefined;
   private cacheContext?: {
     identity: ListingCacheIdentity;
@@ -94,9 +101,19 @@ export class ExtractionSession {
   }
   invalidate() {
     this.activationKey = undefined;
+    this.activeCaptureKey = undefined;
     this.generation++;
     this.request = undefined;
+    this.retryContext = undefined;
     this.publish({ status: 'idle' });
+  }
+  dispose() {
+    this.activationKey = undefined;
+    this.activeCaptureKey = undefined;
+    this.generation++;
+    this.request = undefined;
+    this.retryContext = undefined;
+    this.listeners.clear();
   }
   captureFailed() {
     this.generation++;
@@ -105,6 +122,7 @@ export class ExtractionSession {
       status: 'failed',
       requestId: crypto.randomUUID(),
       retryMode: 'none',
+      retryAction: 'none',
       retryAt: 0,
       message:
         'The listing capture could not be prepared for AI review. Your preliminary values were kept. Refresh the listing to try again.',
@@ -118,6 +136,20 @@ export class ExtractionSession {
       this.invalidate();
       return;
     }
+    const captureKey = JSON.stringify([
+      page.url,
+      page.selectedUnitId,
+      page.aiCapture.captureRevision,
+      page.aiCapture.selectedLeaseTermMonths,
+    ]);
+    if (
+      !options.bypassCache &&
+      (this.state.status === 'preparing' ||
+        this.state.status === 'extracting') &&
+      this.activeCaptureKey === captureKey
+    )
+      return;
+    this.activeCaptureKey = captureKey;
     this.prepareCapture();
     const generation = ++this.generation;
     void this.prepare(page, generation, options.bypassCache === true);
@@ -139,8 +171,32 @@ export class ExtractionSession {
       selectedLeaseTermMonths: aiCapture.selectedLeaseTermMonths,
     });
     const fingerprint = relevantContentFingerprint(aiCapture);
+    this.retryContext = {
+      listingUrl: page.url,
+      selectedUnitId: page.selectedUnitId ?? null,
+      selectedLeaseTermMonths: aiCapture.selectedLeaseTermMonths,
+    };
     const previous = this.cache ? await this.cache.get(identity) : undefined;
+    const terminal = this.cache?.getTerminal
+      ? await this.cache.getTerminal(identity)
+      : undefined;
     if (generation !== this.generation) return;
+    if (
+      !bypassCache &&
+      terminal?.status === 'failed' &&
+      terminal.fingerprint === fingerprint
+    ) {
+      this.publish({
+        status: 'failed',
+        requestId: terminal.requestId,
+        message: terminal.message,
+        retryMode: terminal.retryMode,
+        retryAction: terminal.retryMode === 'none' ? 'none' : 'refresh',
+        retryAt: terminal.retryAt,
+        continued: terminal.continued,
+      });
+      return;
+    }
     const age = previous ? Date.now() - previous.completedAt : Infinity;
     if (
       !bypassCache &&
@@ -207,22 +263,25 @@ export class ExtractionSession {
   }
   async retry() {
     if (
-      !this.request ||
       this.state.status !== 'failed' ||
-      this.state.retryMode === 'none' ||
+      this.state.retryAction === 'none' ||
       Date.now() < this.state.retryAt
     )
       return;
-    if (Date.now() - this.startedAt >= 24 * 60 * 60 * 1000) {
+    if (
+      this.state.retryAction === 'exact' &&
+      Date.now() - this.startedAt >= 24 * 60 * 60 * 1000
+    ) {
       this.publish({
         ...this.state,
-        retryMode: 'none',
+        retryMode: 'new_request',
+        retryAction: 'refresh',
         message:
           'This request has expired. Refresh the listing to capture it again.',
       });
       return;
     }
-    if (this.state.retryMode === 'new_request') {
+    if (this.state.retryAction === 'refresh') {
       const generation = ++this.generation;
       const previous = this.state;
       this.publish({ status: 'extracting', requestId: previous.requestId });
@@ -232,14 +291,14 @@ export class ExtractionSession {
         if (generation !== this.generation) return;
         if (
           !page.aiCapture ||
-          page.url !== this.request?.identity.listingUrl ||
-          (page.selectedUnitId ?? null) !==
-            (this.request.identity.selectedUnit?.id ?? null) ||
+          !this.retryContext ||
+          page.url !== this.retryContext.listingUrl ||
+          (page.selectedUnitId ?? null) !== this.retryContext.selectedUnitId ||
           page.aiCapture.selectedLeaseTermMonths !==
-            this.request.identity.selectedLeaseTermMonths
+            this.retryContext.selectedLeaseTermMonths
         )
           throw new Error();
-        this.start(page);
+        this.start(page, { bypassCache: true });
       } catch {
         if (generation === this.generation)
           this.publish({
@@ -251,13 +310,29 @@ export class ExtractionSession {
       }
       return;
     }
+    if (this.state.retryAction !== 'exact' || !this.request) return;
     this.generation++;
     void this.run();
   }
   continueWithPreliminary() {
     if (this.state.status !== 'failed') return;
     this.generation++;
-    this.publish({ ...this.state, continued: true });
+    const state = { ...this.state, continued: true };
+    this.publish(state);
+    void this.persistTerminal(state);
+  }
+  private async persistTerminal(state: Extract<AiState, { status: 'failed' }>) {
+    if (!this.cacheContext || !this.cache?.putTerminal) return;
+    await this.cache.putTerminal(this.cacheContext.identity, {
+      status: 'failed',
+      requestId: state.requestId,
+      message: state.message,
+      retryMode: state.retryMode,
+      retryAt: state.retryAt,
+      continued: state.continued,
+      fingerprint: this.cacheContext.fingerprint,
+      completedAt: Date.now(),
+    });
   }
   private async run() {
     const request = this.request!;
@@ -283,10 +358,13 @@ export class ExtractionSession {
             completedAt: Date.now(),
             response: structuredClone(response),
           });
-        this.publish({
+        if (this.cacheContext)
+          await this.cache?.clearTerminal?.(this.cacheContext.identity);
+        const state = {
           status: 'succeeded',
           requestId: request.identity.requestId,
-        });
+        } as const;
+        this.publish(state);
         this.request = undefined; // Drop the full capture after accepted success.
       } else {
         if (response.error.code === 'UNUSABLE_CAPTURE' && this.cacheContext)
@@ -298,13 +376,21 @@ export class ExtractionSession {
         const staleSuffix = this.cacheContext?.previous
           ? ' The last successful listing data was kept and may be stale.'
           : '';
-        this.publish({
+        const state = {
           status: 'failed',
           requestId: request.identity.requestId,
           message: extractionErrorMessage(response.error.code) + staleSuffix,
           retryMode: response.error.retryMode,
+          retryAction:
+            response.error.retryMode === 'same_request'
+              ? 'exact'
+              : response.error.retryMode === 'new_request'
+                ? 'refresh'
+                : 'none',
           retryAt: Date.now() + (response.error.retryAfterSeconds ?? 0) * 1000,
-        });
+        } as const;
+        this.publish(state);
+        await this.persistTerminal(state);
       }
     } catch {
       if (generation !== this.generation) return;
@@ -312,15 +398,18 @@ export class ExtractionSession {
       const staleSuffix = this.cacheContext?.previous
         ? ' The last successful listing data was kept and may be stale.'
         : '';
-      this.publish({
+      const state = {
         status: 'failed',
         requestId: request.identity.requestId,
         message:
           'AI review could not finish. Your preliminary values were kept. Retry to check the original request.' +
           staleSuffix,
         retryMode: 'same_request',
+        retryAction: 'exact',
         retryAt: Date.now(),
-      });
+      } as const;
+      this.publish(state);
+      await this.persistTerminal(state);
     } finally {
       if (this.cacheContext)
         await this.cache?.release(

@@ -49,8 +49,10 @@ import {
   setUtilityIncluded,
   UTILITY_CATEGORIES,
   type CustomFee,
+  type PropertyNote,
   type RentalAnalysis,
 } from '../shared/analysis';
+import { AiMark } from './AiMark';
 import {
   DEFAULT_HOUSEHOLD_PROFILE,
   householdHasPets,
@@ -330,7 +332,7 @@ export function App() {
       aiSession.activate(aiPage, accountId);
     else if (accountStatus !== 'plus' || !aiPage) aiSession.invalidate();
   }, [aiSession, aiPage, accountStatus, accountId]);
-  useEffect(() => () => aiSession.invalidate(), [aiSession]);
+  useEffect(() => () => aiSession.dispose(), [aiSession]);
   const aiControls: AiControls = {
     state: aiState,
     retry: () => aiSession.retry(),
@@ -1803,6 +1805,30 @@ function ComparisonView({
                     </tr>
                   );
                 })}
+                <tr className="comparison-notes-row">
+                  <th scope="row">
+                    Other details
+                    <small>
+                      Features and details outside the cost calculation
+                    </small>
+                  </th>
+                  {items.map((item) => (
+                    <td key={item.id}>
+                      {item.notes.length ? (
+                        <ul>
+                          {item.notes.map((note) => (
+                            <li key={note.id}>
+                              {note.source === 'ai' && <AiMark />}
+                              <span>{note.text}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span className="comparison-no-notes">No notes</span>
+                      )}
+                    </td>
+                  ))}
+                </tr>
               </tbody>
             </table>
           </div>
@@ -1935,6 +1961,70 @@ function HouseholdProfileCard({
   );
 }
 
+function PropertyNotesEditor({
+  notes,
+  onAdd,
+  onRemove,
+}: {
+  notes: PropertyNote[];
+  onAdd: (text: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const submit = () => {
+    const text = draft.trim();
+    if (!text) return;
+    onAdd(text);
+    setDraft('');
+  };
+  return (
+    <ReviewDisclosure title="Other details">
+      <div className="property-notes-editor">
+        <p>
+          Keep features, restrictions, and listing details that don’t affect the
+          cost calculation.
+        </p>
+        {notes.length > 0 && (
+          <ul>
+            {notes.map((note) => (
+              <li key={note.id}>
+                {note.source === 'ai' && <AiMark />}
+                <span>{note.text}</span>
+                <button
+                  type="button"
+                  className="remove-note"
+                  onClick={() => onRemove(note.id)}
+                  aria-label={`Remove note: ${note.text}`}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="property-note-entry">
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                submit();
+              }
+            }}
+            placeholder="e.g. Wi-Fi included"
+            aria-label="New property detail"
+            maxLength={240}
+          />
+          <button type="button" onClick={submit} disabled={!draft.trim()}>
+            Add detail
+          </button>
+        </div>
+      </div>
+    </ReviewDisclosure>
+  );
+}
+
 export function AnalysisEditor({
   aiControls,
   analysis,
@@ -2036,6 +2126,20 @@ export function AnalysisEditor({
     group: 'identity' | 'recurring' | 'upfront' | 'concessions',
     key: string,
   ) => update((current) => resetField(current, group, key));
+
+  const addPropertyNote = (text: string) =>
+    update((current) => ({
+      ...current,
+      propertyNotes: [
+        ...(current.propertyNotes ?? []),
+        {
+          id: crypto.randomUUID(),
+          text,
+          source: 'user',
+        } satisfies PropertyNote,
+      ],
+      updatedAt: new Date().toISOString(),
+    }));
 
   return (
     <main>
@@ -2436,6 +2540,22 @@ export function AnalysisEditor({
             onReset={() => reset('concessions', 'oneTimeCredit')}
           />
         </ReviewDisclosure>
+      )}
+
+      {!confirmed && (
+        <PropertyNotesEditor
+          notes={analysis.propertyNotes ?? []}
+          onAdd={addPropertyNote}
+          onRemove={(id) =>
+            update((current) => ({
+              ...current,
+              propertyNotes: (current.propertyNotes ?? []).filter(
+                (note) => note.id !== id,
+              ),
+              updatedAt: new Date().toISOString(),
+            }))
+          }
+        />
       )}
 
       {!confirmed && (

@@ -31,9 +31,16 @@ export interface PaidLaundryDetails {
   loadsPerWeek: number;
 }
 
+export interface PropertyNote {
+  id: string;
+  text: string;
+  source: 'user' | 'ai';
+  sourceId?: string;
+}
+
 export interface RentalAnalysis {
   aiExtraction?: import('../ai/types').ExtractionSuccess;
-  aiReviewDecisions?: Record<string, 'entered' | 'excluded'>;
+  aiReviewDecisions?: Record<string, 'entered' | 'excluded' | 'noted'>;
   listing: RentalListing;
   baseline: RentalListing;
   utilityIncluded: Record<UtilityCategory, boolean>;
@@ -45,6 +52,7 @@ export interface RentalAnalysis {
   paidLaundry: PaidLaundryDetails;
   customRecurringFees: CustomFee[];
   customOneTimeFees: CustomFee[];
+  propertyNotes: PropertyNote[];
   userClearedFields: string[];
   updatedAt: string;
   extraction?: ListingExtraction;
@@ -124,6 +132,7 @@ export function createInitialAnalysis(
     paidLaundry: { washPrice: 2, dryPrice: 2, loadsPerWeek: 2 },
     customRecurringFees: [],
     customOneTimeFees: [],
+    propertyNotes: [],
     userClearedFields: [],
     updatedAt: new Date().toISOString(),
   };

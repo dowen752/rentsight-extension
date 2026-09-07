@@ -5,6 +5,8 @@ import { listingCacheKey } from './identity';
 export const EXTRACTION_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export const EXTRACTION_FAILURE_COOLDOWN_MS = 10 * 60 * 1000;
 export const EXTRACTION_IN_FLIGHT_TTL_MS = 2 * 60 * 1000;
+export const EXTRACTION_TERMINAL_TTL_MS = 30 * 60 * 1000;
+export const EXTRACTION_TERMINAL_MAX_ENTRIES = 20;
 
 export interface ExtractionCacheEntry {
   identity: ListingCacheIdentity;
@@ -17,6 +19,18 @@ interface CacheEnvelope {
   entries: Record<string, ExtractionCacheEntry>;
   inFlight: Record<string, { owner: string; expiresAt: number }>;
   failures: Record<string, { fingerprint: string; retryAt: number }>;
+  terminalStates?: Record<string, TerminalExtractionState>;
+}
+
+export interface TerminalExtractionState {
+  status: 'failed';
+  requestId: string;
+  message: string;
+  retryMode: 'none' | 'same_request' | 'new_request';
+  retryAt: number;
+  continued?: boolean;
+  fingerprint: string;
+  completedAt: number;
 }
 
 const EMPTY: CacheEnvelope = { entries: {}, inFlight: {}, failures: {} };
@@ -43,6 +57,14 @@ export interface ExtractionCache {
     fingerprint: string,
     now: number,
   ): Promise<boolean>;
+  getTerminal?(
+    identity: ListingCacheIdentity,
+  ): Promise<TerminalExtractionState | undefined>;
+  putTerminal?(
+    identity: ListingCacheIdentity,
+    state: TerminalExtractionState,
+  ): Promise<void>;
+  clearTerminal?(identity: ListingCacheIdentity): Promise<void>;
 }
 
 export class ChromeExtractionCache implements ExtractionCache {
@@ -100,6 +122,42 @@ export class ChromeExtractionCache implements ExtractionCache {
   ) {
     const failure = (await this.read()).failures[listingCacheKey(identity)];
     return failure?.fingerprint === fingerprint && failure.retryAt > now;
+  }
+  async getTerminal(identity: ListingCacheIdentity) {
+    const value = await this.read();
+    const key = listingCacheKey(identity);
+    const terminal = value.terminalStates?.[key];
+    if (
+      terminal &&
+      Date.now() - terminal.completedAt >= EXTRACTION_TERMINAL_TTL_MS
+    ) {
+      delete value.terminalStates![key];
+      await this.write(value);
+      return undefined;
+    }
+    return terminal;
+  }
+  async putTerminal(
+    identity: ListingCacheIdentity,
+    state: TerminalExtractionState,
+  ) {
+    const value = await this.read();
+    value.terminalStates ??= {};
+    for (const [key, terminal] of Object.entries(value.terminalStates))
+      if (Date.now() - terminal.completedAt >= EXTRACTION_TERMINAL_TTL_MS)
+        delete value.terminalStates[key];
+    value.terminalStates[listingCacheKey(identity)] = state;
+    const newest = Object.entries(value.terminalStates)
+      .sort(([, left], [, right]) => right.completedAt - left.completedAt)
+      .slice(0, EXTRACTION_TERMINAL_MAX_ENTRIES);
+    value.terminalStates = Object.fromEntries(newest);
+    await this.write(value);
+  }
+  async clearTerminal(identity: ListingCacheIdentity) {
+    const value = await this.read();
+    if (value.terminalStates)
+      delete value.terminalStates[listingCacheKey(identity)];
+    await this.write(value);
   }
 }
 

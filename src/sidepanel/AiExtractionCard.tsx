@@ -3,6 +3,7 @@ import type { AiState } from '../ai/session';
 import type { RentalAnalysis } from '../shared/analysis';
 import { adaptExtraction } from '../ai/adapter';
 import { formatReviewIssue } from './reviewIssueLabels';
+import { AiMark } from './AiMark';
 
 export interface AiControls {
   state: AiState;
@@ -58,27 +59,13 @@ export function AiExtractionCard({ controls }: { controls: AiControls }) {
     >
       <div className="ai-card-heading">
         <span className="ai-orbit" aria-hidden="true">
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.65"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            focusable="false"
-          >
-            <path d="M8 3H4a1 1 0 0 0-1 1v4M16 3h4a1 1 0 0 1 1 1v4M21 16v4a1 1 0 0 1-1 1h-4M8 21H4a1 1 0 0 1-1-1v-4M8 10h8M8 14h5" />
-          </svg>
+          <AiMark />
         </span>
         <div>
           <span className="ai-eyebrow">RENTSIGHT AI</span>
           <h2>
             {running
-              ? state.status === 'preparing'
-                ? 'Preparing the listing review'
-                : 'Reviewing the listing details'
+              ? 'AI review in progress'
               : failed
                 ? 'AI review couldn’t finish'
                 : state.status === 'failed' && state.continued
@@ -118,9 +105,13 @@ export function AiExtractionCard({ controls }: { controls: AiControls }) {
       )}
       {failed && (
         <div className="ai-card-actions">
-          {state.retryMode !== 'none' && (
+          {state.retryAction !== 'none' && (
             <button type="button" disabled={wait > 0} onClick={controls.retry}>
-              {wait ? `Retry in ${wait}s` : 'Retry AI extraction'}
+              {wait
+                ? `Retry in ${wait}s`
+                : state.retryAction === 'refresh'
+                  ? 'Refresh listing and try again'
+                  : 'Retry AI extraction'}
             </button>
           )}
           <button type="button" onClick={controls.continueWithPreliminary}>
@@ -161,9 +152,27 @@ export function AiSourceReview({
                     update((current) => {
                       const next = structuredClone(current);
                       next.aiReviewDecisions ??= {};
-                      if (value === 'entered' || value === 'excluded')
+                      next.propertyNotes = (next.propertyNotes ?? []).filter(
+                        (note) =>
+                          !(
+                            note.source === 'ai' && note.sourceId === charge.id
+                          ),
+                      );
+                      if (
+                        value === 'entered' ||
+                        value === 'excluded' ||
+                        value === 'noted'
+                      )
                         next.aiReviewDecisions[charge.id] = value;
                       else delete next.aiReviewDecisions[charge.id];
+                      if (value === 'noted') {
+                        next.propertyNotes.push({
+                          id: crypto.randomUUID(),
+                          text: charge.label,
+                          source: 'ai',
+                          sourceId: charge.id,
+                        });
+                      }
                       next.updatedAt = new Date().toISOString();
                       return next;
                     });
@@ -172,6 +181,7 @@ export function AiSourceReview({
                   <option value="">Select an option</option>
                   <option value="entered">Amount added to inputs</option>
                   <option value="excluded">Doesn’t apply</option>
+                  <option value="noted">Save as a property note</option>
                 </select>
               </label>
             </div>

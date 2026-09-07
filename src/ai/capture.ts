@@ -1,6 +1,46 @@
 import type { ListingExtraction } from '../extractors';
 import type { Capture, CaptureContext } from './types';
 
+const JSON_LD_NOISE_KEYS = new Set([
+  'aggregaterating',
+  'breadcrumb',
+  'breadcrumbs',
+  'image',
+  'images',
+  'logo',
+  'photo',
+  'photos',
+  'review',
+  'reviews',
+  'sameas',
+  'thumbnail',
+  'thumbnailurl',
+  'video',
+  'videos',
+]);
+
+function pruneJsonLd(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(pruneJsonLd);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, child]) =>
+      JSON_LD_NOISE_KEYS.has(key.toLowerCase())
+        ? []
+        : [[key, pruneJsonLd(child)]],
+    ),
+  );
+}
+
+const normalizedBlockText = (value: string) =>
+  value
+    .normalize('NFKC')
+    .replace(
+      /[\u058A\u05BE\u1400\u1806\u2010-\u2015\u2E17\u2E1A\u2E3A-\u2E3B\u2E40\u301C\u3030\u30A0\uFE31-\uFE32\uFE58\uFE63\uFF0D]/g,
+      '-',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+
 // Content is frozen before transport. No user overrides or arbitrary form inputs.
 export function captureListing(
   document: Document,
@@ -12,8 +52,6 @@ export function captureListing(
     unavailableSections: [],
     blocks: [],
   };
-  let bytes = 0;
-  let characters = 0;
   const encoder = new TextEncoder();
   const add = (
     kind: Capture['blocks'][number]['kind'],
@@ -27,18 +65,7 @@ export function captureListing(
       sectionPath: [...sectionPath],
       text,
     };
-    const size = encoder.encode(JSON.stringify(block)).length;
-    if (
-      capture.blocks.length >= 190 ||
-      characters + Array.from(text).length > 180000 ||
-      bytes + size > 450000
-    ) {
-      capture.truncated = true;
-      return;
-    }
     capture.blocks.push(block);
-    bytes += size;
-    characters += Array.from(text).length;
   };
   const coalesceTextBlocks = () => {
     const grouped: Capture['blocks'] = [];
@@ -59,6 +86,40 @@ export function captureListing(
       id: `block-${index + 1}`,
     }));
   };
+  const deduplicateBlocks = () => {
+    const seen = new Set<string>();
+    capture.blocks = capture.blocks.filter((block) => {
+      const key = JSON.stringify([
+        block.kind,
+        block.sectionPath.map(normalizedBlockText),
+        normalizedBlockText(block.text),
+      ]);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  const enforceCaptureLimits = () => {
+    const retained: Capture['blocks'] = [];
+    let bytes = 0;
+    let characters = 0;
+    for (const block of capture.blocks) {
+      const size = encoder.encode(JSON.stringify(block)).length;
+      const textCharacters = Array.from(block.text).length;
+      if (
+        retained.length >= 190 ||
+        characters + textCharacters > 180000 ||
+        bytes + size > 450000
+      ) {
+        capture.truncated = true;
+        continue;
+      }
+      retained.push(block);
+      bytes += size;
+      characters += textCharacters;
+    }
+    capture.blocks = retained;
+  };
   const selectedLeaseTermMonths = readSelectedLeaseTermMonths(document);
   for (const section of document.querySelectorAll('[aria-expanded="false"]')) {
     const label = section.textContent?.trim() ?? '';
@@ -72,9 +133,11 @@ export function captureListing(
     'script[type="application/ld+json"]',
   )) {
     try {
-      add('json_ld', JSON.stringify(JSON.parse(script.textContent ?? '')), [
-        'Structured listing data',
-      ]);
+      add(
+        'json_ld',
+        JSON.stringify(pruneJsonLd(JSON.parse(script.textContent ?? ''))),
+        ['Structured listing data'],
+      );
     } catch {
       capture.unavailableSections.push('Unreadable JSON-LD');
     }
@@ -84,7 +147,7 @@ export function captureListing(
   ).cloneNode(true) as HTMLElement;
   root
     .querySelectorAll(
-      'script,style,noscript,template,nav,form,input,textarea,select,button,iframe,[style*="display:none"],[style*="display: none"],[hidden],[aria-hidden="true"],[contenteditable], [role="navigation"], [class*="recommend" i], [class*="similar-list" i], [class*="advertisement" i]',
+      'script,style,noscript,template,nav,header,footer,aside,form,input,textarea,select,button,iframe,svg,canvas,[style*="display:none"],[style*="display: none"],[hidden],[aria-hidden="true"],[contenteditable],[role="navigation"],[role="banner"],[role="contentinfo"],[role="complementary"],[role="search"],[class*="recommend" i],[class*="similar-list" i],[class*="advertisement" i],[class*="cookie" i],[id*="cookie" i],[class*="newsletter" i],[class*="social-share" i],[class*="share-widget" i],[class*="chat-widget" i],[class*="chatbot" i],[class*="survey-banner" i],[class*="app-banner" i]',
     )
     .forEach((node) => node.remove());
   const headings: string[] = [];
@@ -135,6 +198,8 @@ export function captureListing(
   // Dynamic, div-heavy sites often render one fact across several adjacent leaf
   // nodes. Keep their exact text while giving the model a coherent evidence block.
   coalesceTextBlocks();
+  deduplicateBlocks();
+  enforceCaptureLimits();
   for (const section of ['pricing', 'fees', 'utilities', 'lease']) {
     const pattern = {
       pricing: /rent|price|pricing/i,

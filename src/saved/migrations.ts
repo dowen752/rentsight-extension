@@ -129,6 +129,16 @@ function isCustomFee(value: unknown): boolean {
   );
 }
 
+function isPropertyNote(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    typeof value.id === 'string' &&
+    typeof value.text === 'string' &&
+    (value.source === 'user' || value.source === 'ai') &&
+    (value.sourceId === undefined || typeof value.sourceId === 'string')
+  );
+}
+
 export function isRentalAnalysis(value: unknown): value is RentalAnalysis {
   if (!isObject(value)) return false;
   return (
@@ -139,7 +149,10 @@ export function isRentalAnalysis(value: unknown): value is RentalAnalysis {
     (value.aiReviewDecisions === undefined ||
       (isObject(value.aiReviewDecisions) &&
         Object.values(value.aiReviewDecisions).every(
-          (decision) => decision === 'entered' || decision === 'excluded',
+          (decision) =>
+            decision === 'entered' ||
+            decision === 'excluded' ||
+            decision === 'noted',
         ))) &&
     isListing(value.listing) &&
     isListing(value.baseline) &&
@@ -147,7 +160,10 @@ export function isRentalAnalysis(value: unknown): value is RentalAnalysis {
     Array.isArray(value.customRecurringFees) &&
     value.customRecurringFees.every(isCustomFee) &&
     Array.isArray(value.customOneTimeFees) &&
-    value.customOneTimeFees.every(isCustomFee)
+    value.customOneTimeFees.every(isCustomFee) &&
+    (value.propertyNotes === undefined ||
+      (Array.isArray(value.propertyNotes) &&
+        value.propertyNotes.every(isPropertyNote)))
   );
 }
 
@@ -177,6 +193,9 @@ function normalizeAnalysis(
       ? analysis.userClearedFields.filter(
           (path): path is string => typeof path === 'string',
         )
+      : [],
+    propertyNotes: Array.isArray(analysis.propertyNotes)
+      ? analysis.propertyNotes.filter(isPropertyNote)
       : [],
   };
   for (const listing of [normalized.listing, normalized.baseline]) {

@@ -99,12 +99,22 @@ describe('comparison and completeness', () => {
   });
 
   it('calculates comparable totals and cost differences', () => {
-    const { record } = saveListing([], analysisFor('https://example.com/1'));
+    const analysis = analysisFor('https://example.com/1');
+    analysis.propertyNotes = [
+      {
+        id: 'note-1',
+        text: 'Wi-Fi included',
+        source: 'ai',
+        sourceId: 'charge-1',
+      },
+    ];
+    const { record } = saveListing([], analysis);
     const result = createComparison(record);
     expect(result.url).toBe('https://example.com/1');
     expect(result.trueMonthlyCost).toBeGreaterThan(2_000);
     expect(result.monthlyDifference).toBe(result.trueMonthlyCost - 2_000);
     expect(result.costPerSquareFoot).toBe(result.trueMonthlyCost / 1_000);
+    expect(result.notes).toEqual(analysis.propertyNotes);
   });
 
   it('labels a weighted data-completeness score', () => {
@@ -193,6 +203,7 @@ describe('listing transfer and migration', () => {
     });
     expect(migrated.schemaVersion).toBe(1);
     expect(migrated.analysis.utilityIncludedSource.electricity).toBe('default');
+    expect(migrated.analysis.propertyNotes).toEqual([]);
   });
 
   it('merges imported duplicate URLs without duplicates', () => {

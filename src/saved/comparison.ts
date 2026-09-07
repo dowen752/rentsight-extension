@@ -73,6 +73,7 @@ export interface ComparisonSnapshot {
   laundry?: number;
   petExpenses: number;
   completeness: CompletenessScore;
+  notes: SavedListingRecord['analysis']['propertyNotes'];
 }
 
 export function comparisonBest(
@@ -126,5 +127,6 @@ export function createComparison(
       (listing.recurring.petRent?.value ?? 0) +
       (listing.upfront.petDeposit?.value ?? 0),
     completeness: calculateCompleteness(record),
+    notes: record.analysis.propertyNotes ?? [],
   };
 }
