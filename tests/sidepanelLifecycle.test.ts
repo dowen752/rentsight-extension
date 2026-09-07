@@ -3,8 +3,10 @@ import { emptyExtraction } from '../src/extractors/types';
 import { createInitialAnalysis } from '../src/shared/analysis';
 import { DEFAULT_HOUSEHOLD_PROFILE } from '../src/shared/household';
 import {
+  isSameListingPage,
   preserveReadyViewAfterInspectionFailure,
   refreshReadyView,
+  shouldPreserveActiveExtraction,
   type ReadyViewState,
 } from '../src/sidepanel/lifecycle';
 
@@ -22,6 +24,47 @@ function readyView(): ReadyViewState {
 }
 
 describe('side-panel inspection lifecycle', () => {
+  it('preserves an active extraction when the page republishes the same listing', () => {
+    const current = {
+      url: `${listingUrl}#details`,
+      title: 'Listing',
+      appearsToBeRentalListing: true,
+      selectedUnitId: 'unit-1',
+    };
+    const update = { ...current, url: listingUrl, title: 'Updated listing' };
+
+    expect(isSameListingPage(current, update)).toBe(true);
+    expect(
+      shouldPreserveActiveExtraction(current, update, {
+        status: 'extracting',
+        requestId: 'request-1',
+      }),
+    ).toBe(true);
+    expect(
+      shouldPreserveActiveExtraction(current, update, {
+        status: 'succeeded',
+        requestId: 'request-1',
+      }),
+    ).toBe(false);
+  });
+
+  it('does not preserve extraction when the selected unit changes', () => {
+    const current = {
+      url: listingUrl,
+      title: 'Listing',
+      appearsToBeRentalListing: true,
+      selectedUnitId: 'unit-1',
+    };
+    const update = { ...current, selectedUnitId: 'unit-2' };
+
+    expect(isSameListingPage(current, update)).toBe(false);
+    expect(
+      shouldPreserveActiveExtraction(current, update, {
+        status: 'preparing',
+      }),
+    ).toBe(false);
+  });
+
   it('keeps a successful extraction when another tab becomes active', () => {
     const current = readyView();
     expect(

@@ -92,8 +92,10 @@ import {
 import { analysisForNavigation } from './navigationState';
 import { MembershipBadge } from './MembershipBadge';
 import {
+  isSameListingPage,
   preserveReadyViewAfterInspectionFailure,
   refreshReadyView,
+  shouldPreserveActiveExtraction,
   type ViewState,
 } from './lifecycle';
 
@@ -243,6 +245,10 @@ function ReviewDisclosure({
 
 export function App() {
   const [view, setView] = useState<ViewState>({ status: 'loading' });
+  const viewRef = useRef(view);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
   const clearingDataRef = useRef(false);
   const account = useSyncExternalStore(
     accountSession.subscribe,
@@ -457,12 +463,25 @@ export function App() {
         .query({ active: true, currentWindow: true })
         .then(([tab]) => {
           if (!active || !sender.tab?.id || sender.tab.id !== tab?.id) return;
-          aiSession.invalidate();
+          const current = viewRef.current;
+          const currentPage =
+            current.status === 'ready' ? current.aiPage : undefined;
+          const sameListing = isSameListingPage(currentPage, message.payload);
+          if (
+            shouldPreserveActiveExtraction(
+              currentPage,
+              message.payload,
+              aiSession.getSnapshot(),
+            )
+          )
+            return;
           if (message.payload.requiresUnitSelection) {
+            aiSession.invalidate();
             setView({ status: 'unit-selection-required' });
             return;
           }
           if (!message.payload.appearsToBeRentalListing) {
+            aiSession.invalidate();
             setView({
               status: 'unsupported',
               url: message.payload.url,
@@ -470,10 +489,12 @@ export function App() {
             });
             return;
           }
-          if (message.payload.selectedUnitId) {
+          if (message.payload.selectedUnitId && !sameListing) {
+            aiSession.invalidate();
             window.location.reload();
             return;
           }
+          if (!sameListing) aiSession.invalidate();
           const revision = ++navigationRevision;
           void Promise.all([
             getRentalAnalysis(message.payload.url),
