@@ -5,7 +5,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { captureListing } from '../src/ai/capture';
 import { acceptResponse, assertRequest } from '../src/ai/validation';
-import { applyAiExtraction, adaptExtraction } from '../src/ai/adapter';
+import {
+  applyAiExtraction,
+  adaptExtraction,
+  retainPreliminaryAfterAiFailure,
+} from '../src/ai/adapter';
 import { ExtractionSession } from '../src/ai/session';
 import {
   ChromeExtractionCache,
@@ -16,8 +20,15 @@ import {
 } from '../src/ai/cache';
 import { listingCacheIdentity, listingCacheKey } from '../src/ai/identity';
 import { RentSightBackendClient } from '../src/backend/client';
-import { AiExtractionCard } from '../src/sidepanel/AiExtractionCard';
-import { formatReviewIssue } from '../src/sidepanel/reviewIssueLabels';
+import {
+  AiExtractionCard,
+  AiSourceReview,
+} from '../src/sidepanel/AiExtractionCard';
+import {
+  formatReviewIssue,
+  shouldShowReviewIssue,
+  shouldSuggestPropertyNote,
+} from '../src/sidepanel/reviewIssueLabels';
 import { AnalysisEditor } from '../src/sidepanel/App';
 import {
   createInitialAnalysis,
@@ -123,6 +134,24 @@ describe('capture and adapter', () => {
     expect(text).not.toContain('Private account');
     expect(text).not.toContain('Unrelated');
   });
+  it('captures Zillow calculator rows atomically with applicability context', () => {
+    const document = new JSDOM(`
+      <main><div id="monthly-section"><div class="optional-group">
+        <div class="pet-rent-fee fee-row">
+          <span>Pet Rent ($30 per pet)</span><button>Help</button><span>$0</span>
+        </div>
+      </div></div></main>
+    `).window.document;
+    const capture = captureListing(document, emptyExtraction('Zillow', '1'));
+    const row = capture.capture.blocks.find((block) =>
+      block.text.includes('Pet Rent'),
+    );
+    expect(row).toMatchObject({
+      text: 'Pet Rent ($30 per pet) $0',
+      sectionPath: ['Cost calculator', 'Monthly costs', 'Optional'],
+    });
+    expect(row?.text).not.toContain('Help');
+  });
   it('prunes noisy JSON-LD while preserving extraction fields', () => {
     const document = new JSDOM(
       `<script type="application/ld+json">${JSON.stringify({
@@ -160,6 +189,32 @@ describe('capture and adapter', () => {
       'Unit A',
       'Unit B',
     ]);
+  });
+  it('captures a portaled unit table without contact-form dates', () => {
+    const document = new JSDOM(`
+      <main><p>Property details</p></main>
+      <div role="dialog" aria-modal="true">
+        <h3>2BR/1BA</h3>
+        <div data-testid="modal-body">
+          <table><tr><th>Price</th><th>Sqft</th></tr><tr><td>$845</td><td>660 sqft</td></tr></table>
+        </div>
+        <form><span>Date: 10/01/26</span><input value="10/01/2026"></form>
+      </div>
+    `).window.document;
+
+    const blocks = captureListing(document, emptyExtraction('Test', '1'))
+      .capture.blocks;
+    expect(blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: '2BR/1BA' }),
+        expect.objectContaining({
+          text: '| Price | Sqft |\n| $845 | 660 sqft |',
+        }),
+      ]),
+    );
+    expect(blocks.map((block) => block.text).join(' ')).not.toContain(
+      '10/01/26',
+    );
   });
   it('deduplicates whitespace and dash variants while preserving the first text and ID', () => {
     const document = new JSDOM(
@@ -224,6 +279,30 @@ describe('capture and adapter', () => {
     expect(text).not.toContain('Chat with us');
     expect(text).not.toContain('Related homes');
   });
+  it('preserves semantic listing facts inside buttons without capturing CTAs or duplicates', () => {
+    const document = new JSDOM(`
+      <main>
+        <button>
+          <div data-testid="bed-bath-sqft-facts">
+            <span>4</span><span>beds</span><span>3</span><span>baths</span><span>2,986</span><span>sqft</span>
+          </div>
+        </button>
+        <div aria-label="Bed bath sqft facts">
+          <span>4</span><span>beds</span><span>3</span><span>baths</span><span>2,986</span><span>sqft</span>
+        </div>
+        <button>Apply now</button>
+      </main>
+    `).window.document;
+
+    const blocks = captureListing(document, emptyExtraction('Test', '1'))
+      .capture.blocks;
+    expect(
+      blocks.filter((block) => block.text === '4 beds 3 baths 2,986 sqft'),
+    ).toHaveLength(1);
+    expect(blocks.map((block) => block.text).join('\n')).not.toContain(
+      'Apply now',
+    );
+  });
   it('marks oversized captures as truncated and remains below request limits', () => {
     const document = new JSDOM(
       `<main>${'<p>🏠'.repeat(210)}${'x'.repeat(210000)}</p></main>`,
@@ -236,7 +315,7 @@ describe('capture and adapter', () => {
       preliminaryValues: context.preliminaryValues,
     });
   });
-  it('replaces all preliminary facts while preserving latest overrides and deletions', () => {
+  it('enriches preliminary facts while preserving unknowns, overrides, and deletions', () => {
     const local = emptyExtraction('Local', '1');
     local.listing.recurring.advertisedRent = {
       value: 2200,
@@ -259,7 +338,10 @@ describe('capture and adapter', () => {
       source: 'user',
       confidence: 1,
     });
-    expect(next.listing.upfront.applicationFee).toBeUndefined();
+    expect(next.listing.upfront.applicationFee).toMatchObject({
+      value: 99,
+      source: 'location_estimate',
+    });
     expect(next.baseline.upfront.securityDeposit?.value).toBe(1000);
     expect(next.listing.upfront.securityDeposit).toBeUndefined();
     expect(next.utilityIncluded.water).toBe(false);
@@ -292,6 +374,51 @@ describe('capture and adapter', () => {
     });
     expect(next.listing.identity.state?.value).toBe('CA');
     expect(next.listing.identity.zipCode?.value).toBe('90000');
+  });
+  it('replaces known rent while preserving an AI-unknown local bathroom', () => {
+    const local = emptyExtraction('Local', '1');
+    local.listing.recurring.advertisedRent = {
+      value: 2200,
+      source: 'listing',
+      confidence: 0.7,
+    };
+    local.listing.identity.bathrooms = {
+      value: 1,
+      source: 'listing',
+      confidence: 0.7,
+    };
+    const response = normal();
+    response.result.property.bathrooms = {
+      status: 'unknown',
+      value: null,
+      candidates: [],
+      scope: 'unknown',
+      evidenceIds: [],
+    };
+    const current = applyExtraction(createInitialAnalysis(page().url), local);
+    const next = applyAiExtraction(current, response);
+    expect(next.listing.recurring.advertisedRent).toMatchObject({
+      value: 2400,
+      source: 'listing',
+    });
+    expect(next.listing.identity.bathrooms).toMatchObject({
+      value: 1,
+      source: 'location_estimate',
+    });
+  });
+  it('keeps failed-extraction preliminary values as local estimates', () => {
+    const local = emptyExtraction('Local', '1');
+    local.listing.identity.bathrooms = {
+      value: 1,
+      source: 'listing',
+      confidence: 0.7,
+    };
+    const current = applyExtraction(createInitialAnalysis(page().url), local);
+    const next = retainPreliminaryAfterAiFailure(current);
+    expect(next.listing.identity.bathrooms).toMatchObject({
+      value: 1,
+      source: 'location_estimate',
+    });
   });
   it('emits preliminary address hints at component paths', () => {
     const extraction = emptyExtraction('Test', '1');
@@ -365,6 +492,77 @@ describe('capture and adapter', () => {
     expect(adaptExtraction(response).manualCharges[0].id).toBe(
       'fee:security-deposit',
     );
+  });
+  it('maps per-pet fees and per-applicant charges into distinct inputs', () => {
+    const response = normal();
+    const template = response.result.property.fees.value![0];
+    response.result.property.fees.value = [
+      {
+        ...structuredClone(template),
+        id: 'application',
+        label: 'Application fee',
+        category: 'application',
+        amount: {
+          ...structuredClone(template.amount),
+          value: {
+            ...template.amount.value!,
+            minMinor: 5_500,
+            maxMinor: 5_500,
+            basis: 'per_person',
+          },
+        },
+        refundable: { ...structuredClone(template.refundable), value: false },
+      },
+      {
+        ...structuredClone(template),
+        id: 'pet-rent',
+        label: 'Pet rent',
+        category: 'pet_rent',
+        amount: {
+          ...structuredClone(template.amount),
+          value: {
+            ...template.amount.value!,
+            minMinor: 3_000,
+            maxMinor: 3_000,
+            frequency: 'monthly',
+            basis: 'per_pet',
+          },
+        },
+        refundable: { ...structuredClone(template.refundable), value: false },
+        applicability: {
+          ...structuredClone(template.applicability),
+          kind: 'optional',
+          conditions: ['Applies when the household has a qualifying pet.'],
+        },
+      },
+      {
+        ...structuredClone(template),
+        id: 'pet-fee',
+        label: 'Pet fee',
+        category: 'pet_fee',
+        amount: {
+          ...structuredClone(template.amount),
+          value: {
+            ...template.amount.value!,
+            minMinor: 30_000,
+            maxMinor: 30_000,
+            basis: 'per_pet',
+          },
+        },
+        refundable: { ...structuredClone(template.refundable), value: false },
+        applicability: {
+          ...structuredClone(template.applicability),
+          kind: 'conditional',
+          conditions: ['Applies when the household has a qualifying pet.'],
+        },
+      },
+    ];
+
+    const adapted = adaptExtraction(response).extraction.listing;
+    expect(adapted.upfront.applicationFee?.value).toBe(55);
+    expect(adapted.recurring.petRent?.value).toBe(30);
+    expect(adapted.upfront.petFee?.value).toBe(300);
+    expect(adaptExtraction(response).manualCharges).toHaveLength(0);
   });
   it('keeps unknowns and ranges out of fixed amounts and defers conditional promotions', () => {
     expect(
@@ -533,6 +731,51 @@ describe('transport and session', () => {
 });
 
 describe('AI review UI', () => {
+  it('keeps internal unknowns out of the customer review list', () => {
+    const response = normal();
+    const issue = response.result.reviewIssues[0];
+    expect(
+      shouldShowReviewIssue({
+        ...issue,
+        code: 'UNKNOWN_VALUE',
+        fieldPaths: ['/property/country', '/property/unitLabel'],
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowReviewIssue({
+        ...issue,
+        code: 'UNIT_SCOPE_UNCERTAIN',
+        fieldPaths: ['/property/baseRent'],
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowReviewIssue({
+        ...issue,
+        code: 'RENT_RANGE',
+        fieldPaths: ['/property/baseRent'],
+      }),
+    ).toBe(true);
+  });
+
+  it('suggests qualified charges and promotions, not restated input values', () => {
+    const response = fixture(
+      'conditional-promotion.response',
+    ) as ExtractionSuccess;
+    expect(shouldSuggestPropertyNote(response.result.notes[0])).toBe(false);
+    expect(shouldSuggestPropertyNote(response.result.notes[1])).toBe(true);
+    const analysis = applyAiExtraction(
+      createInitialAnalysis(page().url),
+      response,
+    );
+    const html = renderToStaticMarkup(
+      <AiSourceReview analysis={analysis} update={vi.fn()} />,
+    );
+    expect(html).toContain('Suggested property details');
+    expect(html).toContain('Keep note');
+    expect(html).toContain('Dismiss');
+    expect(html).toContain('advertised $2,200 effective rent');
+  });
+
   it.each([
     {
       name: 'a single field path',
@@ -628,7 +871,7 @@ describe('AI review UI', () => {
         }}
       />,
     );
-    expect(html).toContain('Continue with preliminary values');
+    expect(html).toContain('Review preliminary details');
     expect(html).toContain('Retry AI extraction');
   });
   it('always renders terminal completion feedback after success', () => {
@@ -756,7 +999,7 @@ describe('failure regression coverage', () => {
         }}
       />,
     );
-    expect(html).toContain('AI review couldn’t finish');
+    expect(html).toContain('Your listing details are ready');
     expect(html).not.toContain('private network details');
   });
 
@@ -823,7 +1066,7 @@ describe('failure regression coverage', () => {
         }}
       />,
     );
-    expect(html).toContain('Refresh listing and try again');
+    expect(html).toContain('Load listing and try again');
     expect(client.extractListing).toHaveBeenCalledTimes(1);
     const original = client.extractListing.mock.calls[0][0];
     await reopened.retry();
@@ -911,7 +1154,7 @@ describe('failure regression coverage', () => {
           controls={{ state, retry: vi.fn(), continueWithPreliminary: vi.fn() }}
         />,
       );
-      expect(html).toContain('AI review couldn’t finish');
+      expect(html).toContain('Your listing details are ready');
       expect(html).not.toContain('sensitive provider');
       if (code === 'MODEL_EVIDENCE_INVALID')
         expect(html).toContain('supporting details could not be verified');
@@ -1051,6 +1294,29 @@ describe('failure regression coverage', () => {
     await tick();
     expect(apply).not.toHaveBeenCalled();
     expect(session.getSnapshot().status).toBe('idle');
+  });
+
+  it('includes selected floor-plan context in the request', async () => {
+    let sent!: ExtractionRequest;
+    const session = new ExtractionSession(
+      {
+        extractListing: vi.fn(async (request: ExtractionRequest) => {
+          sent = request;
+          return { ...normal(), identity: request.identity };
+        }),
+      },
+      vi.fn(),
+    );
+    session.start({
+      ...page(),
+      selectedUnitId: '2BR/1BA',
+      selectedUnit: { id: null, label: '2BR/1BA' },
+    });
+    await tick();
+    expect(sent.identity.selectedUnit).toEqual({
+      id: null,
+      label: '2BR/1BA',
+    });
   });
 });
 

@@ -163,6 +163,7 @@ export interface Fee {
     | 'security_deposit'
     | 'holding_deposit'
     | 'pet_deposit'
+    | 'pet_fee'
     | 'pet_rent'
     | 'parking'
     | 'amenity'

@@ -2,6 +2,7 @@ import type { RentalAnalysisMap } from '../shared/analysis';
 import type { SavedListingRecord } from '../saved';
 import type { LocationEstimate } from '../location';
 import type { HouseholdProfile } from '../shared/household';
+import type { StoredSearchProfile } from '../search/types';
 
 export interface StorageSchema {
   lastInspectedUrl: string;
@@ -13,6 +14,7 @@ export interface StorageSchema {
   internetMonthlyCost: number;
   householdProfile: HouseholdProfile;
   onboardingCompleted: boolean;
+  searchProfile: StoredSearchProfile;
 }
 
 type StorageKey = keyof StorageSchema;

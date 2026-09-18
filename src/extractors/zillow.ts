@@ -3,7 +3,7 @@ import {
   classifyLaundry,
   classifyNoPetsPolicy,
   listingValue,
-  parseMoney,
+  parseLabeledMoney,
   parseNumberNear,
   parseRentEvidence,
   parseUsAddress,
@@ -13,6 +13,23 @@ import { emptyExtraction, type ListingExtractor } from './types';
 interface SelectedUnit {
   text: string;
   name?: string;
+}
+
+interface ZillowCalculatorCharge {
+  amount: number;
+  rawText: string;
+}
+
+function calculatorCharge(
+  document: Document,
+  rowClass: string,
+  label: RegExp,
+): ZillowCalculatorCharge | undefined {
+  const row = document.querySelector(`.${rowClass}.fee-row`);
+  if (!row) return undefined;
+  const text = textWithNodeBoundaries(row);
+  const parsed = parseLabeledMoney(text, label);
+  return parsed && { amount: parsed.amount, rawText: text };
 }
 
 function textWithNodeBoundaries(element: Element): string {
@@ -198,6 +215,11 @@ export const zillowExtractor: ListingExtractor = {
         .filter(Boolean)
         .join('\n');
     const body = detailText ?? communityText;
+    const calculatorBaseRent = calculatorCharge(
+      document,
+      'base-rent-fee',
+      /(?:monthly )?base rent/i,
+    );
     const heading = pick('h1');
     const buildingTitle = pick(
       '[data-test-id="bdp-building-title"], [data-testid="bdp-building-title"]',
@@ -278,15 +300,26 @@ export const zillowExtractor: ListingExtractor = {
         address,
       );
     }
-    result.rent = parseRentEvidence(rentTexts, 0.86);
+    result.rent = calculatorBaseRent
+      ? {
+          kind: 'single',
+          amount: listingValue(
+            calculatorBaseRent.amount,
+            0.92,
+            calculatorBaseRent.rawText,
+          ),
+          rawText: calculatorBaseRent.rawText,
+        }
+      : parseRentEvidence(rentTexts, 0.86);
     if (result.rent?.kind === 'single')
       result.listing.recurring.advertisedRent = result.rent.amount;
+    const factContainer = document.querySelector(
+      '[data-testid="bed-bath-sqft-facts"], [aria-label="Bed bath sqft facts"], [data-testid="bed-bath-beyond"], [data-testid="facts-and-features"]',
+    );
     const facts = selectedUnitRequested
       ? (detailText ?? '')
       : (detailText ??
-        pick(
-          '[data-testid="bed-bath-sqft-facts"], [aria-label="Bed bath sqft facts"], [data-testid="bed-bath-beyond"], [data-testid="facts-and-features"]',
-        ) ??
+        (factContainer ? textWithNodeBoundaries(factContainer) : undefined) ??
         '');
     const beds = /\bstudio\b/i.test(facts)
       ? 0
@@ -312,12 +345,40 @@ export const zillowExtractor: ListingExtractor = {
       result.listing.identity.bathrooms = listingValue(baths, 0.84, facts);
     if (sqft !== undefined)
       result.listing.identity.squareFootage = listingValue(sqft, 0.84, facts);
-    const deposit = body.match(/security deposit[^.\n]*\$[\d,]+/i)?.[0];
+    const calculator = {
+      baseRent: calculatorBaseRent,
+      applicationFee: calculatorCharge(
+        document,
+        'application-fee',
+        /application fee/i,
+      ),
+      administrativeFee: calculatorCharge(
+        document,
+        'administration-fee',
+        /admin(?:istrative)? fee/i,
+      ),
+      securityDeposit: calculatorCharge(
+        document,
+        'security-deposit-fee',
+        /security deposit/i,
+      ),
+      petRent: calculatorCharge(document, 'pet-rent-fee', /pet rent/i),
+      petFee: calculatorCharge(document, 'pet-fee-fee', /pet fee/i),
+      trash: calculatorCharge(document, 'garbage-fee-fee', /trash fee/i),
+      utilityManagement: calculatorCharge(
+        document,
+        'utilities-monthly-fee-fee',
+        /utility management fee/i,
+      ),
+    };
+    const deposit =
+      calculator.securityDeposit ??
+      parseLabeledMoney(body, /security deposit/i);
     if (deposit)
       result.listing.upfront.securityDeposit = listingValue(
-        parseMoney(deposit)!,
-        0.72,
-        deposit,
+        deposit.amount,
+        calculator.securityDeposit ? 0.9 : 0.72,
+        deposit.rawText,
       );
     const descriptionText = pick(
       '[data-testid="description"], [data-test-id="description"]',
@@ -327,41 +388,89 @@ export const zillowExtractor: ListingExtractor = {
       : `${body} ${descriptionText ?? ''}`;
     result.rawPetPolicyText = classifyNoPetsPolicy(propertyText);
     if (result.rawPetPolicyText) result.petPolicy = 'none';
-    const applicationFee = propertyText.match(
-      /(?:application|screening) fee[^.\n]{0,80}\$[\d,]+/i,
-    )?.[0];
-    const administrativeFee = propertyText.match(
-      /(?:administrative|admin) fee[^.\n]{0,80}\$[\d,]+/i,
-    )?.[0];
-    const petRent = propertyText.match(
-      /(?:monthly pet rent|pet rent)[^.\n]{0,80}\$[\d,]+/i,
-    )?.[0];
-    const petDeposit = propertyText.match(
-      /pet deposit[^.\n]{0,80}\$[\d,]+/i,
-    )?.[0];
+    const proseApplicationFee = parseLabeledMoney(
+      propertyText,
+      /(?:application|screening) fee/i,
+    );
+    const proseAdministrativeFee = parseLabeledMoney(
+      propertyText,
+      /(?:administrative|admin) fee/i,
+    );
+    const prosePetRent = parseLabeledMoney(
+      propertyText,
+      /(?:monthly pet rent|pet rent)/i,
+    );
+    const proseUtilityManagement = parseLabeledMoney(
+      propertyText,
+      /utility management fee/i,
+    );
+    const applicationFee = calculator.applicationFee ?? proseApplicationFee;
+    const administrativeFee =
+      calculator.administrativeFee ?? proseAdministrativeFee;
+    const petRent = calculator.petRent ?? prosePetRent;
+    const petDeposit = parseLabeledMoney(propertyText, /pet deposit/i);
+    const petFee =
+      calculator.petFee ?? parseLabeledMoney(propertyText, /pet fee/i);
+    for (const [label, structured, prose] of [
+      ['application fee', calculator.applicationFee, proseApplicationFee],
+      [
+        'administrative fee',
+        calculator.administrativeFee,
+        proseAdministrativeFee,
+      ],
+      ['pet rent', calculator.petRent, prosePetRent],
+      [
+        'utility management fee',
+        calculator.utilityManagement,
+        proseUtilityManagement,
+      ],
+    ] as const) {
+      if (structured && prose && structured.amount !== prose.amount)
+        result.warnings.push(
+          `Zillow's property-specific calculator and description list different ${label} amounts. The calculator value was used; confirm it with the housing provider.`,
+        );
+    }
     if (applicationFee)
       result.listing.upfront.applicationFee = listingValue(
-        parseMoney(applicationFee)!,
-        0.7,
-        applicationFee,
+        applicationFee.amount,
+        calculator.applicationFee ? 0.9 : 0.7,
+        applicationFee.rawText,
       );
     if (administrativeFee)
       result.listing.upfront.administrativeFee = listingValue(
-        parseMoney(administrativeFee)!,
-        0.68,
-        administrativeFee,
+        administrativeFee.amount,
+        calculator.administrativeFee ? 0.9 : 0.68,
+        administrativeFee.rawText,
       );
     if (petRent)
       result.listing.recurring.petRent = listingValue(
-        parseMoney(petRent)!,
-        0.68,
-        petRent,
+        petRent.amount,
+        calculator.petRent ? 0.9 : 0.68,
+        petRent.rawText,
       );
     if (petDeposit)
       result.listing.upfront.petDeposit = listingValue(
-        parseMoney(petDeposit)!,
+        petDeposit.amount,
         0.68,
-        petDeposit,
+        petDeposit.rawText,
+      );
+    if (petFee)
+      result.listing.upfront.petFee = listingValue(
+        petFee.amount,
+        calculator.petFee ? 0.9 : 0.68,
+        petFee.rawText,
+      );
+    if (calculator.trash)
+      result.listing.recurring.trash = listingValue(
+        calculator.trash.amount,
+        0.9,
+        calculator.trash.rawText,
+      );
+    if (calculator.utilityManagement)
+      result.listing.recurring.otherRequiredMonthlyFees = listingValue(
+        calculator.utilityManagement.amount,
+        0.9,
+        calculator.utilityManagement.rawText,
       );
     result.includedUtilities = classifyIncludedUtilities(propertyText);
     result.rawUtilityText =

@@ -9,6 +9,7 @@ export interface PageInfo {
   extraction?: ListingExtraction;
   requiresUnitSelection?: boolean;
   selectedUnitId?: string;
+  selectedUnit?: { id: string | null; label: string };
 }
 
 export interface GetPageInfoMessage {

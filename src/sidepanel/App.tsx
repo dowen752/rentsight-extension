@@ -1,13 +1,18 @@
 import { accountSession, rentSightApi } from '../backend/services';
 import { ExtractionSession } from '../ai/session';
 import { canonicalizeListingUrl } from '../ai/identity';
-import { applyAiExtraction, adaptExtraction } from '../ai/adapter';
+import { downloadExtractionCapture } from '../ai/request';
+import {
+  applyAiExtraction,
+  adaptExtraction,
+  retainPreliminaryAfterAiFailure,
+} from '../ai/adapter';
 import {
   AiExtractionCard,
   AiSourceReview,
   type AiControls,
 } from './AiExtractionCard';
-import { formatReviewIssue } from './reviewIssueLabels';
+import { formatReviewIssue, shouldShowReviewIssue } from './reviewIssueLabels';
 import {
   useEffect,
   useSyncExternalStore,
@@ -91,6 +96,8 @@ import {
 } from '../location';
 import { analysisForNavigation } from './navigationState';
 import { MembershipBadge } from './MembershipBadge';
+import { FindRentalsView } from './FindRentalsView';
+export { FindRentalsView } from './FindRentalsView';
 import {
   isSameListingPage,
   preserveReadyViewAfterInspectionFailure,
@@ -292,6 +299,19 @@ export function App() {
     aiSession.getSnapshot,
     aiSession.getSnapshot,
   );
+  const failedRequestId =
+    aiState.status === 'failed' ? aiState.requestId : undefined;
+  useEffect(() => {
+    if (!failedRequestId) return;
+    setView((current) =>
+      current.status === 'ready'
+        ? {
+            ...current,
+            analysis: retainPreliminaryAfterAiFailure(current.analysis),
+          }
+        : current,
+    );
+  }, [failedRequestId]);
   const aiPage = view.status === 'ready' ? view.aiPage : undefined;
   const accountId = account.user?.uid;
   const accountStatus = account.status;
@@ -325,8 +345,16 @@ export function App() {
             : current,
         );
       })
-      .catch(() => {
-        if (active) aiSession.captureFailed();
+      .catch((error: unknown) => {
+        if (!active) return;
+        const invalidated =
+          error instanceof Error &&
+          /extension context invalidated/i.test(error.message);
+        aiSession.captureFailed(
+          invalidated
+            ? 'The extension was reloaded. Reload this page, then load the listing again.'
+            : undefined,
+        );
       });
     return () => {
       active = false;
@@ -364,14 +392,6 @@ export function App() {
         }
         if (response.payload.requiresUnitSelection) {
           setView({ status: 'unit-selection-required' });
-          return;
-        }
-        if (!response.payload.appearsToBeRentalListing) {
-          setView({
-            status: 'unsupported',
-            url: response.payload.url,
-            title: response.payload.title,
-          });
           return;
         }
         const [
@@ -478,15 +498,6 @@ export function App() {
           if (message.payload.requiresUnitSelection) {
             aiSession.invalidate();
             setView({ status: 'unit-selection-required' });
-            return;
-          }
-          if (!message.payload.appearsToBeRentalListing) {
-            aiSession.invalidate();
-            setView({
-              status: 'unsupported',
-              url: message.payload.url,
-              title: message.payload.title,
-            });
             return;
           }
           if (message.payload.selectedUnitId && !sameListing) {
@@ -666,9 +677,7 @@ export function App() {
     })) as ExtensionResponse;
     if (response.type === 'EXTENSION_ERROR') throw new Error(response.error);
     if (response.payload.requiresUnitSelection)
-      throw new Error('Select a specific unit, then refresh again.');
-    if (!response.payload.appearsToBeRentalListing)
-      throw new Error('The active page does not look like a rental listing.');
+      throw new Error('Select a specific unit, then load the listing again.');
 
     const stored = await getRentalAnalysis(response.payload.url);
     setView((current) => {
@@ -679,8 +688,9 @@ export function App() {
         stored ? { [response.payload.url]: stored } : undefined,
       );
     });
-    if (accountStatus === 'plus' && response.payload.aiCapture)
-      aiSession.refresh(response.payload);
+    // Clicking Load listing is an explicit request. Unlike automatic AI
+    // extraction, it must not be suppressed by eligibility or cache signals.
+    if (response.payload.aiCapture) aiSession.refresh(response.payload);
   };
 
   const setSavedListings = async (
@@ -776,68 +786,7 @@ export function App() {
       </UnavailableWorkspace>
     );
   }
-  if (view.status === 'unsupported') {
-    const openManualEntry = async () => {
-      try {
-        const [
-          storedAnalysis,
-          storedRecords,
-          internetCost,
-          storedHouseholdProfile,
-          onboardingCompleted,
-        ] = await Promise.all([
-          getRentalAnalysis(view.url),
-          extensionStorage.get('savedListings'),
-          extensionStorage.get('internetMonthlyCost'),
-          extensionStorage.get('householdProfile'),
-          extensionStorage.get('onboardingCompleted'),
-        ]);
-        const householdProfile = normalizeHouseholdProfile(
-          storedHouseholdProfile ?? { internetMonthlyCost: internetCost },
-        );
-        setView({
-          status: 'ready',
-          url: view.url,
-          analysis: applyHouseholdProfile(
-            storedAnalysis ?? createInitialAnalysis(view.url, view.title),
-            householdProfile,
-          ),
-          savedListings: migrateSavedRecords(storedRecords),
-          onboardingCompleted: onboardingCompleted === true,
-          householdProfile,
-        });
-      } catch (error: unknown) {
-        setView({
-          status: 'error',
-          message:
-            error instanceof Error
-              ? error.message
-              : 'Unable to start manual entry.',
-        });
-      }
-    };
-    return (
-      <UnavailableWorkspace
-        clearAllData={clearAllData}
-        refreshCurrent={() => window.location.reload()}
-      >
-        <main>
-          <section className="warning">
-            <h1>This does not look like a rental listing</h1>
-            <p>Open a rental listing, or start with a blank analysis.</p>
-            <button
-              type="button"
-              className="primary-action"
-              onClick={() => void openManualEntry()}
-            >
-              Enter details manually
-            </button>
-          </section>
-        </main>
-      </UnavailableWorkspace>
-    );
-  }
-
+  const exportPage = view.aiPage?.aiCapture ? view.aiPage : undefined;
   return (
     <Workspace
       aiControls={aiControls}
@@ -850,11 +799,36 @@ export function App() {
       updateHouseholdProfile={updateHouseholdProfile}
       refreshCurrent={refreshCurrent}
       clearAllData={clearAllData}
+      exportExtractionCapture={
+        import.meta.env.DEV && exportPage
+          ? () => downloadExtractionCapture(exportPage)
+          : undefined
+      }
     />
   );
 }
 
-type WorkspaceTab = 'current' | 'saved' | 'compare' | 'about';
+type WorkspaceTab = 'find' | 'current' | 'saved' | 'compare' | 'about';
+
+const WORKSPACE_TABS: readonly WorkspaceTab[] = [
+  'find',
+  'current',
+  'saved',
+  'compare',
+  'about',
+];
+
+function workspaceTabLabel(
+  tab: WorkspaceTab,
+  savedCount: number,
+  selectedCount: number,
+): string {
+  if (tab === 'find') return 'Find';
+  if (tab === 'current') return 'Current';
+  if (tab === 'saved') return `Saved (${savedCount})`;
+  if (tab === 'compare') return `Compare (${selectedCount})`;
+  return 'About';
+}
 
 export function UnavailableWorkspace({
   children,
@@ -915,23 +889,18 @@ export function UnavailableWorkspace({
     <>
       <MembershipBadge />
       <nav className="workspace-tabs" aria-label="RentSight views">
-        {(['current', 'saved', 'compare', 'about'] as const).map((item) => (
+        {WORKSPACE_TABS.map((item) => (
           <button
             key={item}
             type="button"
             aria-current={tab === item ? 'page' : undefined}
             onClick={() => setTab(item)}
           >
-            {item === 'current'
-              ? 'Current'
-              : item === 'saved'
-                ? `Saved (${savedListings.length})`
-                : item === 'compare'
-                  ? `Compare (${selected.length})`
-                  : 'About'}
+            {workspaceTabLabel(item, savedListings.length, selected.length)}
           </button>
         ))}
       </nav>
+      {tab === 'find' && <FindRentalsView />}
       {tab === 'current' && (
         <div className="current-actions">
           <RefreshListingButton onClick={refreshCurrent} />
@@ -990,6 +959,7 @@ function Workspace({
   householdProfile,
   updateHouseholdProfile,
   refreshCurrent,
+  exportExtractionCapture,
 }: {
   aiControls: AiControls;
   analysis: RentalAnalysis;
@@ -1001,6 +971,7 @@ function Workspace({
   householdProfile: HouseholdProfile;
   updateHouseholdProfile: (profile: HouseholdProfile) => void;
   refreshCurrent: () => Promise<void>;
+  exportExtractionCapture?: () => void;
 }) {
   const [tab, setTab] = useState<WorkspaceTab>('current');
   const [selected, setSelected] = useState<string[]>([]);
@@ -1034,10 +1005,10 @@ function Workspace({
     setNotice('');
     try {
       await refreshCurrent();
-      setNotice('Current listing refreshed.');
+      setNotice('Listing loaded.');
     } catch (error: unknown) {
       setNotice(
-        error instanceof Error ? error.message : 'Could not refresh listing.',
+        error instanceof Error ? error.message : 'Could not load listing.',
       );
     } finally {
       setRefreshing(false);
@@ -1086,7 +1057,7 @@ function Workspace({
         className={`workspace-tabs${tourStep !== undefined ? ' tour-active' : ''}`}
         aria-label="RentSight views"
       >
-        {(['current', 'saved', 'compare', 'about'] as const).map((item) => (
+        {WORKSPACE_TABS.map((item) => (
           <button
             key={item}
             type="button"
@@ -1098,22 +1069,22 @@ function Workspace({
             }
             onClick={() => setTab(item)}
           >
-            {item === 'current'
-              ? 'Current'
-              : item === 'saved'
-                ? `Saved (${savedListings.length})`
-                : item === 'compare'
-                  ? `Compare (${selected.length})`
-                  : 'About'}
+            {workspaceTabLabel(item, savedListings.length, selected.length)}
           </button>
         ))}
       </nav>
+      {tab === 'find' && <FindRentalsView />}
       {tab === 'current' && (
         <div className="current-actions">
           <RefreshListingButton
             refreshing={refreshing}
             onClick={() => void refresh()}
           />
+          {exportExtractionCapture && (
+            <button type="button" onClick={exportExtractionCapture}>
+              Export extraction capture
+            </button>
+          )}
         </div>
       )}
       {notice && (
@@ -1126,6 +1097,14 @@ function Workspace({
           )}
         </p>
       )}
+      {tab === 'current' &&
+        !analysis.listing.recurring.advertisedRent &&
+        !notice && (
+          <p className="workspace-note" role="status">
+            Monthly rent wasn't found. Enter it below, or use Load listing for
+            an AI review.
+          </p>
+        )}
       {tab === 'current' && (
         <AnalysisEditor
           aiControls={aiControls}
@@ -1200,7 +1179,7 @@ function RefreshListingButton({
       onClick={onClick}
     >
       <span aria-hidden="true">↻</span>{' '}
-      {refreshing ? 'Refreshing…' : 'Refresh listing'}
+      {refreshing ? 'Loading…' : 'Load listing'}
     </button>
   );
 }
@@ -2071,18 +2050,19 @@ export function AnalysisEditor({
     !aiBlocked && !unresolvedCharges && confirmedRevision === confirmationKey;
   const listing = useMemo(() => materializeListing(analysis), [analysis]);
   const validation = useMemo(() => validateRentalListing(listing), [listing]);
-  const reviewIssues = analysis.aiExtraction?.result.reviewIssues ?? [];
+  const allReviewIssues = analysis.aiExtraction?.result.reviewIssues ?? [];
+  const reviewIssues = allReviewIssues.filter(shouldShowReviewIssue);
   const extractionWarnings = analysis.extraction?.warnings ?? [];
-  const reviewMessagesAreWarningSuffix = reviewIssues.every(
+  const reviewMessagesAreWarningSuffix = allReviewIssues.every(
     (issue, index) =>
       extractionWarnings[
-        extractionWarnings.length - reviewIssues.length + index
+        extractionWarnings.length - allReviewIssues.length + index
       ] === issue.message,
   );
   const standaloneExtractionWarnings = reviewMessagesAreWarningSuffix
     ? extractionWarnings.slice(
         0,
-        extractionWarnings.length - reviewIssues.length,
+        extractionWarnings.length - allReviewIssues.length,
       )
     : extractionWarnings;
   const results = useMemo(() => {
@@ -2175,7 +2155,7 @@ export function AnalysisEditor({
             : 'Check every extracted or estimated value. You can edit any field before calculating.'}
         </p>
       </header>
-      {aiControls && <AiExtractionCard controls={aiControls} />}
+      {!confirmed && aiControls && <AiExtractionCard controls={aiControls} />}
       {!confirmed && <AiSourceReview analysis={analysis} update={update} />}
       {confirmed && toolbar && (
         <div className="analysis-toolbar">{toolbar}</div>
@@ -2509,6 +2489,7 @@ export function AnalysisEditor({
               ['firstMonthsRent', 'First month'],
               ['lastMonthsRent', 'Last month'],
               ['petDeposit', 'Pet deposit'],
+              ['petFee', 'Pet fee'],
               ['administrativeFee', 'Administrative fee'],
               ['utilityDeposits', 'Other deposits'],
               ['otherMoveInFees', 'Other fees'],

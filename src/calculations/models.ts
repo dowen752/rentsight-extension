@@ -43,6 +43,7 @@ export interface UpfrontCosts {
   firstMonthsRent?: SourcedValue<number>;
   lastMonthsRent?: SourcedValue<number>;
   petDeposit?: SourcedValue<number>;
+  petFee?: SourcedValue<number>;
   administrativeFee?: SourcedValue<number>;
   utilityDeposits?: SourcedValue<number>;
   otherMoveInFees?: SourcedValue<number>;

@@ -23,7 +23,41 @@ function nodes(value: unknown): JsonObject[] {
     : [value];
 }
 
-export function extractJsonLd(document: Document): ListingExtraction {
+const normalizedIdentity = (value: string) =>
+  decodeURIComponent(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+function matchesActiveListing(node: JsonObject, pageUrl?: URL): boolean {
+  if (!pageUrl) return true;
+  const nodeUrl = text(node.url) ?? text(node['@id']);
+  if (nodeUrl) {
+    try {
+      const candidate = new URL(nodeUrl, pageUrl);
+      if (
+        candidate.hostname === pageUrl.hostname &&
+        candidate.pathname !== pageUrl.pathname
+      )
+        return false;
+    } catch {
+      // Non-URL schema identifiers provide no useful listing scope.
+    }
+  }
+  const address = object(node.address) ? node.address : undefined;
+  const street = text(address?.streetAddress);
+  const pathIdentity = normalizedIdentity(pageUrl.pathname);
+  const streetIdentity = street ? normalizedIdentity(street) : '';
+  const pathNumber = pathIdentity.match(/\b\d{1,6}\b/)?.[0];
+  const streetNumber = streetIdentity.match(/^\d{1,6}\b/)?.[0];
+  if (pathNumber && streetNumber && pathNumber !== streetNumber) return false;
+  return true;
+}
+
+export function extractJsonLd(
+  document: Document,
+  pageUrl?: URL,
+): ListingExtraction {
   const result = emptyExtraction('Structured JSON-LD', '1.0.0');
   const listing = result.listing;
   const rentTexts: string[] = [];
@@ -37,6 +71,7 @@ export function extractJsonLd(document: Document): ListingExtraction {
         continue;
       }
       for (const node of nodes(JSON.parse(source))) {
+        if (!matchesActiveListing(node, pageUrl)) continue;
         const address = object(node.address) ? node.address : undefined;
         const floorSize = object(node.floorSize)
           ? node.floorSize.value

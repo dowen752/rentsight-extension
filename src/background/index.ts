@@ -111,11 +111,11 @@ async function getActiveTab(): Promise<chrome.tabs.Tab> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id)
     throw new Error(
-      'Return to an accessible rental listing tab and click Refresh listing to try again.',
+      'Return to an accessible rental listing tab and click Load listing to try again.',
     );
   if (tab.url && !/^https?:/.test(tab.url)) {
     throw new Error(
-      'Return to an HTTP or HTTPS rental listing tab and click Refresh listing to try again.',
+      'Return to an HTTP or HTTPS rental listing tab and click Load listing to try again.',
     );
   }
   return tab;
@@ -144,7 +144,7 @@ async function requestPageInfo(
       } catch (error: unknown) {
         console.error('[RentSight] Content script injection failed', error);
         throw new Error(
-          'Return to a rental listing tab and click Refresh listing to try again.',
+          'Return to a rental listing tab and click Load listing to try again.',
           { cause: error },
         );
       }

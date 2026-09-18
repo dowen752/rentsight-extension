@@ -121,6 +121,32 @@ describe('manual listing analysis integration', () => {
     expect(withLargeDog.upfront.petDeposit?.value).toBe(300);
   });
 
+  it('multiplies listing per-pet rates by the household pet count', () => {
+    const analysis = createInitialAnalysis('https://example.com/per-pet');
+    analysis.listing.recurring.petRent = {
+      value: 30,
+      source: 'listing',
+      confidence: 0.9,
+      note: 'Supporting text: Pet Rent ($30 per pet)',
+    };
+    analysis.listing.upfront.petFee = {
+      value: 300,
+      source: 'listing',
+      confidence: 0.9,
+      note: 'Supporting text: Pet Fee ($300 per each pet)',
+    };
+    const listing = materializeListing(
+      applyHouseholdProfile(analysis, {
+        occupants: 2,
+        smallDogs: 1,
+        largeDogs: 1,
+        otherPets: false,
+      }),
+    );
+    expect(listing.recurring.petRent?.value).toBe(60);
+    expect(listing.upfront.petFee?.value).toBe(600);
+  });
+
   it('never overwrites a user-edited value during re-extraction', () => {
     let analysis = createInitialAnalysis(
       'https://example.com/rental/3',

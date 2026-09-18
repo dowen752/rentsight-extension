@@ -8,6 +8,7 @@ import { extractJsonLd } from './jsonLd';
 import { zillowExtractor } from './zillow';
 import { redfinExtractor } from './redfin';
 import { rentExtractor } from './rent';
+import { realtorExtractor } from './realtor';
 import {
   emptyExtraction,
   type ListingExtraction,
@@ -16,6 +17,7 @@ import {
 } from './types';
 
 const SITE_EXTRACTORS: readonly ListingExtractor[] = [
+  realtorExtractor,
   zillowExtractor,
   apartmentsExtractor,
   apartmentListExtractor,
@@ -108,17 +110,17 @@ export function extractListing(
           // labeled stats are the authoritative source for the current home.
           selectedUnit || site === redfinExtractor
             ? undefined
-            : extractJsonLd(document),
+            : extractJsonLd(document, url),
           restoreGenericHomesFallback
-            ? extractEmbeddedData(document)
+            ? extractEmbeddedData(document, url)
             : undefined,
           restoreGenericHomesFallback
             ? genericExtractor.extract(document, url)
             : undefined,
         ]
       : [
-          extractJsonLd(document),
-          extractEmbeddedData(document),
+          extractJsonLd(document, url),
+          extractEmbeddedData(document, url),
           genericExtractor.extract(document, url),
         ]
   ).filter((value): value is ListingExtraction => Boolean(value));
@@ -191,6 +193,7 @@ export {
   genericExtractor,
   homesExtractor,
   redfinExtractor,
+  realtorExtractor,
   rentExtractor,
   zillowExtractor,
 };

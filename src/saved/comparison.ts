@@ -125,7 +125,8 @@ export function createComparison(
     laundry: listing.recurring.laundry?.value,
     petExpenses:
       (listing.recurring.petRent?.value ?? 0) +
-      (listing.upfront.petDeposit?.value ?? 0),
+      (listing.upfront.petDeposit?.value ?? 0) +
+      (listing.upfront.petFee?.value ?? 0),
     completeness: calculateCompleteness(record),
     notes: record.analysis.propertyNotes ?? [],
   };

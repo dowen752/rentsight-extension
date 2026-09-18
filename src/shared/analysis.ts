@@ -14,7 +14,6 @@ import type { ListingExtraction } from '../extractors';
 import type { LocationEstimate } from '../location';
 import {
   DEFAULT_HOUSEHOLD_PROFILE,
-  householdHasPets,
   normalizeHouseholdProfile,
   type HouseholdProfile,
 } from './household';
@@ -207,7 +206,21 @@ export function materializeListing(analysis: RentalAnalysis): RentalListing {
       note: 'Includes custom one-time fees.',
     };
   }
-  if (!householdHasPets(household)) {
+  const petCount =
+    household.smallDogs + household.largeDogs + Number(household.otherPets);
+  if (petCount > 0) {
+    for (const field of [
+      listing.recurring.petRent,
+      listing.upfront.petDeposit,
+      listing.upfront.petFee,
+    ]) {
+      if (
+        field?.source === 'listing' &&
+        /\bper (?:each )?pet\b/i.test(field.note ?? '')
+      )
+        field.value *= petCount;
+    }
+  } else {
     listing.recurring.petRent = {
       value: 0,
       source: 'user',
@@ -219,6 +232,12 @@ export function materializeListing(analysis: RentalAnalysis): RentalListing {
       source: 'user',
       confidence: 1,
       note: 'Listing pet deposit does not apply because the household profile has no pets.',
+    };
+    listing.upfront.petFee = {
+      value: 0,
+      source: 'user',
+      confidence: 1,
+      note: 'Listing pet fee does not apply because the household profile has no pets.',
     };
   }
   if (analysis.laundryType === 'shared_paid') {

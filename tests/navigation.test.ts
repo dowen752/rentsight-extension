@@ -9,11 +9,27 @@ import {
   requiresZillowUnitSelection,
   selectedHomesUnitId,
   selectedRedfinUnitId,
+  selectedRealtorUnit,
   selectedZillowUnitId,
 } from '../src/content/pageState';
 import { extractListing } from '../src/extractors';
 
 describe('SPA listing navigation', () => {
+  it('identifies a Realtor floor plan without inventing a unit id', () => {
+    const document = new JSDOM(`
+      <div role="dialog" aria-modal="true">
+        <h3>2BR/1BA</h3>
+        <div data-testid="modal-body"><table><tr><td>$845</td></tr></table></div>
+        <select name="listingUnit"><option selected value="">Any unit with this floor plan</option></select>
+      </div>
+    `).window.document;
+    expect(
+      selectedRealtorUnit(
+        document,
+        new URL('https://www.realtor.com/rentals/details/example'),
+      ),
+    ).toEqual({ id: null, label: '2BR/1BA' });
+  });
   it('uses Chromium navigation events without starting a permanent poll', async () => {
     const dom = new JSDOM('<html><body></body></html>', {
       url: 'https://example.com/listing/one',

@@ -26,6 +26,49 @@ export function parseMoney(text: string): number | undefined {
   return Number.isFinite(amount) ? amount : undefined;
 }
 
+export interface LabeledMoney {
+  amount: number;
+  rawText: string;
+}
+
+/**
+ * Finds the dollar amount nearest a label without crossing normal fee-list
+ * boundaries. Rental descriptions commonly use both "fee: $50" and
+ * "$50 fee"; keeping the search inside one clause prevents the amount for the
+ * next semicolon-delimited fee from being attached to the current label.
+ */
+export function parseLabeledMoney(
+  text: string,
+  label: RegExp,
+): LabeledMoney | undefined {
+  const clauses = text.split(/(?:[;\n]+|[.!?](?=\s|$))/);
+  for (const candidate of clauses) {
+    const clause = candidate.replace(/\s+/g, ' ').trim();
+    if (!clause) continue;
+    const labelMatch = clause.match(label);
+    if (!labelMatch || labelMatch.index === undefined) continue;
+    const amounts = [...clause.matchAll(/\$\s*([\d,]+(?:\.\d{1,2})?)/g)];
+    if (!amounts.length) continue;
+    const labelStart = labelMatch.index;
+    const labelEnd = labelStart + labelMatch[0].length;
+    const nearest = amounts.sort((left, right) => {
+      const distance = (match: RegExpMatchArray) => {
+        const start = match.index ?? 0;
+        const end = start + match[0].length;
+        return end <= labelStart
+          ? labelStart - end
+          : start >= labelEnd
+            ? start - labelEnd
+            : 0;
+      };
+      return distance(left) - distance(right);
+    })[0];
+    const amount = Number(nearest[1].replaceAll(',', ''));
+    if (Number.isFinite(amount)) return { amount, rawText: clause };
+  }
+  return undefined;
+}
+
 export function parseRentEvidence(
   texts: readonly string[],
   confidence: number,
@@ -89,6 +132,29 @@ export function parseNumberNear(
 ): number | undefined {
   const match = text.match(label);
   return match ? Number(match[1].replaceAll(',', '')) : undefined;
+}
+
+export function parseBedBathShorthand(
+  text: string,
+): { bedrooms: number; bathrooms: number; rawText: string } | undefined {
+  const match = text.match(
+    /\b(Studio(?:\s*(?:BR|BD|beds?|bedrooms?))?|\d+(?:\.\d+)?\s*(?:BR|BD|beds?|bedrooms?))\s*(?:\/|,|·|\|)\s*(\d+(?:\.\d+)?)\s*(?:BA|baths?|bathrooms?)\b/i,
+  );
+  if (!match) return undefined;
+  const bedrooms = /^studio/i.test(match[1])
+    ? 0
+    : Number(match[1].match(/\d+(?:\.\d+)?/)?.[0]);
+  const bathrooms = Number(match[2]);
+  if (
+    !Number.isFinite(bedrooms) ||
+    !Number.isFinite(bathrooms) ||
+    bedrooms < 0 ||
+    bathrooms < 0 ||
+    bedrooms > 20 ||
+    bathrooms > 20
+  )
+    return undefined;
+  return { bedrooms, bathrooms, rawText: match[0] };
 }
 
 export function classifyLaundry(text: string): LaundryType | undefined {

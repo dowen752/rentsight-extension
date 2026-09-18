@@ -21,6 +21,10 @@
     "https://api.umbrellabrand.co/*",
     "https://auth.umbrellabrand.co/rentsight/*"
   ],
+  "optional_host_permissions": [
+    "https://www.apartments.com/*",
+    "https://www.zillow.com/*"
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; frame-src https://auth.umbrellabrand.co; connect-src 'self' https://api.umbrellabrand.co https://apis.google.com https://www.gstatic.com https://www.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com"
   },

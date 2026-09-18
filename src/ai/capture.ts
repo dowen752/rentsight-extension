@@ -41,10 +41,32 @@ const normalizedBlockText = (value: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+const EVIDENCE_CONTAINER_SELECTORS = [
+  '[data-testid="bed-bath-sqft-facts"]',
+  '[aria-label="Bed bath sqft facts"]',
+  '[data-testid="bed-bath-beyond"]',
+  '[data-testid="facts-and-features"]',
+].join(',');
+
+function textWithNodeBoundaries(element: Element): string {
+  const parts: string[] = [];
+  const visit = (node: Node) => {
+    if (node.nodeType === node.TEXT_NODE) {
+      const text = node.textContent?.trim();
+      if (text) parts.push(text);
+      return;
+    }
+    for (const child of node.childNodes) visit(child);
+  };
+  visit(element);
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
 // Content is frozen before transport. No user overrides or arbitrary form inputs.
 export function captureListing(
   document: Document,
   extraction: ListingExtraction,
+  selectedUnitId?: string,
 ): CaptureContext {
   const capture: Capture = {
     capturedAt: new Date().toISOString(),
@@ -75,6 +97,7 @@ export function captureListing(
         previous &&
         previous.kind === 'other' &&
         block.kind === 'other' &&
+        previous.sectionPath[0] !== 'Cost calculator' &&
         JSON.stringify(previous.sectionPath) ===
           JSON.stringify(block.sectionPath) &&
         previous.text.length + block.text.length + 1 <= 4_000;
@@ -142,9 +165,82 @@ export function captureListing(
       capture.unavailableSections.push('Unreadable JSON-LD');
     }
   }
+  // Preserve high-confidence listing facts before interactive wrappers are
+  // removed. Text-node boundaries keep adjacent values and labels readable.
+  const preservedEvidence = new Set<string>();
+  for (const container of document.querySelectorAll(
+    EVIDENCE_CONTAINER_SELECTORS,
+  )) {
+    const text = textWithNodeBoundaries(container);
+    const key = normalizedBlockText(text);
+    if (!key || preservedEvidence.has(key)) continue;
+    preservedEvidence.add(key);
+    add('other', text, ['Listing facts']);
+  }
+  // Available-unit dialogs are commonly portaled outside <main>. Preserve only
+  // their floor-plan heading and inventory table so contact-form dates and phone
+  // numbers cannot be mistaken for bedrooms, bathrooms, rent, or square feet.
+  for (const dialog of document.querySelectorAll(
+    '[role="dialog"][aria-modal="true"]',
+  )) {
+    const table = dialog.querySelector('[data-testid="modal-body"] table');
+    if (!table) continue;
+    const heading = dialog.querySelector('h1,h2,h3,h4')?.textContent?.trim();
+    if (heading) add('heading', heading, ['Selected floor plan']);
+    const rows = Array.from(table.querySelectorAll('tr')).map(
+      (row) =>
+        '| ' +
+        Array.from(row.querySelectorAll('th,td'))
+          .map((cell) => cell.textContent?.trim().replace(/\s+/g, ' ') ?? '')
+          .join(' | ') +
+        ' |',
+    );
+    add('table', rows.join('\n'), ['Selected floor plan']);
+  }
+  // Zillow's calculator contains property-specific charges that may not appear
+  // in the description. Preserve each semantic row as one evidence block so
+  // labels, amounts, cadence, applicability, and refundability stay associated.
+  const preservedCalculatorRows = new Set<string>();
+  for (const row of document.querySelectorAll('.fee-row')) {
+    const copy = row.cloneNode(true) as HTMLElement;
+    copy
+      .querySelectorAll('button,input,select,textarea,[aria-hidden="true"]')
+      .forEach((node) => node.remove());
+    const text = textWithNodeBoundaries(copy);
+    const key = normalizedBlockText(text);
+    if (!key || preservedCalculatorRows.has(key)) continue;
+    preservedCalculatorRows.add(key);
+    const group = row.closest('.required-group, .optional-group');
+    const applicability = group?.classList.contains('required-group')
+      ? 'Required'
+      : group?.classList.contains('optional-group')
+        ? 'Optional'
+        : 'Charges';
+    const section = row.closest('[id$="-section"]')?.id.startsWith('monthly')
+      ? 'Monthly costs'
+      : row.closest('[id$="-section"]')?.id.startsWith('move-in')
+        ? 'Move-in costs'
+        : 'Cost calculator';
+    add('other', text, ['Cost calculator', section, applicability]);
+  }
   const root = (
     document.querySelector('main, [role="main"]') ?? document.body
   ).cloneNode(true) as HTMLElement;
+  // Preserve property-level content, but discard explicitly identified sibling
+  // unit panels when the page exposes a stable selected-unit identity.
+  if (selectedUnitId) {
+    const selected = selectedUnitId.trim().toLowerCase();
+    root.querySelectorAll<HTMLElement>('[data-unit-id]').forEach((node) => {
+      if ((node.dataset.unitId ?? '').trim().toLowerCase() !== selected)
+        node.remove();
+    });
+  }
+  // These containers were captured atomically above. Removing them here avoids
+  // duplicate evidence when they are not nested in removable boilerplate.
+  root
+    .querySelectorAll(EVIDENCE_CONTAINER_SELECTORS)
+    .forEach((node) => node.remove());
+  root.querySelectorAll('.fee-row').forEach((node) => node.remove());
   root
     .querySelectorAll(
       'script,style,noscript,template,nav,header,footer,aside,form,input,textarea,select,button,iframe,svg,canvas,[style*="display:none"],[style*="display: none"],[hidden],[aria-hidden="true"],[contenteditable],[role="navigation"],[role="banner"],[role="contentinfo"],[role="complementary"],[role="search"],[class*="recommend" i],[class*="similar-list" i],[class*="advertisement" i],[class*="cookie" i],[id*="cookie" i],[class*="newsletter" i],[class*="social-share" i],[class*="share-widget" i],[class*="chat-widget" i],[class*="chatbot" i],[class*="survey-banner" i],[class*="app-banner" i]',

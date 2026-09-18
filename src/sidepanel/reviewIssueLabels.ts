@@ -1,4 +1,33 @@
-import type { Issue } from '../ai/contracts/response';
+import type { Issue, Note } from '../ai/contracts/response';
+
+const INTERNAL_REVIEW_FIELDS = ['/property/country', '/property/unitLabel'];
+
+export function shouldShowReviewIssue(issue: Issue): boolean {
+  if (issue.code === 'UNIT_SCOPE_UNCERTAIN') return false;
+  if (issue.code === 'UNKNOWN_VALUE') return false;
+  return issue.fieldPaths.some(
+    (path) =>
+      !INTERNAL_REVIEW_FIELDS.some(
+        (internalPath) =>
+          path === internalPath || path.startsWith(`${internalPath}/`),
+      ),
+  );
+}
+
+const NOTEWORTHY_COLLECTIONS = [
+  '/property/fees',
+  '/property/utilities',
+  '/property/promotions',
+];
+
+export function shouldSuggestPropertyNote(note: Note): boolean {
+  return note.fieldPaths.some((path) =>
+    NOTEWORTHY_COLLECTIONS.some(
+      (collectionPath) =>
+        path === collectionPath || path.startsWith(`${collectionPath}/`),
+    ),
+  );
+}
 
 const REVIEW_FIELD_LABELS = {
   '/property/propertyName': 'Listing name',

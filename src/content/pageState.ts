@@ -64,6 +64,34 @@ export function selectedZillowUnitId(
   return undefined;
 }
 
+export function selectedRealtorUnit(
+  document: Document,
+  url: URL,
+): { id: string | null; label: string } | undefined {
+  if (!/(^|\.)realtor\.com$/i.test(url.hostname)) return undefined;
+  const dialog = Array.from(
+    document.querySelectorAll<HTMLElement>(
+      '[role="dialog"][aria-modal="true"]',
+    ),
+  ).find((item) => item.querySelector('[data-testid="modal-body"] table'));
+  if (!dialog) return undefined;
+  const selected = dialog.querySelector<HTMLSelectElement>(
+    'select[name="listingUnit"]',
+  )?.selectedOptions[0];
+  const selectedId = selected?.value.trim();
+  const selectedLabel = selected?.textContent?.replace(/\s+/g, ' ').trim();
+  if (selectedId && selectedLabel)
+    return {
+      id: selectedId.replace(/^unit_/, '') || null,
+      label: selectedLabel,
+    };
+  const floorPlan = dialog
+    .querySelector('h1,h2,h3,h4')
+    ?.textContent?.replace(/\s+/g, ' ')
+    .trim();
+  return floorPlan ? { id: null, label: floorPlan } : undefined;
+}
+
 export function requiresZillowUnitSelection(
   document: Document,
   url: URL,

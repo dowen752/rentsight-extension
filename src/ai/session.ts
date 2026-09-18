@@ -15,11 +15,8 @@ import {
   type ExtractionCacheEntry,
 } from './cache';
 import { relevantContentFingerprint } from './fingerprint';
-import {
-  EXTRACTION_SCHEMA_VERSION,
-  listingCacheIdentity,
-  type ListingCacheIdentity,
-} from './identity';
+import { listingCacheIdentity, type ListingCacheIdentity } from './identity';
+import { buildExtractionRequest } from './request';
 
 export type AiState =
   | { status: 'idle' }
@@ -115,7 +112,7 @@ export class ExtractionSession {
     this.retryContext = undefined;
     this.listeners.clear();
   }
-  captureFailed() {
+  captureFailed(message?: string) {
     this.generation++;
     this.request = undefined;
     this.publish({
@@ -125,7 +122,8 @@ export class ExtractionSession {
       retryAction: 'none',
       retryAt: 0,
       message:
-        'The listing capture could not be prepared for AI review. Your preliminary values were kept. Refresh the listing to try again.',
+        message ??
+        'The listing capture could not be prepared for AI review. Your preliminary values were kept. Load the listing to try again.',
     });
   }
   prepareCapture() {
@@ -243,20 +241,7 @@ export class ExtractionSession {
     }
     if (generation !== this.generation) return;
     this.cacheContext = { identity, fingerprint, previous, owner };
-    this.request = structuredClone({
-      schemaVersion: EXTRACTION_SCHEMA_VERSION,
-      identity: {
-        requestId: crypto.randomUUID(),
-        captureRevision: aiCapture.captureRevision,
-        listingUrl: page.url,
-        selectedUnit: page.selectedUnitId
-          ? { id: page.selectedUnitId, label: page.selectedUnitId }
-          : null,
-        selectedLeaseTermMonths: aiCapture.selectedLeaseTermMonths,
-      },
-      capture: aiCapture.capture,
-      preliminaryValues: aiCapture.preliminaryValues,
-    });
+    this.request = buildExtractionRequest(page);
     freeze(this.request);
     this.startedAt = Date.now();
     void this.run();

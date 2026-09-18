@@ -3,7 +3,7 @@ import type { SourcedValue, ValueSource } from '../calculations';
 const SOURCE_LABELS: Record<ValueSource, string> = {
   listing: 'Extracted from listing',
   user: 'Entered by user',
-  location_estimate: 'Estimated',
+  location_estimate: 'Local estimate',
   default: 'Default assumption',
 };
 

@@ -71,7 +71,7 @@ describe('rental calculator', () => {
     const partial = listing({ identity: {}, recurring: {}, upfront: {} });
     expect(calculateEstimatedTrueMonthlyCost(partial)).toBe(0);
     expect(calculateCostPerSquareFoot(partial)).toBeUndefined();
-    expect(listMissingCostCategories(partial)).toHaveLength(21);
+    expect(listMissingCostCategories(partial)).toHaveLength(22);
   });
 
   it('estimates paid shared laundry but not in-unit laundry', () => {
@@ -107,11 +107,12 @@ describe('rental calculator', () => {
   it('includes monthly pet rent and pet cash requirements', () => {
     const withPet = listing({
       recurring: { advertisedRent: value(2_000), petRent: value(50) },
-      upfront: { petDeposit: value(300) },
+      upfront: { petDeposit: value(300), petFee: value(250) },
     });
     expect(calculateEstimatedTrueMonthlyCost(withPet)).toBe(2_050);
-    expect(calculateRequiredMoveInCash(withPet)).toBe(300);
+    expect(calculateRequiredMoveInCash(withPet)).toBe(550);
     expect(calculateRefundableDeposits(withPet)).toBe(300);
+    expect(calculateNonrefundableMoveInExpenses(withPet)).toBe(250);
   });
 
   it('amortizes rent concessions over twelve months', () => {

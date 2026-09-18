@@ -12,6 +12,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
+    "test:capture": "vitest run tests/capture",
+    "test:e2e": "vitest run tests/aiExtraction.test.tsx tests/backend.test.ts",
+    "test:live-sites": "vitest run tests/live-sites --passWithNoTests",
     "test:watch": "vitest",
     "contract:generate": "node scripts/generate-extraction-contract.mjs"
   },

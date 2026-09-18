@@ -1,20 +1,18 @@
 import { captureListing, readSelectedLeaseTermMonths } from '../ai/capture';
 import { scoreListingPage } from '../ai/eligibility';
 import { developmentDiagnostic } from '../ai/cache';
-import { appearsToBeRentalListing } from '../shared/listing';
 import { extractListing } from '../extractors';
 import type { ListingExtraction } from '../extractors';
 import { emptyExtraction } from '../extractors/types';
 import { observeListingNavigation } from './navigation';
 import {
-  appearsToBeHomesRental,
-  appearsToBeSupportedSiteRental,
   requiresHomesUnitSelection,
   requiresRedfinUnitSelection,
   requiresZillowUnitSelection,
   selectedHomesUnitId,
   selectedApartmentsUnitId,
   selectedRedfinUnitId,
+  selectedRealtorUnit,
   selectedZillowUnitId,
 } from './pageState';
 import type {
@@ -41,7 +39,16 @@ const selectedUnitIdForPage = (
 function getPageInfo(): PageInfo {
   const browserUrl = window.location.href;
   const parsedUrl = new URL(browserUrl);
-  const selectedUnitId = selectedUnitIdForPage(document, parsedUrl);
+  const realtorUnit = selectedRealtorUnit(document, parsedUrl);
+  const selectedUnitId =
+    realtorUnit?.id ??
+    realtorUnit?.label ??
+    selectedUnitIdForPage(document, parsedUrl);
+  const selectedUnit =
+    realtorUnit ??
+    (selectedUnitId
+      ? { id: selectedUnitId, label: selectedUnitId }
+      : undefined);
   const url = selectedUnitId
     ? `${browserUrl.split('#')[0]}#rentsight-unit=${encodeURIComponent(selectedUnitId)}`
     : browserUrl;
@@ -58,6 +65,7 @@ function getPageInfo(): PageInfo {
       appearsToBeRentalListing: true,
       requiresUnitSelection: true,
       selectedUnitId,
+      selectedUnit,
     };
   }
   try {
@@ -78,21 +86,19 @@ function getPageInfo(): PageInfo {
   const eligibility = scoreListingPage(document, parsedUrl, extraction);
   developmentDiagnostic('eligibility', {
     classification: eligibility.classification,
+    pageShape: eligibility.pageShape,
+    transaction: eligibility.transaction,
     score: eligibility.score,
     positiveSignals: eligibility.positiveSignals,
     negativeSignals: eligibility.negativeSignals,
   });
-  const listingSignal =
-    appearsToBeRentalListing(url, title) ||
-    appearsToBeHomesRental(document, parsedUrl) ||
-    appearsToBeSupportedSiteRental(document, parsedUrl, extraction);
   return {
     url,
     title,
-    appearsToBeRentalListing:
-      listingSignal && eligibility.classification !== 'low',
+    appearsToBeRentalListing: eligibility.isRentalListing,
     requiresUnitSelection: false,
     selectedUnitId,
+    selectedUnit,
     extraction,
     eligibility,
   };
@@ -108,7 +114,11 @@ if (!contentWindow.__rentSightInitialized) {
       const payload = getPageInfo();
       if (message.type === 'GET_AI_CAPTURE' && payload.extraction) {
         try {
-          payload.aiCapture = captureListing(document, payload.extraction);
+          payload.aiCapture = captureListing(
+            document,
+            payload.extraction,
+            payload.selectedUnitId,
+          );
         } catch {
           console.warn(
             '[RentSight] AI capture failed; local extraction remains available',

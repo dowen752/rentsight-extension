@@ -2,7 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AiState } from '../ai/session';
 import type { RentalAnalysis } from '../shared/analysis';
 import { adaptExtraction } from '../ai/adapter';
-import { formatReviewIssue } from './reviewIssueLabels';
+import {
+  formatReviewIssue,
+  shouldSuggestPropertyNote,
+} from './reviewIssueLabels';
 import { AiMark } from './AiMark';
 
 export interface AiControls {
@@ -67,7 +70,7 @@ export function AiExtractionCard({ controls }: { controls: AiControls }) {
             {running
               ? 'AI review in progress'
               : failed
-                ? 'AI review couldn’t finish'
+                ? 'Your listing details are ready'
                 : state.status === 'failed' && state.continued
                   ? 'Using preliminary details'
                   : 'AI review complete'}
@@ -110,12 +113,12 @@ export function AiExtractionCard({ controls }: { controls: AiControls }) {
               {wait
                 ? `Retry in ${wait}s`
                 : state.retryAction === 'refresh'
-                  ? 'Refresh listing and try again'
+                  ? 'Load listing and try again'
                   : 'Retry AI extraction'}
             </button>
           )}
           <button type="button" onClick={controls.continueWithPreliminary}>
-            Continue with preliminary values
+            Review preliminary details
           </button>
         </div>
       )}
@@ -133,8 +136,70 @@ export function AiSourceReview({
   const response = analysis.aiExtraction;
   if (!response) return null;
   const { manualCharges } = adaptExtraction(response);
+  const noteDecisionKey = (id: string) => `note:${id}`;
+  const suggestedNotes = response.result.notes.filter(
+    (note) =>
+      shouldSuggestPropertyNote(note) &&
+      !analysis.aiReviewDecisions?.[noteDecisionKey(note.id)],
+  );
   return (
     <section className="ai-source-review">
+      {suggestedNotes.length > 0 && (
+        <div className="ai-note-suggestions">
+          <h2>Suggested property details</h2>
+          <p>Keep useful listing details that do not fit the cost inputs.</p>
+          {suggestedNotes.map((note) => (
+            <div className="ai-note-suggestion" key={note.id}>
+              <p>{note.text}</p>
+              <div className="ai-note-actions">
+                <button
+                  type="button"
+                  onClick={() =>
+                    update((current) => {
+                      const next = structuredClone(current);
+                      const key = noteDecisionKey(note.id);
+                      next.aiReviewDecisions ??= {};
+                      next.aiReviewDecisions[key] = 'noted';
+                      if (
+                        !(next.propertyNotes ?? []).some(
+                          (item) => item.sourceId === key,
+                        )
+                      ) {
+                        next.propertyNotes ??= [];
+                        next.propertyNotes.push({
+                          id: crypto.randomUUID(),
+                          text: note.text,
+                          source: 'ai',
+                          sourceId: key,
+                        });
+                      }
+                      next.updatedAt = new Date().toISOString();
+                      return next;
+                    })
+                  }
+                >
+                  Keep note
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    update((current) => {
+                      const next = structuredClone(current);
+                      next.aiReviewDecisions ??= {};
+                      next.aiReviewDecisions[noteDecisionKey(note.id)] =
+                        'excluded';
+                      next.updatedAt = new Date().toISOString();
+                      return next;
+                    })
+                  }
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {manualCharges.length > 0 && (
         <div className="warning">
           <h2>Review charges and offers</h2>

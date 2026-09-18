@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { NumberField } from '../src/sidepanel/Fields';
 import {
   AnalysisEditor,
+  FindRentalsView,
   GuidedTour,
   UnavailableWorkspace,
 } from '../src/sidepanel/App';
@@ -29,6 +30,19 @@ describe('side-panel fields', () => {
     expect(markup).toContain('aria-label="Monthly rent"');
     expect(markup).toContain('Entered by user');
     expect(markup).toContain('Reset');
+  });
+  it('uses the existing source badge for retained preliminary values', () => {
+    const markup = renderToStaticMarkup(
+      <NumberField
+        label="Bathrooms"
+        field={{ value: 1, source: 'location_estimate', confidence: 0.7 }}
+        baseline={{ value: 1, source: 'location_estimate', confidence: 0.7 }}
+        onChange={() => undefined}
+        onReset={() => undefined}
+      />,
+    );
+    expect(markup).toContain('Local estimate');
+    expect(markup).not.toContain('Extracted from listing');
   });
 });
 
@@ -217,7 +231,7 @@ describe('guided tour', () => {
 });
 
 describe('unavailable listing workspace', () => {
-  it('keeps the saved, compare, and about tabs accessible', () => {
+  it('keeps the find, saved, compare, and about tabs accessible', () => {
     const markup = renderToStaticMarkup(
       <UnavailableWorkspace
         clearAllData={async () => undefined}
@@ -230,11 +244,23 @@ describe('unavailable listing workspace', () => {
     );
 
     expect(markup).toContain('Current page cannot be inspected.');
+    expect(markup).toContain('>Find</button>');
     expect(markup).toContain('>Current</button>');
     expect(markup).toContain('>Saved (0)</button>');
     expect(markup).toContain('>Compare (0)</button>');
     expect(markup).toContain('>About</button>');
-    expect(markup.match(/Refresh listing/g)).toHaveLength(1);
+    expect(markup.match(/Load listing/g)).toHaveLength(1);
     expect(markup).not.toContain('Check again');
+  });
+
+  it('provides an accessible search form for the Find workspace', () => {
+    const markup = renderToStaticMarkup(<FindRentalsView />);
+
+    expect(markup).toContain('aria-labelledby="find-rentals-heading"');
+    expect(markup).toContain('<h1 id="find-rentals-heading">Find rentals</h1>');
+    expect(markup).toContain('City, state or ZIP');
+    expect(markup).toContain('Minimum listed rent');
+    expect(markup).toContain('Parking available');
+    expect(markup).toContain('Show rental sites');
   });
 });

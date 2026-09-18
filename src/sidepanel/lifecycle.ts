@@ -21,7 +21,6 @@ export type ViewState =
   | { status: 'loading' }
   | { status: 'data-cleared' }
   | { status: 'unit-selection-required' }
-  | { status: 'unsupported'; url: string; title: string }
   | ReadyViewState
   | { status: 'error'; message: string };
 

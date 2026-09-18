@@ -5,11 +5,7 @@ import type {
   UtilityCategory,
 } from '../calculations';
 import { emptyExtraction } from '../extractors/types';
-import {
-  applyExtraction,
-  createInitialAnalysis,
-  type RentalAnalysis,
-} from '../shared/analysis';
+import { applyExtraction, type RentalAnalysis } from '../shared/analysis';
 import type { ExtractionSuccess } from './types';
 import type { MoneyField } from './contracts/response';
 
@@ -47,13 +43,17 @@ export function adaptExtraction(response: ExtractionSuccess) {
     !response.identity.selectedUnit || field.scope === 'selected_unit';
   const known = <T>(field: Field<T>) =>
     field.status === 'known' && field.value !== null;
-  const amount = (field: MoneyField, frequency: 'monthly' | 'one_time') => {
+  const amount = (
+    field: MoneyField,
+    frequency: 'monthly' | 'one_time',
+    allowedBases: readonly string[] = ['per_unit'],
+  ) => {
     const m = field.value;
     return known(field) &&
       m?.kind === 'exact' &&
       m.currency === 'USD' &&
       m.frequency === frequency &&
-      m.basis === 'per_unit' &&
+      allowedBases.includes(m.basis) &&
       unitSafe(field)
       ? m.minMinor! / 100
       : undefined;
@@ -81,7 +81,7 @@ export function adaptExtraction(response: ExtractionSuccess) {
         p[propertyKey],
       );
   for (const key of ['bedrooms', 'bathrooms'] as const)
-    if (known(p[key]) && unitSafe(p[key]))
+    if (known(p[key]) && unitSafe(p[key]) && p[key].value! <= 20)
       extraction.listing.identity[key] = sourced(p[key].value!, p[key]);
   if (
     known(p.floorArea) &&
@@ -124,20 +124,38 @@ export function adaptExtraction(response: ExtractionSuccess) {
     administration: 'administrativeFee',
     security_deposit: 'securityDeposit',
     pet_deposit: 'petDeposit',
+    pet_fee: 'petFee',
     move_in: 'otherMoveInFees',
     other: 'otherMoveInFees',
   };
   const defer = (id: string, label: string, detail: string) =>
     manualCharges.push({ id, label, detail });
   for (const fee of p.fees.status === 'known' ? p.fees.value! : []) {
-    const monthly = amount(fee.amount, 'monthly');
-    const once = amount(fee.amount, 'one_time');
+    const petCharge =
+      fee.category === 'pet_rent' ||
+      fee.category === 'pet_deposit' ||
+      fee.category === 'pet_fee';
+    const allowedBases =
+      fee.category === 'pet_rent' ||
+      fee.category === 'pet_deposit' ||
+      fee.category === 'pet_fee'
+        ? ['per_unit', 'per_pet']
+        : fee.category === 'application'
+          ? ['per_unit', 'per_person', 'per_application']
+          : ['per_unit'];
+    const monthly = amount(fee.amount, 'monthly', allowedBases);
+    const once = amount(fee.amount, 'one_time', allowedBases);
     const deposit = fee.category.endsWith('_deposit');
+    const standardApplicability =
+      fee.applicability.kind === 'required' ||
+      (petCharge &&
+        (fee.applicability.kind === 'optional' ||
+          fee.applicability.kind === 'conditional'));
     const refundableSafe = deposit
       ? fee.refundable.status === 'known' && fee.refundable.value === true
       : fee.refundable.status === 'known' && fee.refundable.value === false;
     if (
-      fee.applicability.kind === 'required' &&
+      standardApplicability &&
       refundableSafe &&
       monthly !== undefined &&
       recurring[fee.category]
@@ -149,7 +167,7 @@ export function adaptExtraction(response: ExtractionSuccess) {
         fee.amount,
       );
     } else if (
-      fee.applicability.kind === 'required' &&
+      standardApplicability &&
       refundableSafe &&
       once !== undefined &&
       upfront[fee.category]
@@ -244,19 +262,52 @@ export function adaptExtraction(response: ExtractionSuccess) {
   return { extraction, manualCharges };
 }
 
-// The current user-sourced fields and explicit deletions are the override layer.
-// Rebuild from defaults + AI only; no preliminary listing facts survive.
+function markRetainedPreliminaryLocal(
+  analysis: RentalAnalysis,
+): RentalAnalysis {
+  const next = structuredClone(analysis);
+  for (const group of [
+    'identity',
+    'recurring',
+    'upfront',
+    'concessions',
+  ] as const)
+    for (const field of Object.values(next.listing[group] ?? {}))
+      if (field?.source === 'listing') field.source = 'location_estimate';
+  for (const group of [
+    'identity',
+    'recurring',
+    'upfront',
+    'concessions',
+  ] as const)
+    for (const field of Object.values(next.baseline[group] ?? {}))
+      if (field?.source === 'listing') field.source = 'location_estimate';
+  return next;
+}
+
+export function retainPreliminaryAfterAiFailure(
+  analysis: RentalAnalysis,
+): RentalAnalysis {
+  const next = markRetainedPreliminaryLocal(analysis);
+  next.updatedAt = new Date().toISOString();
+  return next;
+}
+
+// AI is an enrichment layer: known fields overlay preliminary values, while
+// quarantined/unknown fields leave the local baseline intact. User values and
+// deliberate deletions remain authoritative over both layers.
 export function applyAiExtraction(
   current: RentalAnalysis,
   response: ExtractionSuccess,
 ): RentalAnalysis {
   const { extraction } = adaptExtraction(response);
-  const fresh = applyExtraction(
-    createInitialAnalysis(response.identity.listingUrl),
-    extraction,
-  );
+  const preliminary = markRetainedPreliminaryLocal(current);
+  // Suppress applyExtraction's stale-local cleanup. Missing fields in this
+  // adapted extraction represent AI unknown/conflict fields, not deletions.
+  const enrichmentBase = { ...preliminary, extraction: undefined };
+  const fresh = applyExtraction(enrichmentBase, extraction);
   const next: RentalAnalysis = {
-    ...structuredClone(current),
+    ...fresh,
     listing: fresh.listing,
     baseline: fresh.baseline,
     extraction,
@@ -268,7 +319,7 @@ export function applyAiExtraction(
     locationEstimate: undefined,
     laundryType:
       current.laundryType === current.extraction?.laundryType
-        ? 'unknown'
+        ? fresh.laundryType
         : current.laundryType,
     updatedAt: new Date().toISOString(),
   };

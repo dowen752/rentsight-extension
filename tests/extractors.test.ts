@@ -8,6 +8,8 @@ import {
   classifyIncludedUtilities,
   classifyLaundry,
   classifyNoPetsPolicy,
+  parseBedBathShorthand,
+  parseLabeledMoney,
   parseRentEvidence,
 } from '../src/extractors/parsers';
 
@@ -18,6 +20,90 @@ const fixture = (name: string, url = 'https://example.com/rental') => {
 };
 
 describe('listing extraction', () => {
+  it('associates fee amounts within punctuation-bounded clauses in either order', () => {
+    const text =
+      'A $55 application fee per applicant; a one-time $75 admin fee; an $11 monthly utility management fee.';
+    expect(parseLabeledMoney(text, /application fee/i)?.amount).toBe(55);
+    expect(parseLabeledMoney(text, /admin fee/i)?.amount).toBe(75);
+    expect(parseLabeledMoney(text, /utility management fee/i)?.amount).toBe(11);
+    expect(
+      parseLabeledMoney('Application fee: $40.', /application fee/i)?.amount,
+    ).toBe(40);
+  });
+  it('parses contextual bedroom and bathroom shorthand conservatively', () => {
+    expect(parseBedBathShorthand('2BR/1BA')).toMatchObject({
+      bedrooms: 2,
+      bathrooms: 1,
+    });
+    expect(parseBedBathShorthand('2 BD, 1.5 BA')).toMatchObject({
+      bedrooms: 2,
+      bathrooms: 1.5,
+    });
+    expect(parseBedBathShorthand('Studio/1BA')).toMatchObject({
+      bedrooms: 0,
+      bathrooms: 1,
+    });
+    expect(
+      parseBedBathShorthand('Desired move-in date 10/01/26'),
+    ).toBeUndefined();
+  });
+
+  it('rejects structured addresses that conflict with the canonical listing', () => {
+    const document = new JSDOM(`
+      <script type="application/ld+json">${JSON.stringify({
+        '@type': 'Apartment',
+        url: 'https://www.realtor.com/rentals/details/730-29th-St_Boulder_CO',
+        address: {
+          streetAddress: '730 29th St',
+          addressLocality: 'Boulder',
+          addressRegion: 'CO',
+          postalCode: '80303',
+        },
+      })}</script>
+    `).window.document;
+    const result = extractJsonLd(
+      document,
+      new URL(
+        'https://www.realtor.com/rentals/details/2950-Bixby-Ln_Boulder_CO_80303',
+      ),
+    );
+    expect(result.listing.identity.fullAddress).toBeUndefined();
+  });
+  it('uses one representative value for duplicate Realtor.com units', () => {
+    const url = new URL(
+      'https://www.realtor.com/rentals/details/2950-Bixby-Ln_Boulder_CO_80303_M16811-47115',
+    );
+    const document = new JSDOM(`
+      <html><body>
+        <main><h2>2950 Bixby Ln, Boulder, CO 80303</h2></main>
+        <div role="dialog" aria-modal="true">
+          <div data-testid="modal-content">
+            <h3>2BR/1BA</h3>
+            <div data-testid="modal-body">
+              <table>
+                <thead><tr><th>Unit</th><th>Price</th><th>Sqft</th><th>Availability</th></tr></thead>
+                <tbody>
+                  <tr><td>Private-2-1120269</td><td>$845</td><td>660 sqft</td><td>Now</td></tr>
+                  <tr><td>Private-2-1120269</td><td>$845</td><td>660 sqft</td><td>Now</td></tr>
+                  <tr><td></td><td>$845</td><td>660 sqft</td><td>Now</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <form><span>Date: 10/01/26</span><input value="10/01/2026"></form>
+          </div>
+        </div>
+      </body></html>
+    `).window.document;
+
+    const result = extractListing(document, url);
+
+    expect(result.siteName).toBe('Realtor.com');
+    expect(result.listing.identity.bedrooms?.value).toBe(2);
+    expect(result.listing.identity.bathrooms?.value).toBe(1);
+    expect(result.listing.identity.squareFootage?.value).toBe(660);
+    expect(result.listing.recurring.advertisedRent?.value).toBe(845);
+    expect(result.rent).toMatchObject({ kind: 'single' });
+  });
   it('treats equal advertised rent bounds as one exact rent', () => {
     expect(parseRentEvidence(['$3,845 - $3,845'], 0.6)).toMatchObject({
       kind: 'single',
@@ -48,6 +134,72 @@ describe('listing extraction', () => {
     expect(result.listing.identity.squareFootage?.value).toBe(1_250);
     expect(result.listing.recurring.advertisedRent?.value).toBe(2_650);
     expect(result.listing.upfront.securityDeposit?.value).toBe(2_000);
+  });
+
+  it('prefers Zillow calculator rows and preserves optional pet charges', () => {
+    const url = new URL('https://www.zillow.com/homedetails/example/1_zpid/');
+    const document = new JSDOM(`
+      <main>
+        <h1>2045 Houdini St, Henderson, NV 89002</h1>
+        <span data-testid="price">$2,125/mo</span>
+        <span>3 beds</span><span>2.5 baths</span><span>1,635 sqft</span>
+        <div data-testid="description">
+          A $55 application fee per applicant; a one-time $75 admin fee;
+          an $11 monthly utility management fee.
+        </div>
+        <div id="monthly-section">
+          <div class="required-group">
+            <div class="base-rent-fee fee-row"><span>Monthly base rent</span><span>$2,100</span></div>
+            <div class="garbage-fee-fee fee-row"><span>Trash Fee</span><span>$25</span></div>
+            <div class="utilities-monthly-fee-fee fee-row"><span>Utility Management Fee</span><span>$0</span></div>
+          </div>
+          <div class="optional-group">
+            <div class="pet-rent-fee fee-row"><span>Pet Rent ($30 per pet)</span><span>$0</span></div>
+          </div>
+        </div>
+        <div id="move-in-section">
+          <div class="required-group">
+            <div class="administration-fee fee-row"><span>Admin Fee</span><span>$75</span></div>
+            <div class="application-fee fee-row"><span>Application Fee ($55 per adult applicant)</span><span>$55</span></div>
+            <div class="security-deposit-fee fee-row"><span>Security Deposit</span><span>$2,100</span><span>Refundable</span></div>
+          </div>
+          <div class="optional-group">
+            <div class="pet-fee-fee fee-row"><span>Pet Fee ($300 per pet)</span><span>$0</span></div>
+          </div>
+        </div>
+      </main>
+    `).window.document;
+
+    const result = extractListing(document, url);
+
+    expect(result.listing.upfront.applicationFee?.value).toBe(55);
+    expect(result.listing.recurring.advertisedRent?.value).toBe(2_100);
+    expect(result.listing.upfront.administrativeFee?.value).toBe(75);
+    expect(result.listing.upfront.securityDeposit?.value).toBe(2_100);
+    expect(result.listing.upfront.petFee?.value).toBe(300);
+    expect(result.listing.recurring.petRent?.value).toBe(30);
+    expect(result.listing.recurring.trash?.value).toBe(25);
+    expect(result.listing.recurring.otherRequiredMonthlyFees?.value).toBe(0);
+    expect(result.warnings).toContain(
+      "Zillow's property-specific calculator and description list different utility management fee amounts. The calculator value was used; confirm it with the housing provider.",
+    );
+  });
+
+  it('reads Zillow facts split across sibling spans inside a button', () => {
+    const url = new URL('https://www.zillow.com/homedetails/example/1_zpid/');
+    const document = new JSDOM(`
+      <main>
+        <h1>200 Sample Road, Testville, CA 90210</h1>
+        <span data-testid="price">$2,650/mo</span>
+        <button>
+          <div data-testid="bed-bath-sqft-facts"><span>4</span><span>beds</span><span>3</span><span>baths</span><span>2,986</span><span>sqft</span></div>
+        </button>
+      </main>
+    `).window.document;
+
+    const result = extractListing(document, url);
+
+    expect(result.listing.identity.bathrooms?.value).toBe(3);
   });
 
   it('does not fill missing Zillow detail facts from background cards', () => {

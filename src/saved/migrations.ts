@@ -86,6 +86,7 @@ const UPFRONT_FIELDS = {
   firstMonthsRent: 'number',
   lastMonthsRent: 'number',
   petDeposit: 'number',
+  petFee: 'number',
   administrativeFee: 'number',
   utilityDeposits: 'number',
   otherMoveInFees: 'number',

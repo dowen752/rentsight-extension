@@ -50,7 +50,7 @@ Run `npm run dev` for a watched development build. Vite rebuilds `dist/` when so
 
 Data flows from the active tab's layered extractor into a normalized, metadata-bearing listing. The side panel merges extraction into a persisted draft without replacing user values. Pure calculation functions materialize that analysis for results. Saving creates a separately versioned snapshot; comparisons recalculate snapshots rather than persisting derived totals. Location resolution is optional, cached, and provider-based, and unresolved locations leave national assumptions in place.
 
-The manifest grants the RentSight API origin only (`https://api.umbrellabrand.co/*`) and no broad listing-site host permissions. Opening the extension grants temporary `activeTab` access, allowing the service worker to inject `content.js` only into the page the user chose to inspect. Chrome-internal pages cannot be inspected and surface a friendly error in the panel.
+The manifest grants required access only to the RentSight API and authentication origins. Opening the extension grants temporary `activeTab` access, allowing the service worker to inject `content.js` only into the page the user chose to inspect. The Find workflow declares separate optional permissions for Zillow and Apartments.com; Chrome requests the relevant site access only when a user launches an assisted search that needs filters applied through that site's page controls. Chrome-internal pages cannot be inspected and surface a friendly error in the panel.
 
 ## RentSight Cloud and billing integration
 
@@ -151,7 +151,7 @@ To add a real provider, implement the relevant interface in `src/location/types.
 
 ## Privacy considerations
 
-RentSight performs listing extraction locally in the user-selected active tab and does not bulk scrape or automatically browse sites. Drafts, saved listings, and location cache entries stay in `chrome.storage.local` for the current Chrome profile unless the user explicitly exports them. When RentSight Cloud is configured, the extension contacts only the declared RentSight API origin to check account entitlement and initiate user-requested billing; AI review uploads relevant listing content and preliminary values to the backend and OpenAI, excluding customer overrides and household assumptions. The extension requests no broad listing-site host permission and includes no analytics, authentication bypass, or CAPTCHA workaround. Exported files may contain addresses and financial assumptions; users should store and share them accordingly.
+RentSight performs listing extraction locally in the user-selected active tab and does not bulk scrape sites. Its listing-site host permissions are optional and limited to Zillow and Apartments.com; when granted from the Find workflow, RentSight applies supported requested filters through the chosen site's own controls in that newly opened search. Drafts, saved listings, and location cache entries stay in `chrome.storage.local` for the current Chrome profile unless the user explicitly exports them. When RentSight Cloud is configured, the extension contacts only the declared RentSight API origin to check account entitlement and initiate user-requested billing; AI review uploads relevant listing content and preliminary values to the backend and OpenAI, excluding customer overrides and household assumptions. The extension includes no analytics, authentication bypass, or CAPTCHA workaround. Exported files may contain addresses and financial assumptions; users should store and share them accordingly.
 
 ## Known limitations
 
@@ -184,10 +184,12 @@ A placeholder or legacy response produces a visible failure and explicit fallbac
 Frontend validation uses contract fixtures and mocked transport; it does not make
 live provider calls.
 
-`src/ai/contracts` vendors the shared 1.0.0 schemas. `npm run contract:generate`
+`src/ai/contracts` vendors the backend-authoritative 1.1.0 schemas. `npm run contract:generate`
 generates TypeScript wire types and CSP-compatible standalone validators (no
 runtime schema compilation). Refresh the vendored schemas deliberately when the
-shared contract changes. Fixtures in `tests/fixtures/ai` come from that contract.
+backend contract changes. The capture suite checks that the schema ID, generated
+type, and runtime request remain on the same version. Fixtures in
+`tests/fixtures/ai` come from that contract.
 
 Captures are bounded, preserve JSON-LD and text/table/footnote blocks, report
 missing sections/truncation, and never contain customer overrides. This initial
@@ -208,3 +210,38 @@ are mapped; qualified charges and promotions require an explicit manual decision
 The original AI response retains all ranges, conditions, source scope, evidence,
 notes, identity, and metadata alongside saved analyses. Source notes are labeled
 as baseline context so they do not claim to support customer overrides.
+
+### Capture regression and evaluation-fixture workflow
+
+The frontend tests browser DOM interpretation and request construction; the
+backend evaluation corpus tests model interpretation, Structured Outputs, and
+semantic validation. Frontend tests never call the real backend or a paid model.
+
+- `npm run test:capture` runs deterministic stored/synthetic HTML capture tests.
+- `npm run test:e2e` runs the extension flow with mocked transport.
+- `npm run test:live-sites` is an explicit, optional public-site smoke-test lane
+  and is never required for ordinary pull requests.
+
+Capture fixtures live in `tests/capture/fixtures`. Development builds show an
+**Export extraction capture** action in the Current view after capture is ready.
+It downloads the exact normalized v1.1.0 request body with a fresh request UUID;
+it does not upload anything. Production builds do not include the action. The
+request shape contains only identity, capture metadata and blocks, and preliminary
+listing values—not authorization headers, Firebase tokens, cookies, extension
+storage, Stripe data, customer edits, or household assumptions.
+
+Before placing an export at `backend/evals/cases/<case-name>/capture.json`, copy it
+to a working file and remove or replace personal details that are unrelated to the
+failure (names, contact details, exact addresses, tracking query parameters, and
+unrelated page copy). Preserve evidence-relevant text exactly—including labels,
+amounts, cadence, qualifications, section paths, selected-unit context, and block
+boundaries—or the fixture no longer reproduces the defect. Review the complete
+JSON manually before committing it.
+
+For a problematic listing: reproduce it in the extension, export the normalized
+request, and decide whether browser capture or backend interpretation is wrong.
+Reduce the defect to a reusable structural class. If capture is wrong, add a
+sanitized HTML fixture and fix the general capture rule. If interpretation is
+wrong, add the sanitized request to the backend evaluation corpus. Run both
+relevant suites. Do not add listing-specific selectors, hostname exceptions, or
+text rewrites merely to make one property pass.

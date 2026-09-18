@@ -10,6 +10,7 @@ const isObject = (value: unknown): value is JsonObject =>
 function findListing(
   value: unknown,
   budget: { remaining: number },
+  pageUrl?: URL,
   depth = 0,
 ): JsonObject | undefined {
   budget.remaining -= 1;
@@ -17,7 +18,7 @@ function findListing(
   if (depth > 8) return undefined;
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = findListing(item, budget, depth + 1);
+      const found = findListing(item, budget, pageUrl, depth + 1);
       if (found) return found;
     }
     return undefined;
@@ -27,10 +28,40 @@ function findListing(
   if (
     keys.some((key) => /address/i.test(key)) &&
     keys.some((key) => /(?:rent|price)/i.test(key))
-  )
-    return value;
+  ) {
+    const candidateUrl = getString(value, [
+      'url',
+      'canonicalUrl',
+      'listingUrl',
+    ]);
+    if (candidateUrl && pageUrl) {
+      try {
+        const candidate = new URL(candidateUrl, pageUrl);
+        if (
+          candidate.hostname === pageUrl.hostname &&
+          candidate.pathname !== pageUrl.pathname
+        )
+          return undefined;
+      } catch {
+        // Ignore opaque application identifiers.
+      }
+    }
+    const addressValue = value.address;
+    const street =
+      typeof addressValue === 'string'
+        ? addressValue
+        : isObject(addressValue)
+          ? getString(addressValue, ['streetAddress', 'street', 'fullAddress'])
+          : undefined;
+    const pageNumber = pageUrl?.pathname.match(
+      /(?:^|\D)(\d{1,6})(?:\D|$)/,
+    )?.[1];
+    const streetNumber = street?.match(/^\s*(\d{1,6})\b/)?.[1];
+    if (!pageNumber || !streetNumber || pageNumber === streetNumber)
+      return value;
+  }
   for (const child of Object.values(value)) {
-    const found = findListing(child, budget, depth + 1);
+    const found = findListing(child, budget, pageUrl, depth + 1);
     if (found) return found;
   }
   return undefined;
@@ -56,7 +87,10 @@ function getNumber(object: JsonObject, names: string[]): number | undefined {
   return undefined;
 }
 
-export function extractEmbeddedData(document: Document): ListingExtraction {
+export function extractEmbeddedData(
+  document: Document,
+  pageUrl?: URL,
+): ListingExtraction {
   const result = emptyExtraction('Embedded listing data', '1.0.0');
   const scripts = document.querySelectorAll<HTMLScriptElement>(
     'script#__NEXT_DATA__, script[type="application/json"][data-hypernova-key], script#__APOLLO_STATE__',
@@ -70,9 +104,11 @@ export function extractEmbeddedData(document: Document): ListingExtraction {
         );
         continue;
       }
-      const found = findListing(JSON.parse(source), {
-        remaining: MAX_VISITED_NODES,
-      });
+      const found = findListing(
+        JSON.parse(source),
+        { remaining: MAX_VISITED_NODES },
+        pageUrl,
+      );
       if (!found) continue;
       const addressValue = found.address;
       const address =

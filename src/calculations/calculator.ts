@@ -38,6 +38,7 @@ const UPFRONT_LABELS: Record<UpfrontCostCategory, string> = {
   firstMonthsRent: "First month's rent",
   lastMonthsRent: "Last month's rent",
   petDeposit: 'Pet deposit',
+  petFee: 'Pet fee',
   administrativeFee: 'Administrative fee',
   utilityDeposits: 'Utility deposits',
   otherMoveInFees: 'Other move-in fees',
@@ -90,12 +91,14 @@ export function calculateNonrefundableMoveInExpenses(
   listing: RentalListing,
 ): number {
   assertValidListing(listing);
-  const { applicationFee, administrativeFee, otherMoveInFees } =
+  const { applicationFee, administrativeFee, petFee, otherMoveInFees } =
     listing.upfront;
-  return [applicationFee, administrativeFee, otherMoveInFees].reduce<number>(
-    (total, field) => total + (field?.value ?? 0),
-    0,
-  );
+  return [
+    applicationFee,
+    administrativeFee,
+    petFee,
+    otherMoveInFees,
+  ].reduce<number>((total, field) => total + (field?.value ?? 0), 0);
 }
 
 export function calculateRefundableDeposits(listing: RentalListing): number {

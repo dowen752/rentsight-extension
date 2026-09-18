@@ -4,6 +4,7 @@ import {
   classifyNoPetsPolicy,
   listingValue,
   parseMoney,
+  parseBedBathShorthand,
   parseNumberNear,
   parseRentEvidence,
   parseUsAddress,
@@ -64,16 +65,19 @@ export const genericExtractor: ListingExtractor = {
     result.rent = parseRentEvidence(rentLines, 0.55);
     if (result.rent?.kind === 'single')
       result.listing.recurring.advertisedRent = result.rent.amount;
+    const shorthand = parseBedBathShorthand(body);
     const bedrooms =
+      (shorthand?.bedrooms ??
       /\d+(?:\.\d+)?\s*(?:-|–|—|to)\s*\d+(?:\.\d+)?\s*(?:bed(?:room)?s?|bd)\b/i.test(
         body,
-      )
+      ))
         ? undefined
         : parseNumberNear(body, /(\d+(?:\.\d+)?)\s*(?:bed(?:room)?s?|bd)\b/i);
     const bathrooms =
+      (shorthand?.bathrooms ??
       /\d+(?:\.\d+)?\s*(?:-|–|—|to)\s*\d+(?:\.\d+)?\s*(?:bath(?:room)?s?|ba)\b/i.test(
         body,
-      )
+      ))
         ? undefined
         : parseNumberNear(body, /(\d+(?:\.\d+)?)\s*(?:bath(?:room)?s?|ba)\b/i);
     const squareFeet =
@@ -83,9 +87,17 @@ export const genericExtractor: ListingExtractor = {
         ? undefined
         : parseNumberNear(body, /([\d,]+)\s*(?:sq\.?\s*ft|square feet)\b/i);
     if (bedrooms !== undefined)
-      result.listing.identity.bedrooms = listingValue(bedrooms, 0.58);
+      result.listing.identity.bedrooms = listingValue(
+        bedrooms,
+        shorthand ? 0.82 : 0.58,
+        shorthand?.rawText,
+      );
     if (bathrooms !== undefined)
-      result.listing.identity.bathrooms = listingValue(bathrooms, 0.58);
+      result.listing.identity.bathrooms = listingValue(
+        bathrooms,
+        shorthand ? 0.82 : 0.58,
+        shorthand?.rawText,
+      );
     if (squareFeet !== undefined)
       result.listing.identity.squareFootage = listingValue(squareFeet, 0.58);
     const depositText = body.match(/security deposit[^\n.]*\$[\d,]+/i)?.[0];
