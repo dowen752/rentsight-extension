@@ -1,11 +1,16 @@
 import { acceptResponse, assertRequest } from '../ai/validation';
 import type { ExtractionRequest, ExtractionResponse } from '../ai/types';
+import {
+  acceptAssistantResponse,
+  type AssistantRequest,
+  type AssistantResponse,
+} from '../assistant';
 import { RENT_SIGHT_API_ORIGIN } from './config';
 import {
   isAccountEntitlements,
   isBillingLink,
+  parseBackendError,
   type AccountEntitlements,
-  type BackendErrorBody,
   type BillingLink,
 } from './types';
 
@@ -19,6 +24,9 @@ export class BackendRequestError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly code?: string,
+    readonly retryable?: boolean,
+    readonly retryAfterSeconds?: number,
   ) {
     super(message);
   }
@@ -36,6 +44,12 @@ export class BackendNetworkError extends Error {
       'Could not reach RentSight cloud services. Check your connection and try again.',
       options,
     );
+  }
+}
+
+export class BackendTimeoutError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('RentSight took too long to respond. Please try again.', options);
   }
 }
 
@@ -132,6 +146,21 @@ export class RentSightBackendClient {
       '/v1/billing/portal',
       { method: 'POST' },
       isBillingLink,
+    );
+  }
+
+  sendAssistantMessage(request: AssistantRequest): Promise<AssistantResponse> {
+    return this.request(
+      '/v1/listings/chat',
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': request.clientRequestId },
+        body: JSON.stringify(request),
+        signal: AbortSignal.timeout(90_000),
+      },
+      (value): value is AssistantResponse =>
+        acceptAssistantResponse(value) !== undefined,
+      acceptAssistantResponse,
     );
   }
 
@@ -246,6 +275,7 @@ export class RentSightBackendClient {
     path: string,
     init: RequestInit,
     validate: (value: unknown) => value is T,
+    normalize?: (value: unknown) => T | undefined,
   ): Promise<T> {
     if (!this.configured) throw new BackendNotConfiguredError();
     const token = await this.options.getAccessToken();
@@ -264,18 +294,31 @@ export class RentSightBackendClient {
         },
       });
     } catch (error: unknown) {
+      if (isTimeoutError(error))
+        throw new BackendTimeoutError({ cause: error });
       throw new BackendNetworkError({ cause: error });
     }
     if (!response.ok) {
-      let body: BackendErrorBody = {};
+      let body: unknown;
       try {
-        body = (await response.json()) as BackendErrorBody;
+        body = await response.json();
       } catch {
         // Non-JSON responses still produce a useful status-based error.
       }
+      const parsed = parseBackendError(body);
+      const retryValues = [
+        parsed.retryAfterSeconds,
+        parseRetryAfter(response.headers.get('Retry-After')),
+      ].filter((value): value is number => value !== undefined);
+      const retryAfterSeconds = retryValues.length
+        ? Math.max(...retryValues)
+        : undefined;
       throw new BackendRequestError(
-        body.message ?? body.error ?? statusMessage(response.status),
+        parsed.message ?? statusMessage(response.status),
         response.status,
+        parsed.code,
+        parsed.retryable,
+        retryAfterSeconds,
       );
     }
     let value: unknown;
@@ -285,9 +328,26 @@ export class RentSightBackendClient {
       throw new UnexpectedBackendResponseError();
     }
     if (!validate(value)) throw new UnexpectedBackendResponseError();
-    return value;
+    return normalize?.(value) ?? value;
   }
 }
+
+const isTimeoutError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === 'AbortError' ||
+    error.name === 'TimeoutError' ||
+    /\b(?:abort|timed?\s*out|timeout)\b/i.test(error.message)
+  );
+};
+
+const parseRetryAfter = (value: string | null): number | undefined => {
+  if (value === null) return undefined;
+  const seconds = /^\d+$/.test(value)
+    ? Number(value)
+    : Math.max(0, Math.ceil((Date.parse(value) - Date.now()) / 1_000));
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+};
 
 const statusMessage = (status: number): string => {
   if (status === 401)

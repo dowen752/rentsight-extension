@@ -93,6 +93,15 @@ describe('Apartments.com assisted search launch', () => {
           <li class="ui-menu-item"><div role="option">Dog and Cat Allowed</div></li>
         </div>
         <input class="advancedFilterMoveInDate" readonly />
+        <div class="datepicker-days">
+          <button class="prev">Previous</button>
+          <span class="datepicker-switch">AUGUST 2026</span>
+          <button class="next">Next</button>
+          <table><tbody><tr>
+            <td class="old day" data-date="${new Date(2026, 7, 24).getTime()}">24</td>
+            <td class="day" data-date="${new Date(2026, 8, 24).getTime()}">24</td>
+          </tr></tbody></table>
+        </div>
         <select id="minSF"><option value="">No Min</option><option value="400">400</option><option value="500">500</option></select>
         <button id="minSF-button"><span class="ui-selectmenu-text">No Min</span></button>
         <div id="minSF-menu"><li class="ui-menu-item"><div role="option">400</div></li><li class="ui-menu-item"><div role="option">500</div></li></div>
@@ -102,9 +111,7 @@ describe('Apartments.com assisted search launch', () => {
         <button id="seeResultBtn">See Results</button>
         </div>
       `,
-      {
-        url: 'https://www.apartments.com/springfield-mo/?mid=20260924',
-      },
+      { url: 'https://www.apartments.com/springfield-mo/' },
     );
     installDom(dom);
     for (const button of dom.window.document.querySelectorAll('button')) {
@@ -124,6 +131,25 @@ describe('Apartments.com assisted search launch', () => {
           button.setAttribute('aria-pressed', 'true');
       });
     }
+    const nextMonth = vi.fn(() => {
+      dom.window.document.querySelector(
+        '.datepicker-days .datepicker-switch',
+      )!.textContent = 'SEPTEMBER 2026';
+    });
+    dom.window.document
+      .querySelector('.datepicker-days .next')
+      ?.addEventListener('click', nextMonth);
+    const adjacentDate = vi.fn();
+    dom.window.document
+      .querySelector('.datepicker-days td.old')
+      ?.addEventListener('click', adjacentDate);
+    dom.window.document
+      .querySelector('.datepicker-days td.day:not(.old)')
+      ?.addEventListener('click', () => {
+        dom.window.document.querySelector<HTMLInputElement>(
+          '.advancedFilterMoveInDate',
+        )!.value = '9/24/2026';
+      });
     dom.window.document
       .querySelector('#adv-petPolicy-select-menu [role="option"]')
       ?.addEventListener('click', () => {
@@ -164,7 +190,6 @@ describe('Apartments.com assisted search launch', () => {
     ).resolves.toEqual({
       applied: [
         'location',
-        'moveInDate',
         'minListedRent',
         'maxListedRent',
         'minBedrooms',
@@ -172,6 +197,7 @@ describe('Apartments.com assisted search launch', () => {
         'minBathrooms',
         'catsAllowed',
         'smallDogsAllowed',
+        'moveInDate',
         'minSquareFeet',
         'parkingAvailable',
         'inUnitLaundry',
@@ -189,7 +215,9 @@ describe('Apartments.com assisted search launch', () => {
       dom.window.document.querySelector<HTMLInputElement>(
         '.advancedFilterMoveInDate',
       )?.value,
-    ).toBe('');
+    ).toBe('9/24/2026');
+    expect(nextMonth).toHaveBeenCalledOnce();
+    expect(adjacentDate).not.toHaveBeenCalled();
     expect(
       dom.window.document
         .querySelector('#PropertyType-1')
@@ -240,11 +268,12 @@ describe('Apartments.com assisted search launch', () => {
       fillApartmentsSearchPage({
         location: 'Springfield, MO',
         catsAllowed: true,
+        moveInDate: '2026-09-24',
         parkingAvailable: true,
       }),
     ).resolves.toEqual({
       applied: ['location', 'parkingAvailable'],
-      failed: ['catsAllowed'],
+      failed: ['catsAllowed', 'moveInDate'],
     });
     expect(seeResults).toHaveBeenCalledOnce();
     dom.window.close();
@@ -295,7 +324,6 @@ describe('Apartments.com assisted search launch', () => {
       'propertyTypes',
       'catsAllowed',
       'smallDogsAllowed',
-      'moveInDate',
       'minSquareFeet',
     ]);
     expect(

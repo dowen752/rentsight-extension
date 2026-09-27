@@ -208,23 +208,38 @@ describe('guided tour', () => {
 
     expect(markup).toContain('role="dialog"');
     expect(markup).toContain('aria-modal="true"');
-    expect(markup).toContain('Quick tour · 1 of 5');
+    expect(markup).toContain('Quick tour · 1 of 6');
     expect(markup).toContain('Review the current listing');
     expect(markup).toContain('Skip tour');
     expect(markup).toContain('>Next</button>');
     expect(markup).toContain('disabled=""');
   });
 
-  it('finishes with a clear start action', () => {
+  it('explains cross-site search in the Find tour step', () => {
     const markup = renderToStaticMarkup(
       <GuidedTour
-        step={4}
+        step={1}
         setStep={() => undefined}
         finish={async () => undefined}
       />,
     );
 
-    expect(markup).toContain('Quick tour · 5 of 5');
+    expect(markup).toContain('Quick tour · 2 of 6');
+    expect(markup).toContain('Search across rental sites');
+    expect(markup).toContain('filters each site can accept already applied');
+    expect(markup).toContain('anything you still need to check');
+  });
+
+  it('finishes with a clear start action', () => {
+    const markup = renderToStaticMarkup(
+      <GuidedTour
+        step={5}
+        setStep={() => undefined}
+        finish={async () => undefined}
+      />,
+    );
+
+    expect(markup).toContain('Quick tour · 6 of 6');
     expect(markup).toContain('Personalize your estimates');
     expect(markup).toContain('Start using RentSight');
   });

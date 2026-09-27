@@ -34,6 +34,11 @@ describe('Find rentals workflow', () => {
   it('saves optional preferences, shows all sites, and opens a routed search', async () => {
     const openUrl = vi.fn().mockResolvedValue(undefined);
     const openApartments = vi.fn().mockResolvedValue({ automated: true });
+    const openRealtor = vi.fn().mockResolvedValue({ automated: true });
+    const openRedfin = vi.fn().mockResolvedValue({ automated: true });
+    const openRent = vi.fn().mockResolvedValue({ automated: true });
+    const openHotpads = vi.fn().mockResolvedValue({ automated: true });
+    const openZumper = vi.fn().mockResolvedValue({ automated: true });
     const openZillow = vi.fn().mockResolvedValue({ automated: true });
     const root = createRoot(container);
     await act(async () => {
@@ -41,6 +46,11 @@ describe('Find rentals workflow', () => {
         <FindRentalsView
           openUrl={openUrl}
           openApartments={openApartments}
+          openRealtor={openRealtor}
+          openRedfin={openRedfin}
+          openRent={openRent}
+          openHotpads={openHotpads}
+          openZumper={openZumper}
           openZillow={openZillow}
         />,
       );
@@ -75,7 +85,7 @@ describe('Find rentals workflow', () => {
         parkingAvailable: true,
       },
     });
-    expect(container.querySelectorAll('.search-site-card')).toHaveLength(8);
+    expect(container.querySelectorAll('.search-site-card')).toHaveLength(7);
     expect(container.textContent).toContain(
       'Will apply: location, maximum rent, parking',
     );
@@ -102,6 +112,48 @@ describe('Find rentals workflow', () => {
     expect(new URL(openApartments.mock.calls[0][1]).href).toBe(
       'https://www.apartments.com/seattle-wa/',
     );
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('Open Realtor.com'))!
+        .click();
+    });
+    expect(openRealtor).toHaveBeenCalledOnce();
+    expect(new URL(openRealtor.mock.calls[0][1]).href).toBe(
+      'https://www.realtor.com/apartments/seattle_WA',
+    );
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('Open Redfin'))!
+        .click();
+    });
+    expect(openRedfin).toHaveBeenCalledOnce();
+    expect(openRedfin.mock.calls[0][1]).toBe('https://www.redfin.com/rentals');
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('Open Rent.com'))!
+        .click();
+    });
+    expect(openRent).toHaveBeenCalledOnce();
+    expect(openRent.mock.calls[0][1]).toBe('https://www.rent.com/');
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('Open HotPads'))!
+        .click();
+    });
+    expect(openHotpads).toHaveBeenCalledOnce();
+    expect(openHotpads.mock.calls[0][1]).toBe('https://hotpads.com/');
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent?.includes('Open Zumper'))!
+        .click();
+    });
+    expect(openZumper).toHaveBeenCalledOnce();
+    expect(openZumper.mock.calls[0][1]).toBe('https://www.zumper.com/');
 
     await act(async () => root.unmount());
   });

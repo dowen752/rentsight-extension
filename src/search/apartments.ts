@@ -14,7 +14,6 @@ export const APARTMENTS_SUPPORTED_CRITERIA: readonly SearchCriterion[] = [
   'catsAllowed',
   'smallDogsAllowed',
   'largeDogsAllowed',
-  'moveInDate',
   'minSquareFeet',
   'parkingAvailable',
   'inUnitLaundry',
@@ -49,7 +48,6 @@ export function apartmentsAppliedCriteria(
   if (search.catsAllowed) applied.push('catsAllowed');
   if (search.smallDogsAllowed) applied.push('smallDogsAllowed');
   if (search.largeDogsAllowed) applied.push('largeDogsAllowed');
-  if (search.moveInDate) applied.push('moveInDate');
   if (
     search.minSquareFeet !== undefined &&
     Number.isFinite(search.minSquareFeet) &&

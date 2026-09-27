@@ -23,6 +23,11 @@
   ],
   "optional_host_permissions": [
     "https://www.apartments.com/*",
+    "https://www.realtor.com/*",
+    "https://www.redfin.com/*",
+    "https://www.rent.com/*",
+    "https://hotpads.com/*",
+    "https://www.zumper.com/*",
     "https://www.zillow.com/*"
   ],
   "content_security_policy": {

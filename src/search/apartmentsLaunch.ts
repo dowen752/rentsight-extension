@@ -246,16 +246,6 @@ export async function fillApartmentsSearchPage(
 
   // The location is encoded in the results-page route before this script runs.
   if (search.location) record(applied, 'location');
-  if (search.moveInDate) {
-    const compactDate = /^\d{4}-\d{2}-\d{2}$/.test(search.moveInDate)
-      ? search.moveInDate.replaceAll('-', '')
-      : undefined;
-    if (
-      compactDate &&
-      new URL(location.href).searchParams.get('mid') === compactDate
-    )
-      record(applied, 'moveInDate');
-  }
 
   const rentCriteria = [
     ...(search.minListedRent !== undefined ? (['minListedRent'] as const) : []),
@@ -382,6 +372,7 @@ export async function fillApartmentsSearchPage(
       criterion: 'largeDogsAllowed',
       enabled: Boolean(search.largeDogsAllowed),
     },
+    { criterion: 'moveInDate', enabled: Boolean(search.moveInDate) },
     {
       criterion: 'minSquareFeet',
       enabled:
@@ -486,6 +477,113 @@ export async function fillApartmentsSearchPage(
             }, 1_500);
           },
         );
+      }
+      if (search.moveInDate) {
+        await applyDetailed(['moveInDate'], async () => {
+          const input = await waitFor(
+            () =>
+              document.querySelector<HTMLInputElement>(
+                '.advancedFilterMoveInDate',
+              ) ?? undefined,
+            1_500,
+          );
+          const parts = search.moveInDate!.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+          if (!parts) throw new Error('Move-in date format was invalid.');
+          const targetYear = Number(parts[1]);
+          const targetMonth = Number(parts[2]) - 1;
+          const targetDay = Number(parts[3]);
+          input.click();
+
+          const monthNames = [
+            'JANUARY',
+            'FEBRUARY',
+            'MARCH',
+            'APRIL',
+            'MAY',
+            'JUNE',
+            'JULY',
+            'AUGUST',
+            'SEPTEMBER',
+            'OCTOBER',
+            'NOVEMBER',
+            'DECEMBER',
+          ];
+          const readVisibleMonth = () => {
+            const label = document.querySelector<HTMLElement>(
+              '.datepicker-days .datepicker-switch',
+            );
+            if (!label) return undefined;
+            const match = (label.textContent ?? '')
+              .trim()
+              .toUpperCase()
+              .match(/^([A-Z]+)\s+(\d{4})$/);
+            if (!match) return undefined;
+            const month = monthNames.indexOf(match[1]);
+            const year = Number(match[2]);
+            return month >= 0 && Number.isFinite(year)
+              ? { label, month, year }
+              : undefined;
+          };
+
+          let visible = await waitFor(
+            () => readVisibleMonth()?.label,
+            1_500,
+          ).then(() => readVisibleMonth());
+          if (!visible)
+            throw new Error('Move-in calendar month was unavailable.');
+          for (let attempts = 0; attempts < 36; attempts += 1) {
+            const delta =
+              (targetYear - visible.year) * 12 + (targetMonth - visible.month);
+            if (delta === 0) break;
+            const previousLabel = visible.label.textContent;
+            const navigation = document.querySelector<HTMLElement>(
+              `.datepicker-days .${delta > 0 ? 'next' : 'prev'}`,
+            );
+            if (!navigation || navigation.classList.contains('disabled'))
+              throw new Error('Move-in calendar navigation was unavailable.');
+            navigation.click();
+            await waitFor(() => {
+              const nextVisible = readVisibleMonth();
+              return nextVisible &&
+                nextVisible.label.textContent !== previousLabel
+                ? nextVisible.label
+                : undefined;
+            }, 1_500);
+            visible = readVisibleMonth();
+            if (!visible)
+              throw new Error('Move-in calendar month was unavailable.');
+          }
+          if (visible.year !== targetYear || visible.month !== targetMonth)
+            throw new Error('Move-in calendar could not reach the date.');
+
+          const targetCell = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              '.datepicker-days td.day[data-date]',
+            ),
+          ).find((cell) => {
+            if (cell.classList.contains('disabled')) return false;
+            const timestamp = Number(cell.dataset.date);
+            if (!Number.isFinite(timestamp)) return false;
+            const candidate = new Date(timestamp);
+            return (
+              candidate.getFullYear() === targetYear &&
+              candidate.getMonth() === targetMonth &&
+              candidate.getDate() === targetDay
+            );
+          });
+          if (!targetCell) throw new Error('Move-in date was not available.');
+          targetCell.click();
+          await waitFor(() => {
+            const [selectedMonth, selectedDay, selectedYear] = input.value
+              .split('/')
+              .map(Number);
+            return selectedMonth === targetMonth + 1 &&
+              selectedDay === targetDay &&
+              selectedYear === targetYear
+              ? input
+              : undefined;
+          }, 1_500);
+        });
       }
       if (search.minSquareFeet !== undefined) {
         await applyDetailed(['minSquareFeet'], async () => {
@@ -622,21 +720,6 @@ export async function launchApartmentsSearch(
       throw new Error(
         'Apartments.com could not resolve the requested location.',
       );
-    }
-    if (search.moveInDate && /^\d{4}-\d{2}-\d{2}$/.test(search.moveInDate)) {
-      const currentTab = await chrome.tabs.get(tab.id);
-      if (currentTab.url) {
-        const currentUrl = new URL(currentTab.url);
-        const compactDate = search.moveInDate.replaceAll('-', '');
-        if (
-          currentUrl.origin === APARTMENTS_ORIGIN &&
-          currentUrl.searchParams.get('mid') !== compactDate
-        ) {
-          currentUrl.searchParams.set('mid', compactDate);
-          await chrome.tabs.update(tab.id, { url: currentUrl.toString() });
-          await waitForApartmentsTab(tab.id);
-        }
-      }
     }
     const [injection] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },

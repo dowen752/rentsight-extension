@@ -5,11 +5,21 @@ import {
   buildSearchLinks,
   getSearchProfile,
   launchApartmentsSearch,
+  launchRealtorSearch,
+  launchRedfinSearch,
+  launchRentSearch,
+  launchHotpadsSearch,
+  launchZumperSearch,
   launchZillowSearch,
   normalizeRentalSearch,
   setSearchProfile,
   type ApartmentsLaunchOutcome,
   type RentalSearch,
+  type RealtorLaunchOutcome,
+  type RedfinLaunchOutcome,
+  type RentLaunchOutcome,
+  type HotpadsLaunchOutcome,
+  type ZumperLaunchOutcome,
   type SearchCriterion,
   type SearchPropertyType,
   type ZillowLaunchOutcome,
@@ -63,6 +73,11 @@ const defaultOpenUrl = async (url: string) => {
 export function FindRentalsView({
   openUrl = defaultOpenUrl,
   openApartments = launchApartmentsSearch,
+  openRealtor = launchRealtorSearch,
+  openRedfin = launchRedfinSearch,
+  openRent = launchRentSearch,
+  openHotpads = launchHotpadsSearch,
+  openZumper = launchZumperSearch,
   openZillow = launchZillowSearch,
 }: {
   openUrl?: (url: string) => Promise<unknown>;
@@ -70,6 +85,26 @@ export function FindRentalsView({
     search: RentalSearch,
     bootstrapUrl: string,
   ) => Promise<ApartmentsLaunchOutcome>;
+  openRealtor?: (
+    search: RentalSearch,
+    bootstrapUrl: string,
+  ) => Promise<RealtorLaunchOutcome>;
+  openRedfin?: (
+    search: RentalSearch,
+    bootstrapUrl: string,
+  ) => Promise<RedfinLaunchOutcome>;
+  openRent?: (
+    search: RentalSearch,
+    bootstrapUrl: string,
+  ) => Promise<RentLaunchOutcome>;
+  openHotpads?: (
+    search: RentalSearch,
+    bootstrapUrl: string,
+  ) => Promise<HotpadsLaunchOutcome>;
+  openZumper?: (
+    search: RentalSearch,
+    bootstrapUrl: string,
+  ) => Promise<ZumperLaunchOutcome>;
   openZillow?: (
     search: RentalSearch,
     bootstrapUrl: string,
@@ -192,6 +227,31 @@ export function FindRentalsView({
       }
       if (siteId === 'zillow' && submittedSearch) {
         const outcome = await openZillow(submittedSearch, url);
+        if (outcome.message) setMessage(outcome.message);
+        return;
+      }
+      if (siteId === 'realtor' && submittedSearch) {
+        const outcome = await openRealtor(submittedSearch, url);
+        if (outcome.message) setMessage(outcome.message);
+        return;
+      }
+      if (siteId === 'redfin' && submittedSearch) {
+        const outcome = await openRedfin(submittedSearch, url);
+        if (outcome.message) setMessage(outcome.message);
+        return;
+      }
+      if (siteId === 'rent' && submittedSearch) {
+        const outcome = await openRent(submittedSearch, url);
+        if (outcome.message) setMessage(outcome.message);
+        return;
+      }
+      if (siteId === 'hotpads' && submittedSearch) {
+        const outcome = await openHotpads(submittedSearch, url);
+        if (outcome.message) setMessage(outcome.message);
+        return;
+      }
+      if (siteId === 'zumper' && submittedSearch) {
+        const outcome = await openZumper(submittedSearch, url);
         if (outcome.message) setMessage(outcome.message);
         return;
       }

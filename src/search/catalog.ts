@@ -15,6 +15,32 @@ import {
   APARTMENTS_SUPPORTED_CRITERIA,
   apartmentsAppliedCriteria,
 } from './apartments';
+import {
+  REALTOR_ORIGIN,
+  REALTOR_SUPPORTED_CRITERIA,
+  realtorAppliedCriteria,
+  realtorLocationPath,
+} from './realtor';
+import {
+  REDFIN_ORIGIN,
+  REDFIN_SUPPORTED_CRITERIA,
+  redfinAppliedCriteria,
+} from './redfin';
+import {
+  RENT_ORIGIN,
+  RENT_SUPPORTED_CRITERIA,
+  rentAppliedCriteria,
+} from './rent';
+import {
+  HOTPADS_ORIGIN,
+  HOTPADS_SUPPORTED_CRITERIA,
+  hotpadsAppliedCriteria,
+} from './hotpads';
+import {
+  ZUMPER_ORIGIN,
+  ZUMPER_SUPPORTED_CRITERIA,
+  zumperAppliedCriteria,
+} from './zumper';
 
 export const SEARCH_CRITERION_LABELS: Record<SearchCriterion, string> = {
   location: 'location',
@@ -45,22 +71,6 @@ function locationSlug(location: string): string {
     .replace(/&/g, ' and ')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
-}
-
-function realtorLocation(location: string): string {
-  const pieces = location.split(',').map((piece) => piece.trim());
-  if (pieces.length === 2 && /^[a-z]{2}$/i.test(pieces[1])) {
-    return `${locationSlug(pieces[0])}_${pieces[1].toUpperCase()}`;
-  }
-  return locationSlug(location);
-}
-
-function rentLocation(location: string): string | undefined {
-  const trimmed = location.trim();
-  if (/^\d{5}$/.test(trimmed)) return `zip-${trimmed}-apartments`;
-  const pieces = trimmed.split(',').map((piece) => piece.trim());
-  if (pieces.length !== 2 || !/^[a-z]{2}$/i.test(pieces[1])) return undefined;
-  return `${locationSlug(pieces[1])}/${locationSlug(pieces[0])}-apartments`;
 }
 
 function readyLink(
@@ -102,13 +112,10 @@ const apartments: SearchSiteDefinition = {
   supportedCriteria: APARTMENTS_SUPPORTED_CRITERIA,
   buildLink(search) {
     const path = search.location ? `/${locationSlug(search.location)}/` : '/';
-    const url = new URL(path, APARTMENTS_ORIGIN);
-    if (search.moveInDate && /^\d{4}-\d{2}-\d{2}$/.test(search.moveInDate))
-      url.searchParams.set('mid', search.moveInDate.replaceAll('-', ''));
     return readyLink(
       this,
       search,
-      url,
+      new URL(path, APARTMENTS_ORIGIN),
       apartmentsAppliedCriteria(search),
       'page',
     );
@@ -140,141 +147,93 @@ const zillow: SearchSiteDefinition = {
 const realtor: SearchSiteDefinition = {
   id: 'realtor',
   name: 'Realtor.com',
-  description: 'Mixed apartments and homes with readable location searches.',
-  version: 1,
-  allowedOrigins: ['https://www.realtor.com'],
-  supportedCriteria: ['location'],
+  description:
+    'Mixed apartments and homes with a detailed assisted filter search.',
+  version: 2,
+  allowedOrigins: [REALTOR_ORIGIN],
+  supportedCriteria: REALTOR_SUPPORTED_CRITERIA,
   buildLink(search) {
-    const applied: SearchCriterion[] = [];
-    const url = search.location
-      ? new URL(
-          `https://www.realtor.com/apartments/${realtorLocation(search.location)}`,
-        )
-      : new URL('https://www.realtor.com/rentals');
-    if (search.location) applied.push('location');
-    return readyLink(this, search, url, applied);
+    const path = search.location
+      ? (realtorLocationPath(search.location) ?? '/rentals')
+      : '/rentals';
+    return readyLink(
+      this,
+      search,
+      new URL(path, REALTOR_ORIGIN),
+      realtorAppliedCriteria(search),
+      'page',
+    );
   },
 };
 
 const hotpads: SearchSiteDefinition = {
   id: 'hotpads',
   name: 'HotPads',
-  description: 'Map-first Zillow network search with useful URL filters.',
-  version: 1,
-  allowedOrigins: ['https://hotpads.com'],
-  supportedCriteria: [
-    'location',
-    'minListedRent',
-    'maxListedRent',
-    'minBedrooms',
-    'minBathrooms',
-  ],
-  buildLink(search) {
-    const applied: SearchCriterion[] = [];
-    const url = search.location
-      ? new URL(
-          `https://hotpads.com/${locationSlug(search.location)}/apartments-for-rent`,
-        )
-      : new URL('https://hotpads.com/');
-    if (search.location) applied.push('location');
-    if (search.location) {
-      if (search.maxListedRent !== undefined) {
-        url.searchParams.set(
-          'price',
-          `${search.minListedRent ?? 0}-${search.maxListedRent}`,
-        );
-        if (search.minListedRent !== undefined) applied.push('minListedRent');
-        applied.push('maxListedRent');
-      }
-      if (search.minBedrooms !== undefined) {
-        url.searchParams.set('beds', `${search.minBedrooms}-8plus`);
-        applied.push('minBedrooms');
-      }
-      if (search.minBathrooms !== undefined) {
-        url.searchParams.set('baths', `${search.minBathrooms}-8plus`);
-        applied.push('minBathrooms');
-      }
-    }
-    return readyLink(this, search, url, applied);
-  },
-};
-
-function locationOnlySite(
-  definition: Omit<SearchSiteDefinition, 'buildLink'> & {
-    locationUrl: (location: string) => string | undefined;
-    homeUrl: string;
-  },
-): SearchSiteDefinition {
-  return {
-    ...definition,
-    supportedCriteria: ['location'],
-    buildLink(search) {
-      const locationUrl = search.location
-        ? definition.locationUrl(search.location)
-        : undefined;
-      const applied: SearchCriterion[] = [];
-      if (locationUrl && search.location) applied.push('location');
-      return readyLink(
-        this,
-        search,
-        new URL(locationUrl ?? definition.homeUrl),
-        applied,
-      );
-    },
-  };
-}
-
-const rent = locationOnlySite({
-  id: 'rent',
-  name: 'Rent.com',
-  description: 'Familiar apartment search with detailed property amenities.',
-  version: 1,
-  allowedOrigins: ['https://www.rent.com'],
-  supportedCriteria: ['location'],
-  homeUrl: 'https://www.rent.com/',
-  locationUrl: (location) => {
-    const route = rentLocation(location);
-    return route ? `https://www.rent.com/${route}` : undefined;
-  },
-});
-
-const zumper = locationOnlySite({
-  id: 'zumper',
-  name: 'Zumper',
-  description: 'Broad property types with strong amenity filters.',
-  version: 1,
-  allowedOrigins: ['https://www.zumper.com'],
-  supportedCriteria: ['location'],
-  homeUrl: 'https://www.zumper.com/',
-  locationUrl: (location) =>
-    `https://www.zumper.com/apartments-for-rent/${locationSlug(location)}`,
-});
-
-const rentCafe = locationOnlySite({
-  id: 'rentcafe',
-  name: 'RentCafe',
-  description: 'Managed apartment inventory and detailed amenity filters.',
-  version: 1,
-  allowedOrigins: ['https://www.rentcafe.com'],
-  supportedCriteria: ['location'],
-  homeUrl: 'https://www.rentcafe.com/',
-  locationUrl: (location) =>
-    `https://www.rentcafe.com/apartments-for-rent/${locationSlug(location)}/`,
-});
-
-const redfin: SearchSiteDefinition = {
-  id: 'redfin',
-  name: 'Redfin',
-  description: 'Popular rental marketplace; location setup continues on site.',
-  version: 1,
-  allowedOrigins: ['https://www.redfin.com'],
-  supportedCriteria: [],
+  description: 'Map-first rental search with assisted location and filters.',
+  version: 2,
+  allowedOrigins: [HOTPADS_ORIGIN],
+  supportedCriteria: HOTPADS_SUPPORTED_CRITERIA,
   buildLink(search) {
     return readyLink(
       this,
       search,
-      new URL('https://www.redfin.com/rentals'),
-      [],
+      new URL('/', HOTPADS_ORIGIN),
+      hotpadsAppliedCriteria(search),
+      'page',
+    );
+  },
+};
+
+const rent: SearchSiteDefinition = {
+  id: 'rent',
+  name: 'Rent.com',
+  description: 'Rental search with assisted location and detailed filters.',
+  version: 2,
+  allowedOrigins: [RENT_ORIGIN],
+  supportedCriteria: RENT_SUPPORTED_CRITERIA,
+  buildLink(search) {
+    return readyLink(
+      this,
+      search,
+      new URL('/', RENT_ORIGIN),
+      rentAppliedCriteria(search),
+      'page',
+    );
+  },
+};
+
+const zumper: SearchSiteDefinition = {
+  id: 'zumper',
+  name: 'Zumper',
+  description: 'Broad rental search with staged assisted filters.',
+  version: 2,
+  allowedOrigins: [ZUMPER_ORIGIN],
+  supportedCriteria: ZUMPER_SUPPORTED_CRITERIA,
+  buildLink(search) {
+    return readyLink(
+      this,
+      search,
+      new URL('/', ZUMPER_ORIGIN),
+      zumperAppliedCriteria(search),
+      'page',
+    );
+  },
+};
+
+const redfin: SearchSiteDefinition = {
+  id: 'redfin',
+  name: 'Redfin',
+  description: 'Map-first rental search with assisted location and filters.',
+  version: 2,
+  allowedOrigins: [REDFIN_ORIGIN],
+  supportedCriteria: REDFIN_SUPPORTED_CRITERIA,
+  buildLink(search) {
+    return readyLink(
+      this,
+      search,
+      new URL('/rentals', REDFIN_ORIGIN),
+      redfinAppliedCriteria(search),
+      'page',
     );
   },
 };
@@ -287,7 +246,6 @@ export const SEARCH_SITE_ADAPTERS: readonly SearchSiteDefinition[] = [
   rent,
   hotpads,
   zumper,
-  rentCafe,
 ];
 
 export function buildSearchLinks(search: RentalSearch) {

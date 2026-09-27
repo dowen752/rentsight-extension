@@ -140,7 +140,117 @@ describe('rental search contract', () => {
 });
 
 describe('rental search site adapters', () => {
-  it('offers the initial eight marketplaces in product order', () => {
+  it('prepares Rent.com search and reports only filters with matching semantics', () => {
+    const rent = SEARCH_SITE_ADAPTERS.find((site) => site.id === 'rent')!;
+    expect(
+      rent.buildLink({
+        location: 'Springfield, MO',
+        minListedRent: 1000,
+        maxListedRent: 6000,
+        minBedrooms: 1,
+        minBathrooms: 2,
+        propertyTypes: ['apartment_condo', 'house'],
+        catsAllowed: true,
+        smallDogsAllowed: true,
+        largeDogsAllowed: true,
+        parkingAvailable: true,
+        moveInDate: '2026-09-24',
+        minSquareFeet: 537,
+        inUnitLaundry: true,
+        airConditioning: true,
+      }),
+    ).toEqual({
+      status: 'ready',
+      link: {
+        url: 'https://www.rent.com/',
+        transferMode: 'page',
+        applied: [
+          'location',
+          'minListedRent',
+          'maxListedRent',
+          'minBedrooms',
+          'minBathrooms',
+          'propertyTypes',
+          'catsAllowed',
+          'smallDogsAllowed',
+          'largeDogsAllowed',
+          'moveInDate',
+          'minSquareFeet',
+          'inUnitLaundry',
+          'airConditioning',
+        ],
+        omitted: ['parkingAvailable'],
+      },
+    });
+    expect(rent.buildLink({ maxListedRent: 2000 })).toEqual({
+      status: 'ready',
+      link: {
+        url: 'https://www.rent.com/',
+        transferMode: 'page',
+        applied: [],
+        omitted: ['maxListedRent'],
+      },
+    });
+  });
+  it('prepares Redfin assistance without guessing opaque city IDs', () => {
+    const redfin = SEARCH_SITE_ADAPTERS.find((site) => site.id === 'redfin')!;
+    expect(
+      redfin.buildLink({
+        location: 'Springfield, MO',
+        minListedRent: 1000,
+        maxListedRent: 6000,
+        minBedrooms: 1,
+        minBathrooms: 2,
+        propertyTypes: ['house'],
+        catsAllowed: true,
+        moveInDate: '2026-09-24',
+        minSquareFeet: 537,
+        parkingAvailable: true,
+        inUnitLaundry: true,
+        airConditioning: true,
+      }),
+    ).toEqual({
+      status: 'ready',
+      link: {
+        url: 'https://www.redfin.com/rentals',
+        transferMode: 'page',
+        applied: [
+          'location',
+          'minListedRent',
+          'maxListedRent',
+          'minBedrooms',
+          'minBathrooms',
+          'propertyTypes',
+          'catsAllowed',
+          'moveInDate',
+          'minSquareFeet',
+          'parkingAvailable',
+          'inUnitLaundry',
+          'airConditioning',
+        ],
+        omitted: [],
+      },
+    });
+    expect(redfin.buildLink({ minListedRent: 1000 })).toEqual({
+      status: 'ready',
+      link: {
+        url: 'https://www.redfin.com/rentals',
+        transferMode: 'page',
+        applied: [],
+        omitted: ['minListedRent'],
+      },
+    });
+    const ambiguous = redfin.buildLink({
+      location: 'Springfield',
+      minBedrooms: 1,
+    });
+    expect(ambiguous.status).toBe('ready');
+    if (ambiguous.status === 'ready') {
+      expect(ambiguous.link.applied).toEqual(['location', 'minBedrooms']);
+      expect(ambiguous.link.omitted).toEqual([]);
+    }
+  });
+  it('offers the seven supported marketplaces in product order', () => {
     expect(SEARCH_SITE_ADAPTERS.map((site) => site.name)).toEqual([
       'Zillow',
       'Apartments.com',
@@ -149,8 +259,91 @@ describe('rental search site adapters', () => {
       'Rent.com',
       'HotPads',
       'Zumper',
-      'RentCafe',
     ]);
+  });
+
+  it('prepares HotPads for assisted location and filter application', () => {
+    const hotpads = SEARCH_SITE_ADAPTERS.find((site) => site.id === 'hotpads')!;
+    expect(
+      hotpads.buildLink({
+        location: 'Chicago',
+        minListedRent: 2500,
+        maxListedRent: 7000,
+        minBedrooms: 3,
+        minBathrooms: 3,
+        propertyTypes: ['house', 'townhouse'],
+        catsAllowed: true,
+        largeDogsAllowed: true,
+        moveInDate: '2026-10-18',
+        minSquareFeet: 600,
+        parkingAvailable: true,
+        inUnitLaundry: true,
+        airConditioning: true,
+      }),
+    ).toEqual({
+      status: 'ready',
+      link: {
+        url: 'https://hotpads.com/',
+        transferMode: 'page',
+        applied: [
+          'location',
+          'minListedRent',
+          'maxListedRent',
+          'minBedrooms',
+          'minBathrooms',
+          'propertyTypes',
+          'catsAllowed',
+          'largeDogsAllowed',
+          'moveInDate',
+          'minSquareFeet',
+          'parkingAvailable',
+          'inUnitLaundry',
+          'airConditioning',
+        ],
+        omitted: [],
+      },
+    });
+  });
+
+  it('prepares Zumper for staged assisted filters without overpromising', () => {
+    const zumper = SEARCH_SITE_ADAPTERS.find((site) => site.id === 'zumper')!;
+    expect(
+      zumper.buildLink({
+        location: 'Springfield',
+        minListedRent: 1000,
+        maxListedRent: 6000,
+        minBedrooms: 2,
+        minBathrooms: 2,
+        propertyTypes: ['apartment_condo', 'house'],
+        catsAllowed: true,
+        smallDogsAllowed: true,
+        moveInDate: '2026-10-18',
+        minSquareFeet: 700,
+        parkingAvailable: true,
+        inUnitLaundry: true,
+        airConditioning: true,
+      }),
+    ).toEqual({
+      status: 'ready',
+      link: {
+        url: 'https://www.zumper.com/',
+        transferMode: 'page',
+        applied: [
+          'location',
+          'minListedRent',
+          'maxListedRent',
+          'minBedrooms',
+          'minBathrooms',
+          'propertyTypes',
+          'catsAllowed',
+          'smallDogsAllowed',
+          'minSquareFeet',
+          'inUnitLaundry',
+          'airConditioning',
+        ],
+        omitted: ['moveInDate', 'parkingAvailable'],
+      },
+    });
   });
 
   it('opens Apartments.com cleanly and reports page-assisted filters', () => {
@@ -163,13 +356,12 @@ describe('rental search site adapters', () => {
       minBedrooms: 2,
       minBathrooms: 2,
       propertyTypes: ['house'],
-      moveInDate: '2026-09-24',
       parkingAvailable: true,
     });
     expect(result).toEqual({
       status: 'ready',
       link: {
-        url: 'https://www.apartments.com/seattle-wa/?mid=20260924',
+        url: 'https://www.apartments.com/seattle-wa/',
         transferMode: 'page',
         applied: [
           'location',
@@ -178,7 +370,6 @@ describe('rental search site adapters', () => {
           'minBedrooms',
           'minBathrooms',
           'propertyTypes',
-          'moveInDate',
           'parkingAvailable',
         ],
         omitted: [],
@@ -228,12 +419,60 @@ describe('rental search site adapters', () => {
     expect(result.link.omitted).toEqual([]);
   });
 
+  it('uses Realtor.com direct routes when known and its own lookup when ambiguous', () => {
+    const realtor = SEARCH_SITE_ADAPTERS.find((site) => site.id === 'realtor')!;
+    const direct = realtor.buildLink({
+      location: 'Springfield, MO',
+      maxListedRent: 2_500,
+      minBedrooms: 2,
+      minBathrooms: 2,
+      propertyTypes: ['apartment_condo', 'townhouse'],
+      catsAllowed: true,
+      largeDogsAllowed: true,
+      moveInDate: '2026-09-24',
+      minSquareFeet: 600,
+      parkingAvailable: true,
+      inUnitLaundry: true,
+      airConditioning: true,
+    });
+    expect(direct).toEqual({
+      status: 'ready',
+      link: {
+        url: 'https://www.realtor.com/apartments/springfield_MO',
+        transferMode: 'page',
+        applied: [
+          'location',
+          'maxListedRent',
+          'minBedrooms',
+          'minBathrooms',
+          'propertyTypes',
+          'catsAllowed',
+          'largeDogsAllowed',
+          'moveInDate',
+          'minSquareFeet',
+          'parkingAvailable',
+          'inUnitLaundry',
+        ],
+        omitted: ['airConditioning'],
+      },
+    });
+    expect(realtor.buildLink({ location: 'Springfield' })).toEqual({
+      status: 'ready',
+      link: {
+        url: 'https://www.realtor.com/rentals',
+        transferMode: 'page',
+        applied: ['location'],
+        omitted: [],
+      },
+    });
+  });
+
   it('keeps broad searches valid and reports unapplied preferences per site', () => {
     const results = buildSearchLinks({
       maxListedRent: 2000,
       parkingAvailable: true,
     });
-    expect(results).toHaveLength(8);
+    expect(results).toHaveLength(7);
     const apartments = results.find(({ site }) => site.id === 'apartments')!;
     expect(apartments.result).toMatchObject({
       status: 'ready',

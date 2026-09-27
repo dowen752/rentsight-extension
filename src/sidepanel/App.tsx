@@ -97,6 +97,12 @@ import {
 import { analysisForNavigation } from './navigationState';
 import { MembershipBadge } from './MembershipBadge';
 import { FindRentalsView } from './FindRentalsView';
+import { AssistantView } from './AssistantView';
+import {
+  addAssistantPropertyNote,
+  applyCostProposal,
+  type AssistantProposal,
+} from '../assistant';
 export { FindRentalsView } from './FindRentalsView';
 import {
   isSameListingPage,
@@ -808,11 +814,12 @@ export function App() {
   );
 }
 
-type WorkspaceTab = 'find' | 'current' | 'saved' | 'compare' | 'about';
+type WorkspaceTab = 'find' | 'current' | 'ask' | 'saved' | 'compare' | 'about';
 
 const WORKSPACE_TABS: readonly WorkspaceTab[] = [
   'find',
   'current',
+  'ask',
   'saved',
   'compare',
   'about',
@@ -825,6 +832,7 @@ function workspaceTabLabel(
 ): string {
   if (tab === 'find') return 'Find';
   if (tab === 'current') return 'Current';
+  if (tab === 'ask') return 'Ask';
   if (tab === 'saved') return `Saved (${savedCount})`;
   if (tab === 'compare') return `Compare (${selectedCount})`;
   return 'About';
@@ -901,6 +909,12 @@ export function UnavailableWorkspace({
         ))}
       </nav>
       {tab === 'find' && <FindRentalsView />}
+      {tab === 'ask' && (
+        <AssistantView
+          savedListings={savedListings}
+          navigate={(destination) => setTab(destination)}
+        />
+      )}
       {tab === 'current' && (
         <div className="current-actions">
           <RefreshListingButton onClick={refreshCurrent} />
@@ -1074,6 +1088,25 @@ function Workspace({
         ))}
       </nav>
       {tab === 'find' && <FindRentalsView />}
+      {tab === 'ask' && (
+        <AssistantView
+          analysis={analysis}
+          savedListings={savedListings}
+          navigate={(destination) => setTab(destination)}
+          updateAnalysis={(proposal: AssistantProposal) => {
+            if (proposal.type === 'analysis.set_cost')
+              update((current) => applyCostProposal(current, proposal));
+            else if (proposal.type === 'property_note.add')
+              update((current) =>
+                addAssistantPropertyNote(
+                  current,
+                  proposal.id,
+                  proposal.arguments.text,
+                ),
+              );
+          }}
+        />
+      )}
       {tab === 'current' && (
         <div className="current-actions">
           <RefreshListingButton
@@ -1195,6 +1228,12 @@ const TOUR_STEPS: readonly {
     title: 'Review the current listing',
     description:
       'Check the details RentSight found, correct any assumptions, and confirm the inputs to see the estimated costs for a listing.',
+  },
+  {
+    tab: 'find',
+    title: 'Search across rental sites',
+    description:
+      'Enter your rental preferences once, then open supported rental sites with the filters each site can accept already applied. RentSight clearly lists anything you still need to check on that site.',
   },
   {
     tab: 'saved',

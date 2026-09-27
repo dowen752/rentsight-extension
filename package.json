@@ -22,7 +22,9 @@
     "@vitejs/plugin-react": "latest",
     "firebase": "^12.18.0",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@eslint/js": "latest",
