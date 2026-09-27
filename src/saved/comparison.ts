@@ -5,7 +5,12 @@ import {
   calculateRequiredMoveInCash,
   type SourcedValue,
 } from '../calculations';
-import { materializeListing, UTILITY_CATEGORIES } from '../shared/analysis';
+import {
+  applyHouseholdProfile,
+  materializeListing,
+  UTILITY_CATEGORIES,
+} from '../shared/analysis';
+import type { HouseholdProfile } from '../shared/household';
 import type { SavedListingRecord } from './types';
 
 export interface CompletenessScore {
@@ -18,8 +23,12 @@ export interface CompletenessScore {
 
 const importantFields = (
   record: SavedListingRecord,
+  householdProfile?: HouseholdProfile,
 ): (SourcedValue<unknown> | undefined)[] => {
-  const listing = materializeListing(record.analysis);
+  const analysis = householdProfile
+    ? applyHouseholdProfile(record.analysis, householdProfile)
+    : record.analysis;
+  const listing = materializeListing(analysis);
   return [
     listing.identity.fullAddress,
     listing.recurring.advertisedRent,
@@ -37,8 +46,9 @@ const importantFields = (
 
 export function calculateCompleteness(
   record: SavedListingRecord,
+  householdProfile?: HouseholdProfile,
 ): CompletenessScore {
-  const fields = importantFields(record);
+  const fields = importantFields(record, householdProfile);
   const known = fields.filter(
     (field) => field && ['listing', 'user'].includes(field.source),
   ).length;
@@ -96,8 +106,12 @@ export function comparisonBest(
 
 export function createComparison(
   record: SavedListingRecord,
+  householdProfile?: HouseholdProfile,
 ): ComparisonSnapshot {
-  const listing = materializeListing(record.analysis);
+  const analysis = householdProfile
+    ? applyHouseholdProfile(record.analysis, householdProfile)
+    : record.analysis;
+  const listing = materializeListing(analysis);
   const advertisedRent = listing.recurring.advertisedRent?.value;
   const trueMonthlyCost = calculateEstimatedTrueMonthlyCost(listing);
   const displayName = listing.identity.listingTitle?.value.trim();
@@ -127,7 +141,7 @@ export function createComparison(
       (listing.recurring.petRent?.value ?? 0) +
       (listing.upfront.petDeposit?.value ?? 0) +
       (listing.upfront.petFee?.value ?? 0),
-    completeness: calculateCompleteness(record),
+    completeness: calculateCompleteness(record, householdProfile),
     notes: record.analysis.propertyNotes ?? [],
   };
 }

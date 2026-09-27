@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FindRentalsView } from '../src/sidepanel/FindRentalsView';
 import { extensionStorage } from '../src/storage';
+import type { HouseholdProfile } from '../src/shared/household';
 
 function enter(input: HTMLInputElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(
@@ -16,7 +17,7 @@ function enter(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-describe('Find rentals workflow', () => {
+describe('Search workflow', () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
@@ -40,10 +41,19 @@ describe('Find rentals workflow', () => {
     const openHotpads = vi.fn().mockResolvedValue({ automated: true });
     const openZumper = vi.fn().mockResolvedValue({ automated: true });
     const openZillow = vi.fn().mockResolvedValue({ automated: true });
+    const updateHouseholdProfile = vi.fn();
+    const householdProfile: HouseholdProfile = {
+      occupants: 1,
+      smallDogs: 0,
+      largeDogs: 0,
+      otherPets: false,
+    };
     const root = createRoot(container);
     await act(async () => {
       root.render(
         <FindRentalsView
+          householdProfile={householdProfile}
+          updateHouseholdProfile={updateHouseholdProfile}
           openUrl={openUrl}
           openApartments={openApartments}
           openRealtor={openRealtor}
@@ -59,17 +69,25 @@ describe('Find rentals workflow', () => {
     const location = container.querySelector<HTMLInputElement>(
       'input[placeholder="City, state or ZIP"]',
     )!;
-    const maxRent = container.querySelectorAll<HTMLInputElement>(
-      'input[type="number"]',
-    )[1];
+    const maxRent = Array.from(container.querySelectorAll('label'))
+      .find((label) => label.textContent?.includes('Maximum listed rent'))!
+      .querySelector<HTMLInputElement>('input')!;
+    const occupants = Array.from(container.querySelectorAll('label'))
+      .find((label) => label.textContent?.includes('Occupants'))!
+      .querySelector<HTMLInputElement>('input')!;
     const parkingLabel = Array.from(container.querySelectorAll('label')).find(
       (label) => label.textContent?.includes('Parking available'),
     )!;
 
     await act(async () => {
+      enter(occupants, '2');
       enter(location, 'Seattle, WA');
       enter(maxRent, '2000');
       parkingLabel.querySelector<HTMLInputElement>('input')!.click();
+    });
+    expect(updateHouseholdProfile).toHaveBeenCalledWith({
+      ...householdProfile,
+      occupants: 2,
     });
     await act(async () => {
       Array.from(container.querySelectorAll('button'))

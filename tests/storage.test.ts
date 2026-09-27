@@ -94,6 +94,13 @@ describe('extension storage', () => {
       internetMonthlyCost: 65,
     };
     values.locationCache = { place: true };
+    values.assistantConversation = {
+      schemaVersion: '1.0',
+      conversationId: 'conversation-1',
+      messages: [],
+      outcomes: [],
+      pendingOutcomes: [],
+    };
 
     await clearAllRentSightData();
 

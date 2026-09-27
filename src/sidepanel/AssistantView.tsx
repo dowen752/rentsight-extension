@@ -1,13 +1,28 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react';
 import {
   ASSISTANT_ACTION_VERSIONS,
+  acceptStoredAssistantConversation,
   assistantContextForAnalysis,
   assistantContextRevision,
   type AssistantActionOutcome,
+  type AssistantConversationPage,
+  type AssistantConversationSummary,
+  type AssistantConversationTurnsPage,
+  type AssistantHistoryTurn,
   type AssistantProposal,
   type AssistantRequest,
   type AssistantResponse,
+  type StoredAssistantConversation,
+  type StoredAssistantMessage,
 } from '../assistant';
+import { BackendRequestError, SignedOutError } from '../backend';
 import { rentSightApi } from '../backend/services';
 import type { SavedListingRecord } from '../saved';
 import {
@@ -16,20 +31,114 @@ import {
   type RentalSearch,
 } from '../search';
 import type { RentalAnalysis } from '../shared/analysis';
+import { extensionStorage } from '../storage';
 import { AssistantMarkdown } from './AssistantMarkdown';
 
 type AssistantTab = 'find' | 'current' | 'saved' | 'compare';
 
-interface ConversationMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  text: string;
-  response?: AssistantResponse;
+type ConversationMessage = StoredAssistantMessage & {
+  animate?: boolean;
+  historical?: boolean;
+};
+
+interface AssistantHistoryApi {
+  listConversations: (options: {
+    limit: number;
+    cursor?: string;
+  }) => Promise<AssistantConversationPage>;
+  getTurns: (
+    conversationId: string,
+    options: { limit: number; cursor?: string },
+  ) => Promise<AssistantConversationTurnsPage>;
+  deleteConversation: (conversationId: string) => Promise<void>;
 }
+
+const DEFAULT_HISTORY_API: AssistantHistoryApi = {
+  listConversations: (options) =>
+    rentSightApi.listAssistantConversations(options),
+  getTurns: (conversationId, options) =>
+    rentSightApi.getAssistantConversationTurns(conversationId, options),
+  deleteConversation: (conversationId) =>
+    rentSightApi.deleteAssistantConversation(conversationId),
+};
+
+const HISTORY_PAGE_SIZE = 20;
+const TURN_PAGE_SIZE = 20;
+
+const emptyConversation = (): StoredAssistantConversation => ({
+  schemaVersion: '1.0',
+  messages: [],
+  outcomes: [],
+  pendingOutcomes: [],
+});
 
 const randomId = () =>
   globalThis.crypto?.randomUUID?.() ??
   `request-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const errorStatus = (cause: unknown) =>
+  cause instanceof BackendRequestError
+    ? cause.status
+    : typeof cause === 'object' &&
+        cause !== null &&
+        typeof Reflect.get(cause, 'status') === 'number'
+      ? (Reflect.get(cause, 'status') as number)
+      : undefined;
+
+const historyErrorMessage = (cause: unknown) => {
+  if (cause instanceof SignedOutError || errorStatus(cause) === 401)
+    return 'Your session has expired. Sign in again to view chat history.';
+  return cause instanceof Error
+    ? cause.message
+    : 'Chat history could not be loaded. Please try again.';
+};
+
+const formatUpdatedTime = (value: string) => {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(date.getFullYear() !== new Date().getFullYear()
+      ? { year: 'numeric' as const }
+      : {}),
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+};
+
+const messagesForTurns = (
+  conversationId: string,
+  turns: AssistantHistoryTurn[],
+): ConversationMessage[] =>
+  [...turns]
+    .sort(
+      (left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt),
+    )
+    .flatMap((turn) => [
+      {
+        id: `${turn.clientRequestId}:user`,
+        role: 'user' as const,
+        text: turn.userMessage.text,
+        historical: true,
+      },
+      {
+        id: turn.assistantMessage.messageId,
+        role: 'assistant' as const,
+        text: turn.assistantMessage.text,
+        historical: true,
+        response: {
+          schemaVersion: '1.0' as const,
+          conversationId,
+          messageId: turn.assistantMessage.messageId,
+          message: {
+            format: 'markdown' as const,
+            text: turn.assistantMessage.text,
+          },
+          proposals: [],
+        },
+      },
+    ]);
 
 const COST_LABELS: Record<string, string> = {
   naturalGas: 'Gas',
@@ -66,7 +175,7 @@ function proposalSummary(proposal: AssistantProposal): string {
   if (proposal.type === 'analysis.set_cost')
     return `${label(proposal.arguments.category)}: $${proposal.arguments.amount.toLocaleString()} ${proposal.arguments.frequency === 'monthly' ? 'per month' : 'one time'}`;
   if (proposal.type === 'property_note.add') return proposal.arguments.text;
-  return `Open ${label(proposal.arguments.destination)}`;
+  return `Open ${proposal.arguments.destination === 'find' ? 'Search' : label(proposal.arguments.destination)}`;
 }
 
 function ProposalCard({
@@ -158,17 +267,21 @@ function ConversationMessageCard({
         </ul>
       ) : null}
       {revealComplete
-        ? message.response?.proposals.map((proposal) => (
-            <ProposalCard
-              key={proposal.id}
-              proposal={proposal}
-              status={statusFor(proposal.id)}
-              onApply={() => void apply(proposal, message.response!)}
-              onDismiss={() => dismiss(proposal.id)}
-            />
-          ))
+        ? message.response?.proposals
+            .filter((proposal) => !message.historical || statusFor(proposal.id))
+            .map((proposal) => (
+              <ProposalCard
+                key={proposal.id}
+                proposal={proposal}
+                status={statusFor(proposal.id)}
+                onApply={() => void apply(proposal, message.response!)}
+                onDismiss={() => dismiss(proposal.id)}
+              />
+            ))
         : null}
-      {revealComplete && message.response?.followUpSuggestions?.length ? (
+      {revealComplete &&
+      !message.historical &&
+      message.response?.followUpSuggestions?.length ? (
         <div className="assistant-followups">
           {message.response.followUpSuggestions.map((suggestion) => (
             <button
@@ -185,12 +298,190 @@ function ConversationMessageCard({
   );
 }
 
+function NewChatIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3.5 2.5h9A1.5 1.5 0 0 1 14 4v6a1.5 1.5 0 0 1-1.5 1.5H7L3 14v-2.8A1.5 1.5 0 0 1 2 9.8V4a1.5 1.5 0 0 1 1.5-1.5Z" />
+      <path d="M8 5v4M6 7h4" />
+    </svg>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 4.5A6 6 0 1 1 2 8" />
+      <path d="M1.5 2v3h3M8 4.5V8l2.5 1.5" />
+    </svg>
+  );
+}
+
+function ConversationHistory({
+  conversations,
+  activeConversationId,
+  loading,
+  loadingMore,
+  error,
+  nextCursor,
+  deletingId,
+  deleteCandidateId,
+  onOpen,
+  onLoadMore,
+  onRetry,
+  onRequestDelete,
+  onCancelDelete,
+  onConfirmDelete,
+}: {
+  conversations: AssistantConversationSummary[];
+  activeConversationId?: string;
+  loading: boolean;
+  loadingMore: boolean;
+  error: string;
+  nextCursor: string | null;
+  deletingId?: string;
+  deleteCandidateId?: string;
+  onOpen: (conversationId: string) => void;
+  onLoadMore: () => void;
+  onRetry: () => void;
+  onRequestDelete: (conversationId: string) => void;
+  onCancelDelete: () => void;
+  onConfirmDelete: (conversationId: string) => void;
+}) {
+  return (
+    <aside className="assistant-history" aria-label="Chat history">
+      <div className="assistant-history-heading">
+        <div>
+          <strong>Recent conversations</strong>
+          <span>Successful turns are retained for 30 days.</span>
+        </div>
+      </div>
+      {loading ? (
+        <p className="assistant-history-state" role="status">
+          Loading conversations…
+        </p>
+      ) : error && !conversations.length ? (
+        <div className="assistant-history-state error" role="alert">
+          <p>{error}</p>
+          <button type="button" onClick={onRetry}>
+            Try again
+          </button>
+        </div>
+      ) : !conversations.length ? (
+        <p className="assistant-history-state">
+          No retained conversations yet. Start a chat below.
+        </p>
+      ) : (
+        <div className="assistant-history-list">
+          {conversations.map((conversation) => {
+            const confirming =
+              deleteCandidateId === conversation.conversationId;
+            return (
+              <div
+                className={`assistant-history-item${activeConversationId === conversation.conversationId ? ' active' : ''}`}
+                key={conversation.conversationId}
+              >
+                <button
+                  type="button"
+                  className="assistant-history-open"
+                  disabled={Boolean(deletingId)}
+                  onClick={() => onOpen(conversation.conversationId)}
+                >
+                  <span className="assistant-history-title">
+                    {conversation.title}
+                  </span>
+                  <span className="assistant-history-preview">
+                    {conversation.preview}
+                  </span>
+                  <span className="assistant-history-meta">
+                    {formatUpdatedTime(conversation.updatedAt)} ·{' '}
+                    {conversation.turnCount}{' '}
+                    {conversation.turnCount === 1 ? 'turn' : 'turns'}
+                  </span>
+                </button>
+                {confirming ? (
+                  <div
+                    className="assistant-delete-confirmation"
+                    role="alertdialog"
+                    aria-label={`Delete ${conversation.title}?`}
+                  >
+                    <p>Delete this conversation?</p>
+                    <button
+                      type="button"
+                      disabled={deletingId === conversation.conversationId}
+                      onClick={() =>
+                        onConfirmDelete(conversation.conversationId)
+                      }
+                    >
+                      {deletingId === conversation.conversationId
+                        ? 'Deleting…'
+                        : 'Delete'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={Boolean(deletingId)}
+                      onClick={onCancelDelete}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="assistant-history-delete"
+                    aria-label={`Delete ${conversation.title}`}
+                    disabled={Boolean(deletingId)}
+                    onClick={() => onRequestDelete(conversation.conversationId)}
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          {error ? (
+            <p className="assistant-history-page-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {nextCursor ? (
+            <button
+              type="button"
+              className="assistant-history-more"
+              disabled={loadingMore}
+              onClick={onLoadMore}
+            >
+              {loadingMore ? 'Loading…' : 'Load more conversations'}
+            </button>
+          ) : null}
+        </div>
+      )}
+    </aside>
+  );
+}
+
 export function AssistantView({
   analysis,
   savedListings,
   updateAnalysis,
   navigate,
   sendMessage = (request) => rentSightApi.sendAssistantMessage(request),
+  historyApi = DEFAULT_HISTORY_API,
   animateResponses = true,
 }: {
   analysis?: RentalAnalysis;
@@ -198,20 +489,273 @@ export function AssistantView({
   updateAnalysis?: (proposal: AssistantProposal) => void;
   navigate: (tab: AssistantTab) => void;
   sendMessage?: (request: AssistantRequest) => Promise<AssistantResponse>;
+  historyApi?: AssistantHistoryApi;
   animateResponses?: boolean;
 }) {
   const [draft, setDraft] = useState('');
   const [conversationId, setConversationId] = useState<string>();
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [outcomes, setOutcomes] = useState<AssistantActionOutcome[]>([]);
+  const [pendingOutcomes, setPendingOutcomes] = useState<
+    AssistantActionOutcome[]
+  >([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const [storageError, setStorageError] = useState('');
   const [failedRequest, setFailedRequest] = useState<AssistantRequest>();
+  const [conversationLoaded, setConversationLoaded] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [conversations, setConversations] = useState<
+    AssistantConversationSummary[]
+  >([]);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [openingConversationId, setOpeningConversationId] = useState<string>();
+  const [turnsCursor, setTurnsCursor] = useState<string | null>(null);
+  const [olderTurnsLoading, setOlderTurnsLoading] = useState(false);
+  const [deleteCandidateId, setDeleteCandidateId] = useState<string>();
+  const [deletingId, setDeletingId] = useState<string>();
+  const persistenceQueue = useRef<Promise<void>>(Promise.resolve());
+  const threadRef = useRef<HTMLElement>(null);
   const revision = assistantContextRevision(analysis);
   const context = useMemo(
     () => assistantContextForAnalysis(analysis, savedListings),
     [analysis, savedListings],
   );
+
+  const persistConversation = useCallback(
+    (conversation: StoredAssistantConversation) => {
+      const write = persistenceQueue.current
+        .catch(() => undefined)
+        .then(() =>
+          extensionStorage.set('assistantConversation', conversation),
+        );
+      persistenceQueue.current = write;
+      return write;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let active = true;
+    void extensionStorage
+      .get('assistantConversation')
+      .then((stored) => {
+        if (!active) return;
+        const accepted = acceptStoredAssistantConversation(stored);
+        if (accepted) {
+          setConversationId(accepted.conversationId);
+          setMessages(
+            accepted.messages.map((message) => ({
+              ...message,
+              animate: false,
+              historical: true,
+            })),
+          );
+          setOutcomes(accepted.outcomes);
+          setPendingOutcomes(accepted.pendingOutcomes);
+        }
+        setConversationLoaded(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setStorageError(
+          'Your previous chat could not be restored. New messages will still work.',
+        );
+        setConversationLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!conversationLoaded) return;
+    const storedMessages = messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      text: message.text,
+      ...(message.response ? { response: message.response } : {}),
+    }));
+    void persistConversation({
+      schemaVersion: '1.0',
+      ...(conversationId ? { conversationId } : {}),
+      messages: storedMessages,
+      outcomes,
+      pendingOutcomes,
+    }).catch(() =>
+      setStorageError(
+        'This chat could not be saved. Keep the side panel open to avoid losing it.',
+      ),
+    );
+  }, [
+    conversationId,
+    conversationLoaded,
+    messages,
+    outcomes,
+    pendingOutcomes,
+    persistConversation,
+  ]);
+
+  const loadConversationList = useCallback(
+    async (cursor?: string, silent = false) => {
+      if (cursor) setHistoryLoadingMore(true);
+      else if (!silent) setHistoryLoading(true);
+      if (!silent) setHistoryError('');
+      try {
+        const page = await historyApi.listConversations({
+          limit: HISTORY_PAGE_SIZE,
+          ...(cursor ? { cursor } : {}),
+        });
+        setConversations((current) => {
+          if (!cursor) return page.conversations;
+          const known = new Set(current.map((item) => item.conversationId));
+          return [
+            ...current,
+            ...page.conversations.filter(
+              (item) => !known.has(item.conversationId),
+            ),
+          ];
+        });
+        setHistoryCursor(page.nextCursor);
+        setHistoryLoaded(true);
+        setHistoryError('');
+      } catch (cause: unknown) {
+        if (!silent) setHistoryError(historyErrorMessage(cause));
+      } finally {
+        setHistoryLoading(false);
+        setHistoryLoadingMore(false);
+      }
+    },
+    [historyApi],
+  );
+
+  const toggleHistory = () => {
+    const opening = !historyOpen;
+    setHistoryOpen(opening);
+    setDeleteCandidateId(undefined);
+    if (opening && !historyLoaded && !historyLoading)
+      void loadConversationList();
+  };
+
+  const resetConversation = useCallback(() => {
+    setConversationId(undefined);
+    setMessages([]);
+    setOutcomes([]);
+    setPendingOutcomes([]);
+    setFailedRequest(undefined);
+    setTurnsCursor(null);
+    setOpeningConversationId(undefined);
+    setError('');
+    setStorageError('');
+    setDraft('');
+    void persistConversation(emptyConversation()).catch(() =>
+      setStorageError(
+        'The saved chat could not be cleared. Please try New chat again.',
+      ),
+    );
+  }, [persistConversation]);
+
+  const handleMissingConversation = useCallback(
+    (missingId: string) => {
+      setConversations((current) =>
+        current.filter((item) => item.conversationId !== missingId),
+      );
+      setHistoryError(
+        'That conversation is no longer available. It may have expired after 30 days.',
+      );
+      if (conversationId === missingId) resetConversation();
+    },
+    [conversationId, resetConversation],
+  );
+
+  const openConversation = async (selectedId: string) => {
+    if (pending || openingConversationId || deletingId) return;
+    setOpeningConversationId(selectedId);
+    setHistoryError('');
+    setError('');
+    try {
+      const page = await historyApi.getTurns(selectedId, {
+        limit: TURN_PAGE_SIZE,
+      });
+      setConversationId(page.conversation.conversationId);
+      setMessages(
+        messagesForTurns(page.conversation.conversationId, page.turns),
+      );
+      setOutcomes([]);
+      setPendingOutcomes([]);
+      setFailedRequest(undefined);
+      setTurnsCursor(page.nextCursor);
+      setHistoryOpen(false);
+      setDraft('');
+    } catch (cause: unknown) {
+      if (errorStatus(cause) === 404) handleMissingConversation(selectedId);
+      else setHistoryError(historyErrorMessage(cause));
+    } finally {
+      setOpeningConversationId(undefined);
+    }
+  };
+
+  const loadOlderTurns = async () => {
+    if (!conversationId || !turnsCursor || olderTurnsLoading) return;
+    const thread = threadRef.current;
+    const previousHeight = thread?.scrollHeight ?? 0;
+    const previousTop = thread?.scrollTop ?? 0;
+    setOlderTurnsLoading(true);
+    setError('');
+    try {
+      const page = await historyApi.getTurns(conversationId, {
+        limit: TURN_PAGE_SIZE,
+        cursor: turnsCursor,
+      });
+      const olderMessages = messagesForTurns(conversationId, page.turns);
+      setMessages((current) => {
+        const known = new Set(current.map((message) => message.id));
+        return [
+          ...olderMessages.filter((message) => !known.has(message.id)),
+          ...current,
+        ];
+      });
+      setTurnsCursor(page.nextCursor);
+      const preserveScroll = () => {
+        if (!thread) return;
+        thread.scrollTop =
+          previousTop + Math.max(0, thread.scrollHeight - previousHeight);
+      };
+      if (typeof requestAnimationFrame === 'function')
+        requestAnimationFrame(preserveScroll);
+      else queueMicrotask(preserveScroll);
+    } catch (cause: unknown) {
+      if (errorStatus(cause) === 404) handleMissingConversation(conversationId);
+      else setError(historyErrorMessage(cause));
+    } finally {
+      setOlderTurnsLoading(false);
+    }
+  };
+
+  const confirmDeleteConversation = async (selectedId: string) => {
+    if (deletingId) return;
+    setDeletingId(selectedId);
+    setHistoryError('');
+    try {
+      await historyApi.deleteConversation(selectedId);
+      setConversations((current) =>
+        current.filter((item) => item.conversationId !== selectedId),
+      );
+      setDeleteCandidateId(undefined);
+      if (conversationId === selectedId) resetConversation();
+    } catch (cause: unknown) {
+      if (errorStatus(cause) === 404) {
+        handleMissingConversation(selectedId);
+        setDeleteCandidateId(undefined);
+      } else setHistoryError(historyErrorMessage(cause));
+    } finally {
+      setDeletingId(undefined);
+    }
+  };
 
   const executeRequest = async (
     request: AssistantRequest,
@@ -242,16 +786,27 @@ export function AssistantView({
           role: 'assistant',
           text: response.message.text,
           response,
+          animate: true,
+          historical: false,
         },
       ]);
-      setOutcomes([]);
+      setPendingOutcomes([]);
+      void loadConversationList(undefined, true);
     } catch (cause: unknown) {
-      setFailedRequest(request);
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : 'RentSight could not answer right now.',
-      );
+      if (request.conversationId && errorStatus(cause) === 404) {
+        setFailedRequest(undefined);
+        handleMissingConversation(request.conversationId);
+        setError(
+          'This conversation is no longer available. Start a new conversation to keep chatting.',
+        );
+      } else {
+        setFailedRequest(request);
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : 'RentSight could not answer right now.',
+        );
+      }
     } finally {
       setPending(false);
     }
@@ -259,7 +814,7 @@ export function AssistantView({
 
   const submitMessage = async (message: string) => {
     const trimmed = message.trim();
-    if (!trimmed || pending) return;
+    if (!trimmed || pending || openingConversationId || deletingId) return;
     const request: AssistantRequest = {
       schemaVersion: '1.0',
       clientRequestId: randomId(),
@@ -268,7 +823,7 @@ export function AssistantView({
       contextRevision: revision,
       context,
       capabilities: { actions: ASSISTANT_ACTION_VERSIONS },
-      ...(outcomes.length ? { actionOutcomes: outcomes } : {}),
+      ...(pendingOutcomes.length ? { actionOutcomes: pendingOutcomes } : {}),
     };
     await executeRequest(request, true);
   };
@@ -276,11 +831,14 @@ export function AssistantView({
   const setOutcome = (
     proposalId: string,
     status: AssistantActionOutcome['status'],
-  ) =>
-    setOutcomes((current) => [
+  ) => {
+    const update = (current: AssistantActionOutcome[]) => [
       ...current.filter((item) => item.proposalId !== proposalId),
       { proposalId, status },
-    ]);
+    ];
+    setOutcomes(update);
+    setPendingOutcomes(update);
+  };
 
   const apply = async (
     proposal: AssistantProposal,
@@ -301,8 +859,8 @@ export function AssistantView({
         return;
       }
       if (proposal.type === 'workspace.navigate') {
-        navigate(proposal.arguments.destination);
         setOutcome(proposal.id, 'applied');
+        navigate(proposal.arguments.destination);
         return;
       }
       if (!analysis || !updateAnalysis) {
@@ -319,8 +877,65 @@ export function AssistantView({
   const statusFor = (proposalId: string) =>
     outcomes.find((item) => item.proposalId === proposalId)?.status;
 
+  const startNewChat = () => {
+    if (pending || openingConversationId || deletingId) return;
+    resetConversation();
+    setHistoryOpen(false);
+  };
+
   return (
     <main className="assistant-workspace">
+      <div className="assistant-actions">
+        <button
+          type="button"
+          className="chat-history-toggle"
+          aria-expanded={historyOpen}
+          disabled={
+            !conversationLoaded || pending || Boolean(openingConversationId)
+          }
+          onClick={toggleHistory}
+        >
+          <HistoryIcon />
+          History
+        </button>
+        <button
+          type="button"
+          className="new-chat"
+          disabled={
+            !conversationLoaded ||
+            pending ||
+            Boolean(openingConversationId) ||
+            Boolean(deletingId) ||
+            (!messages.length && !conversationId)
+          }
+          onClick={startNewChat}
+        >
+          <NewChatIcon />
+          New chat
+        </button>
+      </div>
+      {historyOpen ? (
+        <ConversationHistory
+          conversations={conversations}
+          activeConversationId={conversationId}
+          loading={historyLoading}
+          loadingMore={historyLoadingMore}
+          error={historyError}
+          nextCursor={historyCursor}
+          deletingId={deletingId}
+          deleteCandidateId={deleteCandidateId}
+          onOpen={(selectedId) => void openConversation(selectedId)}
+          onLoadMore={() => {
+            if (historyCursor) void loadConversationList(historyCursor);
+          }}
+          onRetry={() => void loadConversationList()}
+          onRequestDelete={setDeleteCandidateId}
+          onCancelDelete={() => setDeleteCandidateId(undefined)}
+          onConfirmDelete={(selectedId) =>
+            void confirmDeleteConversation(selectedId)
+          }
+        />
+      ) : null}
       <header className="assistant-heading">
         <span className="eyebrow">RentSight assistant</span>
         <h1>Ask about your rental</h1>
@@ -331,12 +946,35 @@ export function AssistantView({
         <span className="assistant-context">
           {analysis?.listing.identity.fullAddress?.value
             ? `Using ${analysis.listing.identity.fullAddress.value}`
-            : 'No current listing — Find and saved rentals are still available'}
+            : 'No current listing — Search and saved rentals are still available'}
         </span>
+        {conversationId ? (
+          <span className="assistant-history-context">
+            Continuing this chat uses your current rental and calculation
+            context. Opening history does not restore old listing inputs.
+          </span>
+        ) : null}
       </header>
 
-      <section className="assistant-thread" aria-live="polite">
-        {!messages.length && (
+      <section className="assistant-thread" aria-live="polite" ref={threadRef}>
+        {openingConversationId ? (
+          <p className="assistant-history-state" role="status">
+            Loading conversation…
+          </p>
+        ) : null}
+        {turnsCursor ? (
+          <button
+            type="button"
+            className="assistant-older-turns"
+            disabled={olderTurnsLoading}
+            onClick={() => void loadOlderTurns()}
+          >
+            {olderTurnsLoading
+              ? 'Loading older messages…'
+              : 'Load older messages'}
+          </button>
+        ) : null}
+        {conversationLoaded && !messages.length && (
           <div className="assistant-starters">
             {[
               ...(analysis
@@ -361,7 +999,11 @@ export function AssistantView({
           <ConversationMessageCard
             key={message.id}
             message={message}
-            animateResponse={animateResponses && message.role === 'assistant'}
+            animateResponse={
+              animateResponses &&
+              message.role === 'assistant' &&
+              message.animate === true
+            }
             statusFor={statusFor}
             apply={apply}
             dismiss={(proposalId) => setOutcome(proposalId, 'rejected')}
@@ -386,6 +1028,11 @@ export function AssistantView({
             )}
           </div>
         )}
+        {storageError && (
+          <p className="assistant-storage-error" role="status">
+            {storageError}
+          </p>
+        )}
       </section>
 
       <form
@@ -402,6 +1049,11 @@ export function AssistantView({
           rows={3}
           maxLength={4_000}
           placeholder="Ask about costs, fees, the area, or your next search…"
+          disabled={
+            !conversationLoaded ||
+            Boolean(openingConversationId) ||
+            Boolean(deletingId)
+          }
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
@@ -413,7 +1065,13 @@ export function AssistantView({
         <button
           type="submit"
           className="primary-action"
-          disabled={pending || !draft.trim()}
+          disabled={
+            !conversationLoaded ||
+            pending ||
+            Boolean(openingConversationId) ||
+            Boolean(deletingId) ||
+            !draft.trim()
+          }
         >
           {pending ? 'Thinking…' : 'Send'}
         </button>

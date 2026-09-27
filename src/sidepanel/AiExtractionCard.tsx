@@ -201,19 +201,27 @@ export function AiSourceReview({
         </div>
       )}
       {manualCharges.length > 0 && (
-        <div className="warning">
-          <h2>Review charges and offers</h2>
-          <p>These details need your decision before calculating.</p>
+        <div className="ai-extraction-flags">
+          <h2>Flagged during extraction</h2>
+          <p>
+            Review what RentSight found. You can update the related inputs, keep
+            any detail as a property note, or continue without changes.
+          </p>
           {manualCharges.map((charge) => (
             <div className="ai-charge" key={charge.id}>
               <strong>{charge.label}</strong>
-              <p>{charge.detail}</p>
-              <label>
-                How should this affect your calculation?
-                <select
-                  value={analysis.aiReviewDecisions?.[charge.id] ?? ''}
+              <p>
+                <span>Current understanding:</span> {charge.detail}
+              </p>
+              <label className="ai-charge-note-toggle">
+                <input
+                  type="checkbox"
+                  checked={(analysis.propertyNotes ?? []).some(
+                    (note) =>
+                      note.source === 'ai' && note.sourceId === charge.id,
+                  )}
                   onChange={(event) => {
-                    const value = event.target.value;
+                    const checked = event.target.checked;
                     update((current) => {
                       const next = structuredClone(current);
                       next.aiReviewDecisions ??= {};
@@ -223,31 +231,21 @@ export function AiSourceReview({
                             note.source === 'ai' && note.sourceId === charge.id
                           ),
                       );
-                      if (
-                        value === 'entered' ||
-                        value === 'excluded' ||
-                        value === 'noted'
-                      )
-                        next.aiReviewDecisions[charge.id] = value;
-                      else delete next.aiReviewDecisions[charge.id];
-                      if (value === 'noted') {
+                      if (checked) {
+                        next.aiReviewDecisions[charge.id] = 'noted';
                         next.propertyNotes.push({
                           id: crypto.randomUUID(),
-                          text: charge.label,
+                          text: `${charge.label}: ${charge.detail}`,
                           source: 'ai',
                           sourceId: charge.id,
                         });
-                      }
+                      } else delete next.aiReviewDecisions[charge.id];
                       next.updatedAt = new Date().toISOString();
                       return next;
                     });
                   }}
-                >
-                  <option value="">Select an option</option>
-                  <option value="entered">Amount added to inputs</option>
-                  <option value="excluded">Doesn’t apply</option>
-                  <option value="noted">Save as a property note</option>
-                </select>
+                />
+                <span>Keep as a property note</span>
               </label>
             </div>
           ))}

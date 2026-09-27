@@ -489,9 +489,12 @@ describe('capture and adapter', () => {
     expect(
       adaptExtraction(response).extraction.listing.upfront.securityDeposit,
     ).toBeUndefined();
-    expect(adaptExtraction(response).manualCharges[0].id).toBe(
-      'fee:security-deposit',
-    );
+    expect(adaptExtraction(response).manualCharges[0]).toEqual({
+      id: 'fee:security-deposit',
+      label: 'Security deposit',
+      detail:
+        '$1,000 · one time · per unit · required · refundability not stated',
+    });
   });
   it('maps per-pet fees and per-applicant charges into distinct inputs', () => {
     const response = normal();
@@ -774,6 +777,37 @@ describe('AI review UI', () => {
     expect(html).toContain('Keep note');
     expect(html).toContain('Dismiss');
     expect(html).toContain('advertised $2,200 effective rent');
+  });
+
+  it('shows one non-blocking extraction flag with an optional property note', () => {
+    const response = normal();
+    response.result.property.fees.value![0].refundable = {
+      status: 'unknown',
+      value: null,
+      candidates: [],
+      scope: 'unknown',
+      evidenceIds: [],
+    };
+    const analysis = applyAiExtraction(
+      createInitialAnalysis(page().url),
+      response,
+    );
+    const review = renderToStaticMarkup(
+      <AiSourceReview analysis={analysis} update={vi.fn()} />,
+    );
+    expect(review).toContain('Flagged during extraction');
+    expect(review).toContain('Current understanding:');
+    expect(review).toContain('$1,000 · one time · per unit');
+    expect(review).toContain('Keep as a property note');
+    expect(review).toContain('type="checkbox"');
+    expect(review).not.toContain('Select an option');
+    expect(review).not.toContain('Amount added to inputs');
+
+    const editor = renderToStaticMarkup(
+      <AnalysisEditor analysis={analysis} update={vi.fn()} />,
+    );
+    expect(editor).toContain('>Confirm</button>');
+    expect(editor).not.toContain('Review charges above');
   });
 
   it.each([

@@ -1,8 +1,13 @@
 import { normalizeRentalSearch, type SearchCriterion } from '../search';
 import {
   ASSISTANT_COST_FREQUENCIES,
+  type AssistantConversationPage,
+  type AssistantConversationTurnsPage,
+  type AssistantHistoryTurn,
   type AssistantProposal,
   type AssistantResponse,
+  type StoredAssistantConversation,
+  type StoredAssistantMessage,
 } from './types';
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -10,6 +15,64 @@ const object = (value: unknown): value is Record<string, unknown> =>
 
 const text = (value: unknown, max: number): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max;
+
+const nullableCursor = (value: unknown): value is string | null =>
+  value === null || text(value, 2_000);
+
+const timestamp = (value: unknown): value is string =>
+  text(value, 100) && Number.isFinite(Date.parse(value));
+
+const conversationIdentity = (value: unknown) =>
+  object(value) &&
+  text(value.conversationId, 200) &&
+  text(value.title, 500) &&
+  timestamp(value.createdAt) &&
+  timestamp(value.updatedAt);
+
+export function isAssistantConversationPage(
+  value: unknown,
+): value is AssistantConversationPage {
+  return (
+    object(value) &&
+    value.schemaVersion === '1.0' &&
+    Array.isArray(value.conversations) &&
+    value.conversations.every(
+      (item) =>
+        conversationIdentity(item) &&
+        text(item.preview, 2_000) &&
+        Number.isInteger(item.turnCount) &&
+        (item.turnCount as number) >= 0,
+    ) &&
+    nullableCursor(value.nextCursor)
+  );
+}
+
+const isAssistantHistoryTurn = (
+  value: unknown,
+): value is AssistantHistoryTurn =>
+  object(value) &&
+  text(value.clientRequestId, 200) &&
+  timestamp(value.createdAt) &&
+  timestamp(value.completedAt) &&
+  object(value.userMessage) &&
+  text(value.userMessage.text, 4_000) &&
+  object(value.assistantMessage) &&
+  text(value.assistantMessage.messageId, 200) &&
+  value.assistantMessage.format === 'markdown' &&
+  text(value.assistantMessage.text, 20_000);
+
+export function isAssistantConversationTurnsPage(
+  value: unknown,
+): value is AssistantConversationTurnsPage {
+  return (
+    object(value) &&
+    value.schemaVersion === '1.0' &&
+    conversationIdentity(value.conversation) &&
+    Array.isArray(value.turns) &&
+    value.turns.every(isAssistantHistoryTurn) &&
+    nullableCursor(value.nextCursor)
+  );
+}
 
 const SEARCH_KEYS = new Set<SearchCriterion>([
   'location',
@@ -139,5 +202,61 @@ export function acceptAssistantResponse(
     followUpSuggestions: Array.isArray(value.followUpSuggestions)
       ? value.followUpSuggestions.filter((item) => text(item, 300)).slice(0, 4)
       : undefined,
+  };
+}
+
+export function acceptStoredAssistantConversation(
+  value: unknown,
+): StoredAssistantConversation | undefined {
+  if (
+    !object(value) ||
+    value.schemaVersion !== '1.0' ||
+    !Array.isArray(value.messages) ||
+    !Array.isArray(value.outcomes) ||
+    (value.pendingOutcomes !== undefined &&
+      !Array.isArray(value.pendingOutcomes)) ||
+    (value.conversationId !== undefined && !text(value.conversationId, 200))
+  )
+    return undefined;
+
+  const messages = value.messages
+    .map((item): StoredAssistantMessage | undefined => {
+      if (!object(item) || !text(item.id, 200)) return undefined;
+      if (item.role === 'user' && text(item.text, 4_000))
+        return { id: item.id, role: 'user', text: item.text };
+      if (item.role !== 'assistant') return undefined;
+      const response = acceptAssistantResponse(item.response);
+      if (!response) return undefined;
+      return {
+        id: response.messageId,
+        role: 'assistant',
+        text: response.message.text,
+        response,
+      };
+    })
+    .filter((item): item is StoredAssistantMessage => item !== undefined);
+
+  const validOutcomes = (items: unknown[]) =>
+    items.filter(
+      (item): item is StoredAssistantConversation['outcomes'][number] =>
+        object(item) &&
+        text(item.proposalId, 200) &&
+        ['applied', 'rejected', 'failed', 'stale'].includes(
+          String(item.status),
+        ),
+    );
+  const outcomes = validOutcomes(value.outcomes);
+  const pendingOutcomes = validOutcomes(
+    Array.isArray(value.pendingOutcomes) ? value.pendingOutcomes : [],
+  );
+
+  return {
+    schemaVersion: '1.0',
+    ...(typeof value.conversationId === 'string'
+      ? { conversationId: value.conversationId }
+      : {}),
+    messages,
+    outcomes,
+    pendingOutcomes,
   };
 }

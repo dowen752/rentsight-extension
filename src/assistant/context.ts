@@ -26,6 +26,9 @@ export function assistantContextForAnalysis(
   if (!analysis)
     return {
       activeView: 'unavailable',
+      extractionNotes: [],
+      userNotes: [],
+      reviewIssues: [],
       selectedListings: savedListings.slice(0, 10).map((record) => ({
         id: record.id,
         address: record.analysis.listing.identity.fullAddress?.value,
@@ -74,6 +77,28 @@ export function assistantContextForAnalysis(
       recurring,
       upfront,
     },
+    extractionNotes: [
+      ...(analysis.aiExtraction?.result.notes.map((note) => ({
+        id: note.id,
+        text: note.text,
+        fieldPaths: note.fieldPaths,
+      })) ?? []),
+      ...(analysis.extraction?.warnings.map((text, index) => ({
+        id: `local-warning-${index}`,
+        text,
+      })) ?? []),
+    ],
+    userNotes: analysis.propertyNotes
+      .filter((note) => note.source === 'user')
+      .map(({ id, text }) => ({ id, text })),
+    reviewIssues:
+      analysis.aiExtraction?.result.reviewIssues.map((issue) => ({
+        id: issue.id,
+        code: issue.code,
+        message: issue.message,
+        fieldPaths: issue.fieldPaths,
+        decision: analysis.aiReviewDecisions?.[issue.id],
+      })) ?? [],
     location: analysis.locationEstimate
       ? {
           ...analysis.locationEstimate.location,

@@ -2,7 +2,11 @@
 
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { applyAiExtraction } from '../src/ai/adapter';
+import type { ExtractionSuccess } from '../src/ai/types';
+import { AiSourceReview } from '../src/sidepanel/AiExtractionCard';
 import { AnalysisEditor } from '../src/sidepanel/App';
 import {
   createInitialAnalysis,
@@ -60,6 +64,49 @@ describe('analysis editor workflow', () => {
 
     expect(container.textContent).toContain('Step 2 · Results');
     expect(container.textContent).not.toContain('AI review complete');
+
+    await act(async () => root.unmount());
+  });
+
+  it('keeps a flagged extraction as a complete property note when selected', async () => {
+    const response = JSON.parse(
+      readFileSync('tests/fixtures/ai/normal.response.json', 'utf8'),
+    ) as ExtractionSuccess;
+    response.result.property.fees.value![0].refundable = {
+      status: 'unknown',
+      value: null,
+      candidates: [],
+      scope: 'unknown',
+      evidenceIds: [],
+    };
+    const analysis = applyAiExtraction(
+      createInitialAnalysis('https://example.com/rental/flagged'),
+      response,
+    );
+    const update = vi.fn();
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<AiSourceReview analysis={analysis} update={update} />);
+    });
+
+    const checkbox = container.querySelector<HTMLInputElement>(
+      '.ai-charge-note-toggle input',
+    );
+    expect(checkbox?.checked).toBe(false);
+    await act(async () => checkbox?.click());
+
+    const transform = update.mock.calls[0]?.[0] as
+      ((current: typeof analysis) => typeof analysis) | undefined;
+    expect(transform).toBeTypeOf('function');
+    const updated = transform!(analysis);
+    expect(updated.propertyNotes).toEqual([
+      expect.objectContaining({
+        source: 'ai',
+        sourceId: 'fee:security-deposit',
+        text: 'Security deposit: $1,000 · one time · per unit · required · refundability not stated',
+      }),
+    ]);
 
     await act(async () => root.unmount());
   });

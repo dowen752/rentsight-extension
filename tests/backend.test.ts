@@ -67,8 +67,9 @@ describe('RentSightBackendClient', () => {
 
   it('sends authenticated assistant turns with an idempotency key', async () => {
     const fetcher = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        Response.json({
+      async (...requestArgs: [RequestInfo | URL, RequestInit?]) => {
+        void requestArgs;
+        return Response.json({
           schemaVersion: '1.0',
           conversationId: 'conversation-1',
           messageId: 'message-1',
@@ -77,7 +78,8 @@ describe('RentSightBackendClient', () => {
             text: 'The calculation includes parking.',
           },
           proposals: [],
-        }),
+        });
+      },
     );
     const client = new RentSightBackendClient({
       apiOrigin: 'https://api.rentsight.test',
@@ -119,6 +121,117 @@ describe('RentSightBackendClient', () => {
     expect(new Headers(init?.headers).get('Idempotency-Key')).toBe(
       body.clientRequestId,
     );
+  });
+
+  it('loads cursor-paginated assistant conversations and turns with authenticated URLs', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          schemaVersion: '1.0',
+          conversations: [
+            {
+              conversationId: 'conversation/1',
+              title: 'Hidden fees',
+              preview: 'The listing discloses…',
+              createdAt: '2026-09-20T12:00:00.000Z',
+              updatedAt: '2026-09-21T12:00:00.000Z',
+              turnCount: 4,
+            },
+          ],
+          nextCursor: 'next page',
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          schemaVersion: '1.0',
+          conversation: {
+            conversationId: 'conversation/1',
+            title: 'Hidden fees',
+            createdAt: '2026-09-20T12:00:00.000Z',
+            updatedAt: '2026-09-21T12:00:00.000Z',
+          },
+          turns: [
+            {
+              clientRequestId: 'request-1',
+              createdAt: '2026-09-20T12:00:00.000Z',
+              completedAt: '2026-09-20T12:00:01.000Z',
+              userMessage: { text: 'Any fees?' },
+              assistantMessage: {
+                messageId: 'message-1',
+                format: 'markdown',
+                text: 'There is an application fee.',
+              },
+            },
+          ],
+          nextCursor: null,
+        }),
+      );
+    const client = new RentSightBackendClient({
+      apiOrigin: 'https://api.rentsight.test',
+      getAccessToken: async () => 'fresh-firebase-token',
+      fetch: fetcher,
+    });
+
+    await client.listAssistantConversations({
+      limit: 20,
+      cursor: 'opaque cursor',
+    });
+    await client.getAssistantConversationTurns('conversation/1', {
+      limit: 10,
+      cursor: 'turn cursor',
+    });
+
+    expect(fetcher.mock.calls[0][0]).toBe(
+      'https://api.rentsight.test/v1/listings/chat/conversations?limit=20&cursor=opaque+cursor',
+    );
+    expect(fetcher.mock.calls[1][0]).toBe(
+      'https://api.rentsight.test/v1/listings/chat/conversations/conversation%2F1/turns?limit=10&cursor=turn+cursor',
+    );
+    for (const [, init] of fetcher.mock.calls) {
+      expect(new Headers(init?.headers).get('Authorization')).toBe(
+        'Bearer fresh-firebase-token',
+      );
+    }
+  });
+
+  it('deletes assistant conversations only after a 204 response', async () => {
+    const fetcher = vi.fn(async () => new Response(null, { status: 204 }));
+    const client = new RentSightBackendClient({
+      apiOrigin: 'https://api.rentsight.test',
+      getAccessToken: async () => 'firebase-token',
+      fetch: fetcher,
+    });
+
+    await expect(
+      client.deleteAssistantConversation('conversation/1'),
+    ).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://api.rentsight.test/v1/listings/chat/conversations/conversation%2F1',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer firebase-token',
+        }),
+      }),
+    );
+  });
+
+  it('rejects malformed assistant history payloads', async () => {
+    const client = new RentSightBackendClient({
+      apiOrigin: 'https://api.rentsight.test',
+      getAccessToken: async () => 'firebase-token',
+      fetch: async () =>
+        Response.json({
+          schemaVersion: '1.0',
+          conversations: [{ conversationId: 'missing-fields' }],
+          nextCursor: null,
+        }),
+    });
+
+    await expect(
+      client.listAssistantConversations({ limit: 20 }),
+    ).rejects.toBeInstanceOf(UnexpectedBackendResponseError);
   });
 
   it('surfaces aborted assistant requests as a clear timeout', async () => {

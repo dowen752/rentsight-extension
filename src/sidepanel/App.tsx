@@ -4,7 +4,6 @@ import { canonicalizeListingUrl } from '../ai/identity';
 import { downloadExtractionCapture } from '../ai/request';
 import {
   applyAiExtraction,
-  adaptExtraction,
   retainPreliminaryAfterAiFailure,
 } from '../ai/adapter';
 import {
@@ -830,7 +829,7 @@ function workspaceTabLabel(
   savedCount: number,
   selectedCount: number,
 ): string {
-  if (tab === 'find') return 'Find';
+  if (tab === 'find') return 'Search';
   if (tab === 'current') return 'Current';
   if (tab === 'ask') return 'Ask';
   if (tab === 'saved') return `Saved (${savedCount})`;
@@ -893,6 +892,20 @@ export function UnavailableWorkspace({
     setSavedListings(records);
   };
 
+  const updateHouseholdProfile = (profile: HouseholdProfile) => {
+    const normalized = normalizeHouseholdProfile(profile);
+    setHouseholdProfile(normalized);
+    void extensionStorage
+      .set('householdProfile', normalized)
+      .catch((error) =>
+        setNotice(
+          error instanceof Error
+            ? error.message
+            : 'Could not save the household profile.',
+        ),
+      );
+  };
+
   return (
     <>
       <MembershipBadge />
@@ -908,13 +921,18 @@ export function UnavailableWorkspace({
           </button>
         ))}
       </nav>
-      {tab === 'find' && <FindRentalsView />}
-      {tab === 'ask' && (
+      {tab === 'find' && (
+        <FindRentalsView
+          householdProfile={householdProfile}
+          updateHouseholdProfile={updateHouseholdProfile}
+        />
+      )}
+      <div hidden={tab !== 'ask'}>
         <AssistantView
           savedListings={savedListings}
           navigate={(destination) => setTab(destination)}
         />
-      )}
+      </div>
       {tab === 'current' && (
         <div className="current-actions">
           <RefreshListingButton onClick={refreshCurrent} />
@@ -929,6 +947,7 @@ export function UnavailableWorkspace({
       {tab === 'saved' && (
         <SavedListingsView
           records={savedListings}
+          householdProfile={householdProfile}
           selected={selected}
           setSelected={setSelected}
           setRecords={setRecords}
@@ -987,7 +1006,9 @@ function Workspace({
   refreshCurrent: () => Promise<void>;
   exportExtractionCapture?: () => void;
 }) {
-  const [tab, setTab] = useState<WorkspaceTab>('current');
+  const [tab, setTab] = useState<WorkspaceTab>(
+    onboardingCompleted ? 'current' : 'find',
+  );
   const [selected, setSelected] = useState<string[]>([]);
   const [notice, setNotice] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -1010,7 +1031,7 @@ function Workspace({
   }, [notice]);
 
   const startTour = () => {
-    setTab('current');
+    setTab('find');
     setTourStep(0);
   };
 
@@ -1087,8 +1108,13 @@ function Workspace({
           </button>
         ))}
       </nav>
-      {tab === 'find' && <FindRentalsView />}
-      {tab === 'ask' && (
+      {tab === 'find' && (
+        <FindRentalsView
+          householdProfile={householdProfile}
+          updateHouseholdProfile={updateHouseholdProfile}
+        />
+      )}
+      <div hidden={tab !== 'ask'}>
         <AssistantView
           analysis={analysis}
           savedListings={savedListings}
@@ -1106,7 +1132,7 @@ function Workspace({
               );
           }}
         />
-      )}
+      </div>
       {tab === 'current' && (
         <div className="current-actions">
           <RefreshListingButton
@@ -1159,6 +1185,7 @@ function Workspace({
       {tab === 'saved' && (
         <SavedListingsView
           records={savedListings}
+          householdProfile={householdProfile}
           selected={selected}
           setSelected={setSelected}
           setRecords={setSavedListings}
@@ -1188,9 +1215,8 @@ function Workspace({
           finish={async () => {
             await extensionStorage.set('onboardingCompleted', true);
             setTourStep(undefined);
+            setTab('find');
           }}
-          householdProfile={householdProfile}
-          updateHouseholdProfile={updateHouseholdProfile}
         />
       )}
     </>
@@ -1221,19 +1247,18 @@ const TOUR_STEPS: readonly {
   tab: WorkspaceTab;
   title: string;
   description: string;
-  profile?: boolean;
 }[] = [
+  {
+    tab: 'find',
+    title: 'Set up your search',
+    description:
+      'Save your household details and rental preferences in Search, then open supported rental sites with the filters each site can accept already applied.',
+  },
   {
     tab: 'current',
     title: 'Review the current listing',
     description:
       'Check the details RentSight found, correct any assumptions, and confirm the inputs to see the estimated costs for a listing.',
-  },
-  {
-    tab: 'find',
-    title: 'Search across rental sites',
-    description:
-      'Enter your rental preferences once, then open supported rental sites with the filters each site can accept already applied. RentSight clearly lists anything you still need to check on that site.',
   },
   {
     tab: 'saved',
@@ -1254,11 +1279,10 @@ const TOUR_STEPS: readonly {
       'Learn how RentSight keeps data local, replay this tour, send feedback, or delete all stored RentSight data.',
   },
   {
-    tab: 'current',
-    title: 'Personalize your estimates',
+    tab: 'find',
+    title: 'Personalize every estimate',
     description:
-      'Optional: save a few household details so RentSight can apply relevant utilities and pet costs to every property.',
-    profile: true,
+      'Use Your household in Search to tell RentSight how many people and pets to include. These details are saved across sessions and reused for utility estimates and applicable pet costs.',
   },
 ];
 
@@ -1266,14 +1290,10 @@ export function GuidedTour({
   step,
   setStep,
   finish,
-  householdProfile = { ...DEFAULT_HOUSEHOLD_PROFILE },
-  updateHouseholdProfile = () => undefined,
 }: {
   step: number;
   setStep: (step: number) => void;
   finish: () => Promise<void>;
-  householdProfile?: HouseholdProfile;
-  updateHouseholdProfile?: (profile: HouseholdProfile) => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const finishRef = useRef(finish);
@@ -1352,13 +1372,6 @@ export function GuidedTour({
         </span>
         <h2 id="tour-title">{current.title}</h2>
         <p id="tour-description">{current.description}</p>
-        {current.profile && (
-          <HouseholdProfileFields
-            profile={householdProfile}
-            onChange={updateHouseholdProfile}
-            compact
-          />
-        )}
         {finishError && (
           <p className="tour-error" role="alert">
             {finishError}
@@ -1386,7 +1399,7 @@ export function GuidedTour({
                 className="primary-action"
                 onClick={() => void complete()}
               >
-                Start using RentSight
+                Go to Search
               </button>
             ) : (
               <button
@@ -1510,7 +1523,7 @@ function AboutPrivacy({
       </section>
       <section aria-labelledby="help-heading">
         <h2 id="help-heading">Need a refresher?</h2>
-        <p>Walk through the four main RentSight views again.</p>
+        <p>Walk through the core RentSight views again.</p>
         <button type="button" className="replay-tour" onClick={replayTour}>
           Replay guided tour
         </button>
@@ -1530,6 +1543,7 @@ function downloadData(filename: string, content: string, type: string): void {
 
 function SavedListingsView({
   records,
+  householdProfile,
   selected,
   setSelected,
   setRecords,
@@ -1538,6 +1552,7 @@ function SavedListingsView({
   openCompare,
 }: {
   records: SavedListingRecord[];
+  householdProfile: HouseholdProfile;
   selected: string[];
   setSelected: (ids: string[]) => void;
   setRecords: (records: SavedListingRecord[]) => Promise<void>;
@@ -1603,7 +1618,7 @@ function SavedListingsView({
           onClick={() =>
             downloadData(
               'rentsight-listings.csv',
-              exportListingsCsv(exportedRecords),
+              exportListingsCsv(exportedRecords, householdProfile),
               'text/csv',
             )
           }
@@ -1633,7 +1648,7 @@ function SavedListingsView({
         </section>
       ) : (
         records.map((record) => {
-          const item = createComparison(record);
+          const item = createComparison(record, householdProfile);
           return (
             <section className="saved-card" key={record.id}>
               <label className="saved-select">
@@ -1721,7 +1736,9 @@ function ComparisonView({
   records: SavedListingRecord[];
   householdProfile: HouseholdProfile;
 }) {
-  const items = records.map(createComparison);
+  const items = records.map((record) =>
+    createComparison(record, householdProfile),
+  );
   const rows = householdHasPets(householdProfile)
     ? comparisonRows
     : comparisonRows.filter(([, key]) => key !== 'petExpenses');
@@ -1886,120 +1903,6 @@ interface AnalysisEditorProps {
   updateHouseholdProfile?: (profile: HouseholdProfile) => void;
 }
 
-function HouseholdProfileFields({
-  profile,
-  onChange,
-  compact = false,
-}: {
-  profile: HouseholdProfile;
-  onChange: (profile: HouseholdProfile) => void;
-  compact?: boolean;
-}) {
-  return (
-    <div className={`household-fields${compact ? ' compact' : ''}`}>
-      <label>
-        Occupants
-        <DefaultedNumberInput
-          value={profile.occupants}
-          defaultValue={1}
-          min={1}
-          onCommit={(value) => onChange({ ...profile, occupants: value })}
-        />
-      </label>
-      <label>
-        Internet / month
-        <span className="input-row">
-          <span className="prefix">$</span>
-          <input
-            type="number"
-            min="0"
-            placeholder="Not included"
-            value={profile.internetMonthlyCost ?? ''}
-            onChange={(event) =>
-              onChange({
-                ...profile,
-                internetMonthlyCost: Number.isNaN(event.target.valueAsNumber)
-                  ? undefined
-                  : Math.max(0, event.target.valueAsNumber),
-              })
-            }
-          />
-        </span>
-      </label>
-      <label className="pet-presence">
-        <input
-          type="checkbox"
-          checked={profile.smallDogs > 0}
-          onChange={(event) =>
-            onChange({ ...profile, smallDogs: event.target.checked ? 1 : 0 })
-          }
-        />
-        Small dog
-      </label>
-      <label className="pet-presence">
-        <input
-          type="checkbox"
-          checked={profile.largeDogs > 0}
-          onChange={(event) =>
-            onChange({ ...profile, largeDogs: event.target.checked ? 1 : 0 })
-          }
-        />
-        Large dog
-      </label>
-      <label className="pet-presence">
-        <input
-          type="checkbox"
-          checked={profile.otherPets}
-          onChange={(event) =>
-            onChange({ ...profile, otherPets: event.target.checked })
-          }
-        />
-        Other pet
-      </label>
-    </div>
-  );
-}
-
-function householdSummary(profile: HouseholdProfile): string {
-  const details = [
-    `${profile.occupants} occupant${profile.occupants === 1 ? '' : 's'}`,
-  ];
-  if (profile.smallDogs) details.push('small dog');
-  if (profile.largeDogs) details.push('large dog');
-  if (profile.otherPets) details.push('other pet');
-  if (!householdHasPets(profile)) details.push('no pets');
-  details.push(
-    profile.internetMonthlyCost === undefined
-      ? 'internet not included'
-      : `${MONEY.format(profile.internetMonthlyCost)}/mo internet`,
-  );
-  return details.join(' · ');
-}
-
-function HouseholdProfileCard({
-  profile,
-  onChange,
-}: {
-  profile: HouseholdProfile;
-  onChange: (profile: HouseholdProfile) => void;
-}) {
-  return (
-    <details className="household-card">
-      <summary>
-        <span>
-          <strong>Your household</strong>
-          <small>{householdSummary(profile)}</small>
-        </span>
-        <span className="household-edit">Edit</span>
-      </summary>
-      <div className="household-card-content">
-        <HouseholdProfileFields profile={profile} onChange={onChange} />
-        <p>Saved locally and reused for every property.</p>
-      </div>
-    </details>
-  );
-}
-
 function PropertyNotesEditor({
   notes,
   onAdd,
@@ -2079,14 +1982,8 @@ export function AnalysisEditor({
     aiControls?.state.status === 'preparing' ||
     aiControls?.state.status === 'extracting' ||
     (aiControls?.state.status === 'failed' && !aiControls.state.continued);
-  const unresolvedCharges = analysis.aiExtraction
-    ? adaptExtraction(analysis.aiExtraction).manualCharges.some(
-        (charge) => !analysis.aiReviewDecisions?.[charge.id],
-      )
-    : false;
   const confirmationKey = `${analysis.updatedAt}:${aiControls && 'requestId' in aiControls.state ? aiControls.state.requestId : ''}`;
-  const confirmed =
-    !aiBlocked && !unresolvedCharges && confirmedRevision === confirmationKey;
+  const confirmed = !aiBlocked && confirmedRevision === confirmationKey;
   const listing = useMemo(() => materializeListing(analysis), [analysis]);
   const validation = useMemo(() => validateRentalListing(listing), [listing]);
   const allReviewIssues = analysis.aiExtraction?.result.reviewIssues ?? [];
@@ -2271,11 +2168,6 @@ export function AnalysisEditor({
           </p>
         </section>
       )}
-
-      <HouseholdProfileCard
-        profile={householdProfile}
-        onChange={updateHouseholdProfile}
-      />
 
       {!confirmed && (
         <section aria-labelledby="summary-heading">
@@ -2609,15 +2501,11 @@ export function AnalysisEditor({
           <button
             type="button"
             className="primary-action confirm-action"
-            disabled={!validation.valid || aiBlocked || unresolvedCharges}
+            disabled={!validation.valid || aiBlocked}
             aria-describedby="confirm-help"
             onClick={() => setConfirmedRevision(confirmationKey)}
           >
-            {aiBlocked
-              ? 'Waiting for AI review'
-              : unresolvedCharges
-                ? 'Review charges above'
-                : 'Confirm'}
+            {aiBlocked ? 'Waiting for AI review' : 'Confirm'}
           </button>
         </section>
       )}

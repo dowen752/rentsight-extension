@@ -6,6 +6,7 @@ import {
   type SavedListingRecord,
 } from './types';
 import { createComparison } from './comparison';
+import type { HouseholdProfile } from '../shared/household';
 
 export function exportListingsJson(
   records: readonly SavedListingRecord[],
@@ -26,6 +27,7 @@ const csvCell = (value: string | number | undefined): string => {
 
 export function exportListingsCsv(
   records: readonly SavedListingRecord[],
+  householdProfile?: HouseholdProfile,
 ): string {
   const headers = [
     'Address',
@@ -41,7 +43,7 @@ export function exportListingsCsv(
     'Completeness',
   ];
   const rows = records.map((record) => {
-    const item = createComparison(record);
+    const item = createComparison(record, householdProfile);
     return [
       item.address,
       record.url,

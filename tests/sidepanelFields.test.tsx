@@ -209,13 +209,13 @@ describe('guided tour', () => {
     expect(markup).toContain('role="dialog"');
     expect(markup).toContain('aria-modal="true"');
     expect(markup).toContain('Quick tour · 1 of 6');
-    expect(markup).toContain('Review the current listing');
+    expect(markup).toContain('Set up your search');
     expect(markup).toContain('Skip tour');
     expect(markup).toContain('>Next</button>');
     expect(markup).toContain('disabled=""');
   });
 
-  it('explains cross-site search in the Find tour step', () => {
+  it('introduces the current listing review after Search', () => {
     const markup = renderToStaticMarkup(
       <GuidedTour
         step={1}
@@ -225,12 +225,11 @@ describe('guided tour', () => {
     );
 
     expect(markup).toContain('Quick tour · 2 of 6');
-    expect(markup).toContain('Search across rental sites');
-    expect(markup).toContain('filters each site can accept already applied');
-    expect(markup).toContain('anything you still need to check');
+    expect(markup).toContain('Review the current listing');
+    expect(markup).toContain('correct any assumptions');
   });
 
-  it('finishes with a clear start action', () => {
+  it('finishes by directing people to Search instead of duplicating the form', () => {
     const markup = renderToStaticMarkup(
       <GuidedTour
         step={5}
@@ -240,8 +239,10 @@ describe('guided tour', () => {
     );
 
     expect(markup).toContain('Quick tour · 6 of 6');
-    expect(markup).toContain('Personalize your estimates');
-    expect(markup).toContain('Start using RentSight');
+    expect(markup).toContain('Personalize every estimate');
+    expect(markup).toContain('Use Your household in Search');
+    expect(markup).toContain('Go to Search');
+    expect(markup).not.toContain('Internet / month');
   });
 });
 
@@ -259,7 +260,7 @@ describe('unavailable listing workspace', () => {
     );
 
     expect(markup).toContain('Current page cannot be inspected.');
-    expect(markup).toContain('>Find</button>');
+    expect(markup).toContain('>Search</button>');
     expect(markup).toContain('>Current</button>');
     expect(markup).toContain('>Saved (0)</button>');
     expect(markup).toContain('>Compare (0)</button>');
@@ -268,14 +269,19 @@ describe('unavailable listing workspace', () => {
     expect(markup).not.toContain('Check again');
   });
 
-  it('provides an accessible search form for the Find workspace', () => {
+  it('provides household details and an accessible rental search form', () => {
     const markup = renderToStaticMarkup(<FindRentalsView />);
 
     expect(markup).toContain('aria-labelledby="find-rentals-heading"');
-    expect(markup).toContain('<h1 id="find-rentals-heading">Find rentals</h1>');
+    expect(markup).toContain('<h1 id="find-rentals-heading">Search setup</h1>');
+    expect(markup).toContain('id="search-household-heading"');
+    expect(markup).toContain('Saved across sessions');
+    expect(markup).toContain('Occupants');
+    expect(markup).toContain('Cats or other pets');
     expect(markup).toContain('City, state or ZIP');
     expect(markup).toContain('Minimum listed rent');
     expect(markup).toContain('Parking available');
     expect(markup).toContain('Show rental sites');
+    expect(markup).toContain('Clear search');
   });
 });

@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom';
 import { extractListing } from '../src/extractors';
 import {
   applyExtraction,
+  applyHouseholdProfile,
   applyLocationEstimate,
   createInitialAnalysis,
   setIdentityValue,
@@ -115,6 +116,35 @@ describe('comparison and completeness', () => {
     expect(result.monthlyDifference).toBe(result.trueMonthlyCost - 2_000);
     expect(result.costPerSquareFoot).toBe(result.trueMonthlyCost / 1_000);
     expect(result.notes).toEqual(analysis.propertyNotes);
+  });
+
+  it('recalculates saved listings with the current household profile', () => {
+    let analysis = analysisFor('https://example.com/household');
+    analysis = setRecurringValue(analysis, 'petRent', 50);
+    analysis = applyHouseholdProfile(analysis, {
+      occupants: 1,
+      smallDogs: 0,
+      largeDogs: 0,
+      otherPets: false,
+    });
+    const { record } = saveListing([], analysis);
+
+    const withoutPets = createComparison(record, {
+      occupants: 1,
+      smallDogs: 0,
+      largeDogs: 0,
+      otherPets: false,
+    });
+    const withPetAndRoommate = createComparison(record, {
+      occupants: 2,
+      smallDogs: 1,
+      largeDogs: 0,
+      otherPets: false,
+    });
+
+    expect(withoutPets.petExpenses).toBe(0);
+    expect(withPetAndRoommate.petExpenses).toBe(50);
+    expect(withPetAndRoommate.utilities).toBeGreaterThan(withoutPets.utilities);
   });
 
   it('labels a weighted data-completeness score', () => {

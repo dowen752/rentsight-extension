@@ -2,6 +2,10 @@ import { acceptResponse, assertRequest } from '../ai/validation';
 import type { ExtractionRequest, ExtractionResponse } from '../ai/types';
 import {
   acceptAssistantResponse,
+  isAssistantConversationPage,
+  isAssistantConversationTurnsPage,
+  type AssistantConversationPage,
+  type AssistantConversationTurnsPage,
   type AssistantRequest,
   type AssistantResponse,
 } from '../assistant';
@@ -164,6 +168,35 @@ export class RentSightBackendClient {
     );
   }
 
+  listAssistantConversations(options: {
+    limit: number;
+    cursor?: string;
+  }): Promise<AssistantConversationPage> {
+    return this.request(
+      `/v1/listings/chat/conversations?${paginationQuery(options)}`,
+      { method: 'GET' },
+      isAssistantConversationPage,
+    );
+  }
+
+  getAssistantConversationTurns(
+    conversationId: string,
+    options: { limit: number; cursor?: string },
+  ): Promise<AssistantConversationTurnsPage> {
+    return this.request(
+      `/v1/listings/chat/conversations/${encodeURIComponent(conversationId)}/turns?${paginationQuery(options)}`,
+      { method: 'GET' },
+      isAssistantConversationTurnsPage,
+    );
+  }
+
+  async deleteAssistantConversation(conversationId: string): Promise<void> {
+    await this.requestNoContent(
+      `/v1/listings/chat/conversations/${encodeURIComponent(conversationId)}`,
+      { method: 'DELETE' },
+    );
+  }
+
   async extractListing(
     request: ExtractionRequest,
   ): Promise<ExtractionResponse> {
@@ -277,6 +310,29 @@ export class RentSightBackendClient {
     validate: (value: unknown) => value is T,
     normalize?: (value: unknown) => T | undefined,
   ): Promise<T> {
+    const response = await this.fetchResponse(path, init);
+    let value: unknown;
+    try {
+      value = await response.json();
+    } catch {
+      throw new UnexpectedBackendResponseError();
+    }
+    if (!validate(value)) throw new UnexpectedBackendResponseError();
+    return normalize?.(value) ?? value;
+  }
+
+  private async requestNoContent(
+    path: string,
+    init: RequestInit,
+  ): Promise<void> {
+    const response = await this.fetchResponse(path, init);
+    if (response.status !== 204) throw new UnexpectedBackendResponseError();
+  }
+
+  private async fetchResponse(
+    path: string,
+    init: RequestInit,
+  ): Promise<Response> {
     if (!this.configured) throw new BackendNotConfiguredError();
     const token = await this.options.getAccessToken();
     if (!token) throw new SignedOutError();
@@ -298,39 +354,40 @@ export class RentSightBackendClient {
         throw new BackendTimeoutError({ cause: error });
       throw new BackendNetworkError({ cause: error });
     }
-    if (!response.ok) {
-      let body: unknown;
-      try {
-        body = await response.json();
-      } catch {
-        // Non-JSON responses still produce a useful status-based error.
-      }
-      const parsed = parseBackendError(body);
-      const retryValues = [
-        parsed.retryAfterSeconds,
-        parseRetryAfter(response.headers.get('Retry-After')),
-      ].filter((value): value is number => value !== undefined);
-      const retryAfterSeconds = retryValues.length
-        ? Math.max(...retryValues)
-        : undefined;
-      throw new BackendRequestError(
-        parsed.message ?? statusMessage(response.status),
-        response.status,
-        parsed.code,
-        parsed.retryable,
-        retryAfterSeconds,
-      );
-    }
-    let value: unknown;
+    if (!response.ok) await this.throwResponseError(response);
+    return response;
+  }
+
+  private async throwResponseError(response: Response): Promise<never> {
+    let body: unknown;
     try {
-      value = await response.json();
+      body = await response.json();
     } catch {
-      throw new UnexpectedBackendResponseError();
+      // Non-JSON responses still produce a useful status-based error.
     }
-    if (!validate(value)) throw new UnexpectedBackendResponseError();
-    return normalize?.(value) ?? value;
+    const parsed = parseBackendError(body);
+    const retryValues = [
+      parsed.retryAfterSeconds,
+      parseRetryAfter(response.headers.get('Retry-After')),
+    ].filter((value): value is number => value !== undefined);
+    const retryAfterSeconds = retryValues.length
+      ? Math.max(...retryValues)
+      : undefined;
+    throw new BackendRequestError(
+      parsed.message ?? statusMessage(response.status),
+      response.status,
+      parsed.code,
+      parsed.retryable,
+      retryAfterSeconds,
+    );
   }
 }
+
+const paginationQuery = (options: { limit: number; cursor?: string }) => {
+  const query = new URLSearchParams({ limit: String(options.limit) });
+  if (options.cursor) query.set('cursor', options.cursor);
+  return query.toString();
+};
 
 const isTimeoutError = (error: unknown): boolean => {
   if (!(error instanceof Error)) return false;

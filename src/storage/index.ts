@@ -3,6 +3,7 @@ import type { SavedListingRecord } from '../saved';
 import type { LocationEstimate } from '../location';
 import type { HouseholdProfile } from '../shared/household';
 import type { StoredSearchProfile } from '../search/types';
+import type { StoredAssistantConversation } from '../assistant';
 
 export interface StorageSchema {
   lastInspectedUrl: string;
@@ -15,6 +16,7 @@ export interface StorageSchema {
   householdProfile: HouseholdProfile;
   onboardingCompleted: boolean;
   searchProfile: StoredSearchProfile;
+  assistantConversation: StoredAssistantConversation;
 }
 
 type StorageKey = keyof StorageSchema;

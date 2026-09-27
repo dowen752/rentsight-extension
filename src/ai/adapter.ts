@@ -7,7 +7,12 @@ import type {
 import { emptyExtraction } from '../extractors/types';
 import { applyExtraction, type RentalAnalysis } from '../shared/analysis';
 import type { ExtractionSuccess } from './types';
-import type { MoneyField } from './contracts/response';
+import type {
+  Applicability,
+  BooleanField,
+  Money,
+  MoneyField,
+} from './contracts/response';
 
 type Field<T> = {
   status: string;
@@ -20,6 +25,91 @@ export interface ManualCharge {
   label: string;
   detail: string;
 }
+
+const formatCurrency = (minor: number, currency: string) => {
+  const amount = minor / 100;
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: minor % 100 === 0 ? 0 : 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${currency} ${amount.toFixed(minor % 100 === 0 ? 0 : 2)}`;
+  }
+};
+
+const describeMoney = (money: Money) => {
+  const minimum =
+    money.minMinor === null
+      ? undefined
+      : formatCurrency(money.minMinor, money.currency);
+  const maximum =
+    money.maxMinor === null
+      ? undefined
+      : formatCurrency(money.maxMinor, money.currency);
+  const amount =
+    money.kind === 'exact'
+      ? minimum
+      : minimum && maximum
+        ? `${minimum}–${maximum}`
+        : minimum
+          ? `from ${minimum}`
+          : maximum
+            ? `up to ${maximum}`
+            : 'amount not stated';
+  const frequency = {
+    monthly: 'monthly',
+    weekly: 'weekly',
+    daily: 'daily',
+    yearly: 'yearly',
+    one_time: 'one time',
+    per_occurrence: 'per occurrence',
+    unknown: 'frequency not stated',
+  }[money.frequency];
+  const basis = {
+    per_unit: 'per unit',
+    per_person: 'per person',
+    per_pet: 'per pet',
+    per_vehicle: 'per vehicle',
+    per_application: 'per application',
+    unknown: 'basis not stated',
+  }[money.basis];
+  return [amount, frequency, basis].filter(Boolean).join(' · ');
+};
+
+const describeMoneyField = (field: MoneyField) => {
+  if (field.status === 'known' && field.value)
+    return describeMoney(field.value);
+  if (field.status === 'not_applicable') return 'no separate amount';
+  if (field.status === 'conflict') {
+    const candidates = field.candidates.map(describeMoney);
+    return candidates.length
+      ? `conflicting amounts: ${candidates.join(' or ')}`
+      : 'conflicting amounts';
+  }
+  return 'amount not stated';
+};
+
+const describeApplicability = (applicability: Applicability) => {
+  const status = {
+    required: 'required',
+    optional: 'optional',
+    conditional: 'conditional',
+    unknown: 'applicability not stated',
+  }[applicability.kind];
+  return applicability.conditions.length
+    ? `${status}: ${applicability.conditions.join('; ')}`
+    : status;
+};
+
+const describeRefundability = (field: BooleanField) => {
+  if (field.status === 'known')
+    return field.value ? 'refundable' : 'nonrefundable';
+  if (field.status === 'conflict') return 'refundability is unclear';
+  return 'refundability not stated';
+};
 export function adaptExtraction(response: ExtractionSuccess) {
   const extraction = emptyExtraction(
     'AI listing review',
@@ -183,16 +273,17 @@ export function adaptExtraction(response: ExtractionSuccess) {
         `fee:${fee.id}`,
         fee.label,
         [
-          ...fee.applicability.conditions,
-          'Review the amount, frequency, applicability, and refundability in source details.',
-        ].join(' '),
+          describeMoneyField(fee.amount),
+          describeApplicability(fee.applicability),
+          describeRefundability(fee.refundable),
+        ].join(' · '),
       );
   }
   if (p.fees.status === 'conflict')
     defer(
       'fees:conflict',
       'Conflicting fees',
-      'Resolve the conflicting fee claims in source details.',
+      'The listing contains conflicting fee information.',
     );
   const utilityKeys: Record<string, UtilityCategory> = {
     water: 'water',
@@ -211,8 +302,10 @@ export function adaptExtraction(response: ExtractionSuccess) {
       defer(
         `utility:${utility.id}`,
         utility.label,
-        utility.applicability.conditions.join(' ') ||
-          'Review this utility charge before calculating.',
+        [
+          describeMoneyField(utility.amount),
+          describeApplicability(utility.applicability),
+        ].join(' · '),
       );
       continue;
     }
@@ -230,7 +323,10 @@ export function adaptExtraction(response: ExtractionSuccess) {
         defer(
           `utility:${utility.id}`,
           utility.label,
-          'This utility amount needs manual review.',
+          [
+            describeMoneyField(utility.amount),
+            describeApplicability(utility.applicability),
+          ].join(' · '),
         );
     }
   }
@@ -238,7 +334,7 @@ export function adaptExtraction(response: ExtractionSuccess) {
     defer(
       'utilities:conflict',
       'Conflicting utility terms',
-      'Resolve who pays each utility before calculating.',
+      'The listing contains conflicting information about who pays for utilities.',
     );
   for (const promotion of p.promotions.status === 'known'
     ? p.promotions.value!
@@ -246,17 +342,14 @@ export function adaptExtraction(response: ExtractionSuccess) {
     defer(
       `promotion:${promotion.id}`,
       promotion.description,
-      [
-        ...promotion.applicability.conditions,
-        'If eligible, enter this benefit under Lease and concessions. Otherwise exclude it.',
-      ].join(' '),
+      describeApplicability(promotion.applicability),
     );
   }
   if (p.promotions.status === 'conflict')
     defer(
       'promotions:conflict',
       'Conflicting promotions',
-      'Resolve eligibility before including a concession.',
+      'The listing contains conflicting promotion information.',
     );
   extraction.warnings.push(...reviewIssues.map((issue) => issue.message));
   return { extraction, manualCharges };

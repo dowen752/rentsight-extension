@@ -14,9 +14,46 @@ export interface AssistantContext {
   activeView: AssistantWorkspace;
   currentListing?: Record<string, unknown>;
   currentCalculation?: Record<string, unknown>;
+  extractionNotes?: Record<string, unknown>[];
+  userNotes?: Record<string, unknown>[];
+  reviewIssues?: Record<string, unknown>[];
   search?: RentalSearch;
   selectedListings?: Record<string, unknown>[];
   location?: Record<string, unknown>;
+}
+
+export interface AssistantConversationSummary {
+  conversationId: string;
+  title: string;
+  preview: string;
+  createdAt: string;
+  updatedAt: string;
+  turnCount: number;
+}
+
+export interface AssistantConversationPage {
+  schemaVersion: '1.0';
+  conversations: AssistantConversationSummary[];
+  nextCursor: string | null;
+}
+
+export interface AssistantHistoryTurn {
+  clientRequestId: string;
+  createdAt: string;
+  completedAt: string;
+  userMessage: { text: string };
+  assistantMessage: {
+    messageId: string;
+    format: 'markdown';
+    text: string;
+  };
+}
+
+export interface AssistantConversationTurnsPage {
+  schemaVersion: '1.0';
+  conversation: Omit<AssistantConversationSummary, 'preview' | 'turnCount'>;
+  turns: AssistantHistoryTurn[];
+  nextCursor: string | null;
 }
 
 export interface AssistantActionOutcome {
@@ -123,4 +160,19 @@ export interface AssistantResponse {
   proposals: AssistantProposal[];
   citations?: AssistantCitation[];
   followUpSuggestions?: string[];
+}
+
+export interface StoredAssistantMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  response?: AssistantResponse;
+}
+
+export interface StoredAssistantConversation {
+  schemaVersion: '1.0';
+  conversationId?: string;
+  messages: StoredAssistantMessage[];
+  outcomes: AssistantActionOutcome[];
+  pendingOutcomes: AssistantActionOutcome[];
 }

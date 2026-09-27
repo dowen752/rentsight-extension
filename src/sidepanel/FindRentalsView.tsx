@@ -24,6 +24,11 @@ import {
   type SearchPropertyType,
   type ZillowLaunchOutcome,
 } from '../search';
+import {
+  DEFAULT_HOUSEHOLD_PROFILE,
+  normalizeHouseholdProfile,
+  type HouseholdProfile,
+} from '../shared/household';
 
 const PROPERTY_TYPE_LABELS: Record<SearchPropertyType, string> = {
   apartment_condo: 'Apartment or condo',
@@ -36,18 +41,20 @@ function SearchNumberInput({
   value,
   onChange,
   step = 1,
+  min = 0,
 }: {
   label: string;
   value: number | undefined;
   onChange: (value: number | undefined) => void;
   step?: number;
+  min?: number;
 }) {
   return (
     <label>
       {label}
       <input
         type="number"
-        min={0}
+        min={min}
         step={step}
         value={value ?? ''}
         onChange={(event) =>
@@ -57,6 +64,63 @@ function SearchNumberInput({
         }
       />
     </label>
+  );
+}
+
+function HouseholdDetails({
+  profile,
+  onChange,
+}: {
+  profile: HouseholdProfile;
+  onChange: (profile: HouseholdProfile) => void;
+}) {
+  const update = <K extends keyof HouseholdProfile>(
+    key: K,
+    value: HouseholdProfile[K],
+  ) => onChange(normalizeHouseholdProfile({ ...profile, [key]: value }));
+
+  return (
+    <section
+      className="search-section search-household"
+      aria-labelledby="search-household-heading"
+    >
+      <h2 id="search-household-heading">Your household</h2>
+      <p>
+        Saved across sessions and used for utility estimates and applicable pet
+        costs. These details are not sent to rental sites.
+      </p>
+      <div className="household-fields">
+        <SearchNumberInput
+          label="Occupants"
+          value={profile.occupants}
+          min={1}
+          onChange={(value) => update('occupants', value ?? 1)}
+        />
+        <SearchNumberInput
+          label="Internet / month ($)"
+          value={profile.internetMonthlyCost}
+          onChange={(value) => update('internetMonthlyCost', value)}
+        />
+        <SearchNumberInput
+          label="Small dogs"
+          value={profile.smallDogs}
+          onChange={(value) => update('smallDogs', value ?? 0)}
+        />
+        <SearchNumberInput
+          label="Large dogs"
+          value={profile.largeDogs}
+          onChange={(value) => update('largeDogs', value ?? 0)}
+        />
+        <label className="pet-presence">
+          <input
+            type="checkbox"
+            checked={profile.otherPets}
+            onChange={(event) => update('otherPets', event.target.checked)}
+          />
+          Cats or other pets
+        </label>
+      </div>
+    </section>
   );
 }
 
@@ -71,6 +135,8 @@ const defaultOpenUrl = async (url: string) => {
 };
 
 export function FindRentalsView({
+  householdProfile = { ...DEFAULT_HOUSEHOLD_PROFILE },
+  updateHouseholdProfile = () => undefined,
   openUrl = defaultOpenUrl,
   openApartments = launchApartmentsSearch,
   openRealtor = launchRealtorSearch,
@@ -80,6 +146,8 @@ export function FindRentalsView({
   openZumper = launchZumperSearch,
   openZillow = launchZillowSearch,
 }: {
+  householdProfile?: HouseholdProfile;
+  updateHouseholdProfile?: (profile: HouseholdProfile) => void;
   openUrl?: (url: string) => Promise<unknown>;
   openApartments?: (
     search: RentalSearch,
@@ -268,13 +336,18 @@ export function FindRentalsView({
   return (
     <main className="find-workspace" aria-labelledby="find-rentals-heading">
       <header className="find-heading">
-        <p className="eyebrow">Search across rental sites</p>
-        <h1 id="find-rentals-heading">Find rentals</h1>
+        <p className="eyebrow">Your rental search</p>
+        <h1 id="find-rentals-heading">Search setup</h1>
         <p>
-          Enter only what matters to you. RentSight will carry each preference
-          to a site when its search format supports it.
+          Save your household details and rental preferences, then open rental
+          sites with supported filters already applied.
         </p>
       </header>
+
+      <HouseholdDetails
+        profile={householdProfile}
+        onChange={updateHouseholdProfile}
+      />
 
       <form
         className="rental-search-form"
@@ -335,7 +408,7 @@ export function FindRentalsView({
             </div>
           </fieldset>
           <fieldset>
-            <legend>Pets</legend>
+            <legend>Pet-friendly filters</legend>
             <div className="search-check-grid">
               <label>
                 <input
@@ -466,7 +539,7 @@ export function FindRentalsView({
             className="secondary-action"
             onClick={() => void reset()}
           >
-            Clear
+            Clear search
           </button>
         </div>
       </form>

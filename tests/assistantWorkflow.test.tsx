@@ -3,7 +3,14 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AssistantRequest, AssistantResponse } from '../src/assistant';
+import type {
+  AssistantConversationPage,
+  AssistantConversationTurnsPage,
+  AssistantRequest,
+  AssistantResponse,
+  StoredAssistantConversation,
+} from '../src/assistant';
+import { BackendRequestError } from '../src/backend';
 import { AssistantView } from '../src/sidepanel/AssistantView';
 import {
   createInitialAnalysis,
@@ -34,6 +41,7 @@ describe('assistant workflow', () => {
   afterEach(() => {
     container.remove();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('sends a compact calculation snapshot and applies an approved search patch', async () => {
@@ -106,6 +114,17 @@ describe('assistant workflow', () => {
       address: '123 Main St',
     });
     expect(captured?.capabilities.actions).not.toHaveProperty('search.launch');
+    expect(
+      vi
+        .mocked(extensionStorage.set)
+        .mock.calls.some(
+          ([key, value]) =>
+            key === 'assistantConversation' &&
+            (value as StoredAssistantConversation).conversationId ===
+              'conversation-1' &&
+            (value as StoredAssistantConversation).messages.length === 2,
+        ),
+    ).toBe(true);
 
     await act(async () => {
       Array.from(container.querySelectorAll('button'))
@@ -246,6 +265,505 @@ describe('assistant workflow', () => {
       target: '_blank',
       rel: 'noopener noreferrer',
     });
+    await act(async () => root.unmount());
+  });
+
+  it('restores chat history until New chat clears it and starts a fresh backend conversation', async () => {
+    const restoredResponse = {
+      schemaVersion: '1.0',
+      conversationId: 'conversation-old',
+      messageId: 'assistant-old',
+      message: {
+        format: 'markdown',
+        text: 'The **security deposit** may be refundable.',
+      },
+      proposals: [
+        {
+          id: 'search-old',
+          type: 'search.patch',
+          explanation: 'Use the saved search preference.',
+          arguments: {
+            set: { maxListedRent: 2_800 },
+            clear: [],
+          },
+        },
+      ],
+    } satisfies AssistantResponse;
+    let stored: StoredAssistantConversation = {
+      schemaVersion: '1.0',
+      conversationId: 'conversation-old',
+      messages: [
+        { id: 'user-old', role: 'user', text: 'What is the deposit?' },
+        {
+          id: 'assistant-old',
+          role: 'assistant',
+          text: restoredResponse.message.text,
+          response: restoredResponse,
+        },
+      ],
+      outcomes: [{ proposalId: 'search-old', status: 'applied' }],
+      pendingOutcomes: [],
+    };
+    vi.mocked(extensionStorage.get).mockImplementation(async (key) =>
+      key === 'assistantConversation' ? stored : undefined,
+    );
+    vi.mocked(extensionStorage.set).mockImplementation(async (key, value) => {
+      if (key === 'assistantConversation')
+        stored = value as StoredAssistantConversation;
+    });
+    let nextRequest: AssistantRequest | undefined;
+    const sendMessage = vi.fn(async (request: AssistantRequest) => {
+      nextRequest = request;
+      return {
+        schemaVersion: '1.0',
+        conversationId: 'conversation-new',
+        messageId: 'assistant-new',
+        message: { format: 'markdown', text: 'Starting fresh.' },
+        proposals: [],
+      } satisfies AssistantResponse;
+    });
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <AssistantView
+          savedListings={[]}
+          navigate={vi.fn()}
+          sendMessage={sendMessage}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('What is the deposit?');
+    expect(container.textContent).toContain(
+      'The security deposit may be refundable.',
+    );
+    expect(container.textContent).toContain('Applied');
+    expect(container.querySelector('.assistant-stream-cursor')).toBeNull();
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.new-chat')!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(stored).toEqual({
+      schemaVersion: '1.0',
+      messages: [],
+      outcomes: [],
+      pendingOutcomes: [],
+    });
+    expect(container.textContent).not.toContain('What is the deposit?');
+    expect(container.querySelector('.assistant-starters')).not.toBeNull();
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('.assistant-starters button')!
+        .click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(nextRequest).not.toHaveProperty('conversationId');
+    await act(async () => root.unmount());
+  });
+
+  it('opens retained history as display-only and continues it with the current context', async () => {
+    const analysis = setRecurringValue(
+      createInitialAnalysis('https://example.com/current'),
+      'advertisedRent',
+      2_450,
+    );
+    analysis.propertyNotes.push({
+      id: 'user-note-1',
+      text: 'Ask whether parking is assigned.',
+      source: 'user',
+    });
+    const listConversations = vi.fn(
+      async () =>
+        ({
+          schemaVersion: '1.0',
+          conversations: [
+            {
+              conversationId: 'conversation-history',
+              title: 'Hidden fees',
+              preview: 'The listing discloses a move-in fee.',
+              createdAt: '2026-09-20T12:00:00.000Z',
+              updatedAt: '2026-09-21T12:00:00.000Z',
+              turnCount: 1,
+            },
+          ],
+          nextCursor: null,
+        }) satisfies AssistantConversationPage,
+    );
+    const getTurns = vi.fn(
+      async () =>
+        ({
+          schemaVersion: '1.0',
+          conversation: {
+            conversationId: 'conversation-history',
+            title: 'Hidden fees',
+            createdAt: '2026-09-20T12:00:00.000Z',
+            updatedAt: '2026-09-21T12:00:00.000Z',
+          },
+          turns: [
+            {
+              clientRequestId: 'request-history',
+              createdAt: '2026-09-20T12:00:00.000Z',
+              completedAt: '2026-09-20T12:00:01.000Z',
+              userMessage: { text: 'Are there hidden fees?' },
+              assistantMessage: {
+                messageId: 'message-history',
+                format: 'markdown',
+                text: 'The listing shows a **$250 move-in fee**.',
+              },
+            },
+          ],
+          nextCursor: null,
+        }) satisfies AssistantConversationTurnsPage,
+    );
+    let continuedRequest: AssistantRequest | undefined;
+    const sendMessage = vi.fn(async (request: AssistantRequest) => {
+      continuedRequest = request;
+      return {
+        schemaVersion: '1.0',
+        conversationId: 'conversation-history',
+        messageId: 'message-live',
+        message: { format: 'markdown', text: 'Using the current inputs.' },
+        proposals: [],
+      } satisfies AssistantResponse;
+    });
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <AssistantView
+          analysis={analysis}
+          savedListings={[]}
+          navigate={vi.fn()}
+          sendMessage={sendMessage}
+          historyApi={{
+            listConversations,
+            getTurns,
+            deleteConversation: vi.fn(async () => undefined),
+          }}
+          animateResponses={false}
+        />,
+      );
+    });
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('.chat-history-toggle')!
+        .click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain(
+      'The listing discloses a move-in fee.',
+    );
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('.assistant-history-open')!
+        .click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('Are there hidden fees?');
+    expect(
+      container.querySelector('.assistant-message.assistant strong')
+        ?.textContent,
+    ).toBe('$250 move-in fee');
+    expect(container.textContent).not.toContain('Apply');
+    expect(container.textContent).toContain(
+      'Opening history does not restore old listing inputs.',
+    );
+
+    const composer = container.querySelector<HTMLTextAreaElement>('textarea')!;
+    await act(async () => enter(composer, 'What about parking?'));
+    await act(async () => {
+      container
+        .querySelector<HTMLFormElement>('.assistant-composer')!
+        .dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(continuedRequest?.conversationId).toBe('conversation-history');
+    expect(continuedRequest?.context?.currentCalculation).toMatchObject({
+      advertisedRent: 2_450,
+    });
+    expect(continuedRequest?.context?.userNotes).toEqual([
+      { id: 'user-note-1', text: 'Ask whether parking is assigned.' },
+    ]);
+    expect(continuedRequest?.context).toMatchObject({
+      extractionNotes: [],
+      reviewIssues: [],
+    });
+    expect(listConversations).toHaveBeenCalledTimes(2);
+    await act(async () => root.unmount());
+  });
+
+  it('paginates the conversation list and prepends older retained turns', async () => {
+    const firstConversation = {
+      conversationId: 'conversation-paged',
+      title: 'Application costs',
+      preview: 'The application fee is…',
+      createdAt: '2026-09-20T12:00:00.000Z',
+      updatedAt: '2026-09-27T12:00:00.000Z',
+      turnCount: 2,
+    };
+    const listConversations = vi.fn(
+      async ({ cursor }: { limit: number; cursor?: string }) =>
+        ({
+          schemaVersion: '1.0',
+          conversations: cursor
+            ? [
+                {
+                  ...firstConversation,
+                  conversationId: 'conversation-older',
+                  title: 'Older chat',
+                },
+              ]
+            : [firstConversation],
+          nextCursor: cursor ? null : 'conversation-cursor-2',
+        }) satisfies AssistantConversationPage,
+    );
+    let threadHeight = 100;
+    const getTurns = vi.fn(
+      async (
+        _conversationId: string,
+        { cursor }: { limit: number; cursor?: string },
+      ) => {
+        if (cursor) threadHeight = 200;
+        return {
+          schemaVersion: '1.0',
+          conversation: {
+            conversationId: 'conversation-paged',
+            title: 'Application costs',
+            createdAt: '2026-09-20T12:00:00.000Z',
+            updatedAt: '2026-09-27T12:00:00.000Z',
+          },
+          turns: cursor
+            ? [
+                {
+                  clientRequestId: 'request-old',
+                  createdAt: '2026-09-20T12:00:00.000Z',
+                  completedAt: '2026-09-20T12:00:01.000Z',
+                  userMessage: { text: 'What is the application fee?' },
+                  assistantMessage: {
+                    messageId: 'message-old',
+                    format: 'markdown',
+                    text: 'It is $40.',
+                  },
+                },
+              ]
+            : [
+                {
+                  clientRequestId: 'request-new',
+                  createdAt: '2026-09-27T12:00:00.000Z',
+                  completedAt: '2026-09-27T12:00:01.000Z',
+                  userMessage: { text: 'Is there an admin fee?' },
+                  assistantMessage: {
+                    messageId: 'message-new',
+                    format: 'markdown',
+                    text: 'No admin fee is disclosed.',
+                  },
+                },
+              ],
+          nextCursor: cursor ? null : 'turn-cursor-2',
+        } satisfies AssistantConversationTurnsPage;
+      },
+    );
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <AssistantView
+          savedListings={[]}
+          navigate={vi.fn()}
+          historyApi={{
+            listConversations,
+            getTurns,
+            deleteConversation: vi.fn(async () => undefined),
+          }}
+          animateResponses={false}
+        />,
+      );
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('.chat-history-toggle')!
+        .click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('.assistant-history-more')!
+        .click();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('Older chat');
+    expect(listConversations).toHaveBeenLastCalledWith({
+      limit: 20,
+      cursor: 'conversation-cursor-2',
+    });
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('.assistant-history-open')!
+        .click();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('Is there an admin fee?');
+    const thread = container.querySelector<HTMLElement>('.assistant-thread')!;
+    Object.defineProperty(thread, 'scrollHeight', {
+      configurable: true,
+      get: () => threadHeight,
+    });
+    thread.scrollTop = 35;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('.assistant-older-turns')!
+        .click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const userMessages = Array.from(
+      container.querySelectorAll('.assistant-message.user'),
+    ).map((message) => message.textContent);
+    expect(userMessages).toEqual([
+      expect.stringContaining('What is the application fee?'),
+      expect.stringContaining('Is there an admin fee?'),
+    ]);
+    expect(getTurns).toHaveBeenLastCalledWith('conversation-paged', {
+      limit: 20,
+      cursor: 'turn-cursor-2',
+    });
+    expect(thread.scrollTop).toBe(135);
+    await act(async () => root.unmount());
+  });
+
+  it('removes expired conversations and confirms deletion before clearing the active chat', async () => {
+    const summaries: AssistantConversationPage = {
+      schemaVersion: '1.0',
+      conversations: [
+        {
+          conversationId: 'conversation-delete',
+          title: 'Delete me',
+          preview: 'Temporary chat',
+          createdAt: '2026-09-20T12:00:00.000Z',
+          updatedAt: '2026-09-20T12:00:00.000Z',
+          turnCount: 1,
+        },
+        {
+          conversationId: 'conversation-expired',
+          title: 'Expired chat',
+          preview: 'Old chat',
+          createdAt: '2026-08-01T12:00:00.000Z',
+          updatedAt: '2026-08-01T12:00:00.000Z',
+          turnCount: 1,
+        },
+      ],
+      nextCursor: null,
+    };
+    const getTurns = vi.fn(async (conversationId: string) => {
+      if (conversationId === 'conversation-expired')
+        throw new BackendRequestError('Not found.', 404);
+      return {
+        schemaVersion: '1.0',
+        conversation: {
+          conversationId,
+          title: 'Delete me',
+          createdAt: '2026-09-20T12:00:00.000Z',
+          updatedAt: '2026-09-20T12:00:00.000Z',
+        },
+        turns: [
+          {
+            clientRequestId: 'request-delete',
+            createdAt: '2026-09-20T12:00:00.000Z',
+            completedAt: '2026-09-20T12:00:01.000Z',
+            userMessage: { text: 'Can I delete this?' },
+            assistantMessage: {
+              messageId: 'message-delete',
+              format: 'markdown',
+              text: 'Yes.',
+            },
+          },
+        ],
+        nextCursor: null,
+      } satisfies AssistantConversationTurnsPage;
+    });
+    const deleteConversation = vi.fn(async () => undefined);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <AssistantView
+          savedListings={[]}
+          navigate={vi.fn()}
+          historyApi={{
+            listConversations: vi.fn(async () => summaries),
+            getTurns,
+            deleteConversation,
+          }}
+          animateResponses={false}
+        />,
+      );
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('.chat-history-toggle')!
+        .click();
+      await Promise.resolve();
+    });
+    const expiredOpen = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.assistant-history-open'),
+    ).find((button) => button.textContent?.includes('Expired chat'))!;
+    await act(async () => {
+      expiredOpen.click();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('may have expired after 30 days');
+    expect(container.textContent).not.toContain('Expired chat');
+
+    const deleteOpen = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.assistant-history-open'),
+    ).find((button) => button.textContent?.includes('Delete me'))!;
+    await act(async () => {
+      deleteOpen.click();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('Can I delete this?');
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('.chat-history-toggle')!
+        .click();
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('.assistant-history-delete')!
+        .click();
+    });
+    expect(container.textContent).toContain('Delete this conversation?');
+    expect(deleteConversation).not.toHaveBeenCalled();
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          '.assistant-delete-confirmation button',
+        )!
+        .click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(deleteConversation).toHaveBeenCalledWith('conversation-delete');
+    expect(container.textContent).not.toContain('Can I delete this?');
+    expect(container.querySelector('.assistant-starters')).not.toBeNull();
     await act(async () => root.unmount());
   });
 });
