@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import {
   SEARCH_SITE_ADAPTERS,
+  applyHouseholdPetFilters,
   buildSearchLinks,
   createSearchProfile,
   getSearchProfile,
@@ -123,19 +124,31 @@ describe('rental search contract', () => {
     expect(await getSearchProfile()).toEqual({ schemaVersion: 2, search: {} });
   });
 
-  it('migrates a version-one dog preference to both supported dog sizes', async () => {
+  it('removes legacy pet preferences because the household owns them', async () => {
     vi.spyOn(extensionStorage, 'get').mockResolvedValue({
       schemaVersion: 1,
       search: { location: 'Seattle, WA', dogsAllowed: true },
     });
     expect(await getSearchProfile()).toEqual({
       schemaVersion: 2,
-      search: {
-        location: 'Seattle, WA',
-        smallDogsAllowed: true,
-        largeDogsAllowed: true,
-      },
+      search: { location: 'Seattle, WA' },
     });
+  });
+
+  it('derives pet-friendly filters from the household without persisting them', () => {
+    expect(
+      applyHouseholdPetFilters(
+        { location: 'Chicago', catsAllowed: true },
+        { occupants: 2, cats: 0, smallDogs: 1, largeDogs: 1 },
+      ),
+    ).toEqual({
+      location: 'Chicago',
+      smallDogsAllowed: true,
+      largeDogsAllowed: true,
+    });
+    expect(
+      createSearchProfile({ location: 'Chicago', catsAllowed: true }),
+    ).toEqual({ schemaVersion: 2, search: { location: 'Chicago' } });
   });
 });
 

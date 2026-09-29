@@ -123,23 +123,23 @@ describe('comparison and completeness', () => {
     analysis = setRecurringValue(analysis, 'petRent', 50);
     analysis = applyHouseholdProfile(analysis, {
       occupants: 1,
+      cats: 0,
       smallDogs: 0,
       largeDogs: 0,
-      otherPets: false,
     });
     const { record } = saveListing([], analysis);
 
     const withoutPets = createComparison(record, {
       occupants: 1,
+      cats: 0,
       smallDogs: 0,
       largeDogs: 0,
-      otherPets: false,
     });
     const withPetAndRoommate = createComparison(record, {
       occupants: 2,
+      cats: 0,
       smallDogs: 1,
       largeDogs: 0,
-      otherPets: false,
     });
 
     expect(withoutPets.petExpenses).toBe(0);

@@ -70,7 +70,7 @@ export interface AssistantRequest {
   contextRevision?: string;
   context?: AssistantContext;
   capabilities: {
-    actions: typeof ASSISTANT_ACTION_VERSIONS;
+    actions: Partial<typeof ASSISTANT_ACTION_VERSIONS>;
   };
   actionOutcomes?: AssistantActionOutcome[];
 }

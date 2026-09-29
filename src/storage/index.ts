@@ -12,6 +12,7 @@ export interface StorageSchema {
   savedListings: SavedListingRecord[];
   savedListingsSchemaVersion: number;
   locationCache: Record<string, LocationEstimate>;
+  /** @deprecated Removed after migrating the former household internet preference. */
   internetMonthlyCost: number;
   householdProfile: HouseholdProfile;
   onboardingCompleted: boolean;

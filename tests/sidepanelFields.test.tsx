@@ -57,9 +57,9 @@ describe('analysis review workflow', () => {
     analysis.extraction.rawPetPolicyText = 'No Pets';
     const householdProfile = {
       occupants: 1,
+      cats: 0,
       smallDogs: 1,
       largeDogs: 0,
-      otherPets: false,
     };
 
     const markup = renderToStaticMarkup(
@@ -250,6 +250,7 @@ describe('unavailable listing workspace', () => {
   it('keeps the find, saved, compare, and about tabs accessible', () => {
     const markup = renderToStaticMarkup(
       <UnavailableWorkspace
+        hasActivePass={false}
         clearAllData={async () => undefined}
         refreshCurrent={() => undefined}
       >
@@ -262,11 +263,28 @@ describe('unavailable listing workspace', () => {
     expect(markup).toContain('Current page cannot be inspected.');
     expect(markup).toContain('>Search</button>');
     expect(markup).toContain('>Current</button>');
+    expect(markup).not.toContain('>Ask</button>');
+    expect(markup).not.toContain('Ask RentSight');
     expect(markup).toContain('>Saved (0)</button>');
     expect(markup).toContain('>Compare (0)</button>');
     expect(markup).toContain('>About</button>');
     expect(markup.match(/Load listing/g)).toHaveLength(1);
     expect(markup).not.toContain('Check again');
+  });
+
+  it('exposes Ask only when an active RentSight+ pass is confirmed', () => {
+    const markup = renderToStaticMarkup(
+      <UnavailableWorkspace
+        hasActivePass
+        clearAllData={async () => undefined}
+        refreshCurrent={() => undefined}
+      >
+        <main>Current page cannot be inspected.</main>
+      </UnavailableWorkspace>,
+    );
+
+    expect(markup).toContain('>Ask</button>');
+    expect(markup).toContain('Ask RentSight');
   });
 
   it('provides household details and an accessible rental search form', () => {
@@ -277,7 +295,11 @@ describe('unavailable listing workspace', () => {
     expect(markup).toContain('id="search-household-heading"');
     expect(markup).toContain('Saved across sessions');
     expect(markup).toContain('Occupants');
-    expect(markup).toContain('Cats or other pets');
+    expect(markup).toContain('>Cats<');
+    expect(markup).toContain('Small dogs');
+    expect(markup).toContain('Large dogs');
+    expect(markup).not.toContain('Internet / month');
+    expect(markup).not.toContain('Pet-friendly filters');
     expect(markup).toContain('City, state or ZIP');
     expect(markup).toContain('Minimum listed rent');
     expect(markup).toContain('Parking available');

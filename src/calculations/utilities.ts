@@ -46,14 +46,16 @@ export function estimateUtilities(
     UTILITY_CATEGORIES.map((category) => {
       const value = included.has(category)
         ? 0
-        : Math.round(
-            assumptions.utilities[category] *
-              occupantFactor *
-              bedroomFactor *
-              sizeFactor *
-              housingFactor +
-              1e-9,
-          );
+        : category === 'internet'
+          ? assumptions.utilities.internet
+          : Math.round(
+              assumptions.utilities[category] *
+                occupantFactor *
+                bedroomFactor *
+                sizeFactor *
+                housingFactor +
+                1e-9,
+            );
       return [
         category,
         {

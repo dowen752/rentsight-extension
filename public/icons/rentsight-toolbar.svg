@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">RentSight toolbar icon</title>
+  <desc id="description">A large house on an evergreen rounded square.</desc>
+  <defs>
+    <clipPath id="badge-clip">
+      <rect x="18" y="18" width="476" height="476" rx="128" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#badge-clip)">
+    <rect x="18" y="18" width="476" height="476" fill="#05472a" />
+    <path d="M126 246 256 146l130 100v162H126Z" fill="#f5f1df" />
+    <path d="m93 235 163-126 163 126-34 43-129-100-129 100Z" fill="#d9e8d2" />
+    <path d="M218 408V336c0-22 17-39 38-39s38 17 38 39v72Z" fill="#05472a" />
+  </g>
+</svg>

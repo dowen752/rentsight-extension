@@ -139,6 +139,131 @@ describe('assistant workflow', () => {
     await act(async () => root.unmount());
   });
 
+  it('answers from a rich saved-listing snapshot without exposing current-listing mutations', async () => {
+    const currentAnalysis = setRecurringValue(
+      createInitialAnalysis('https://example.com/current'),
+      'advertisedRent',
+      3_100,
+    );
+    const savedAnalysis = setRecurringValue(
+      createInitialAnalysis('https://example.com/saved'),
+      'advertisedRent',
+      2_200,
+    );
+    savedAnalysis.listing.identity.fullAddress = {
+      value: '500 Saved Ave',
+      source: 'user',
+      confidence: 1,
+    };
+    savedAnalysis.propertyNotes = [
+      {
+        id: 'saved-note',
+        text: 'Parking is assigned.',
+        source: 'user',
+      },
+    ];
+    const savedRecord = {
+      schemaVersion: 1 as const,
+      id: 'saved-1',
+      url: 'https://example.com/saved',
+      analysis: savedAnalysis,
+      createdAt: '2026-09-20T12:00:00.000Z',
+      updatedAt: '2026-09-21T12:00:00.000Z',
+    };
+    let captured: AssistantRequest | undefined;
+    const updateAnalysis = vi.fn();
+    const setSelectedSavedListingIds = vi.fn();
+    const sendMessage = vi.fn(async (request: AssistantRequest) => {
+      captured = request;
+      return {
+        schemaVersion: '1.0',
+        conversationId: 'conversation-saved',
+        messageId: 'message-saved',
+        contextRevision: request.contextRevision,
+        message: { format: 'markdown', text: 'The saved rent is $2,200.' },
+        proposals: [
+          {
+            id: 'unsafe-saved-cost',
+            type: 'analysis.set_cost',
+            explanation: 'Change parking.',
+            arguments: {
+              category: 'parking',
+              amount: 100,
+              currency: 'USD',
+              frequency: 'monthly',
+            },
+          },
+        ],
+      } satisfies AssistantResponse;
+    });
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <AssistantView
+          analysis={currentAnalysis}
+          savedListings={[savedRecord]}
+          selectedSavedListingIds={['saved-1']}
+          setSelectedSavedListingIds={setSelectedSavedListingIds}
+          navigate={vi.fn()}
+          updateAnalysis={updateAnalysis}
+          sendMessage={sendMessage}
+          animateResponses={false}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('Ask about this saved rental');
+    expect(container.textContent).toContain(
+      'Using saved rental: 500 Saved Ave',
+    );
+    await act(async () => {
+      container
+        .querySelector<HTMLDetailsElement>('.assistant-context-picker')!
+        .setAttribute('open', '');
+    });
+    expect(
+      container.querySelector('.assistant-context-options input'),
+    ).toBeNull();
+    const contextOptions = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(
+        '.assistant-context-option',
+      ),
+    );
+    expect(contextOptions).toHaveLength(2);
+    expect(contextOptions[0].getAttribute('aria-pressed')).toBe('false');
+    expect(contextOptions[1].getAttribute('aria-pressed')).toBe('true');
+    await act(async () => contextOptions[0].click());
+    expect(setSelectedSavedListingIds).toHaveBeenCalledWith([]);
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('.assistant-starters button')!
+        .click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(captured?.context?.activeView).toBe('saved');
+    expect(captured?.context).not.toHaveProperty('currentListing');
+    expect(captured?.context?.selectedListings?.[0]).toMatchObject({
+      id: 'saved-1',
+      listing: {
+        address: '500 Saved Ave',
+        recurring: { advertisedRent: { value: 2_200, source: 'user' } },
+      },
+      calculation: { advertisedRent: 2_200 },
+      userNotes: [{ id: 'saved-note', text: 'Parking is assigned.' }],
+    });
+    expect(captured?.contextRevision).toContain('saved-listings:saved-1:');
+    expect(captured?.capabilities.actions).toEqual({
+      'search.patch': '1.0',
+      'workspace.navigate': '1.0',
+    });
+    expect(container.textContent).toContain('The saved rent is $2,200.');
+    expect(container.textContent).not.toContain('Change parking.');
+    expect(updateAnalysis).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
   it('clears pending after a timeout and retries the exact same request', async () => {
     const requests: AssistantRequest[] = [];
     const sendMessage = vi.fn(async (request: AssistantRequest) => {

@@ -8,6 +8,8 @@ import type { SavedListingRecord } from '../saved';
 import { materializeListing, type RentalAnalysis } from '../shared/analysis';
 import type { AssistantContext } from './types';
 
+const MAX_ASSISTANT_SAVED_LISTINGS = 5;
+
 const sourced = <T>(
   value: { value: T; source: string; note?: string } | undefined,
 ) =>
@@ -19,21 +21,7 @@ const sourced = <T>(
       }
     : undefined;
 
-export function assistantContextForAnalysis(
-  analysis: RentalAnalysis | undefined,
-  savedListings: SavedListingRecord[],
-): AssistantContext {
-  if (!analysis)
-    return {
-      activeView: 'unavailable',
-      extractionNotes: [],
-      userNotes: [],
-      reviewIssues: [],
-      selectedListings: savedListings.slice(0, 10).map((record) => ({
-        id: record.id,
-        address: record.analysis.listing.identity.fullAddress?.value,
-      })),
-    };
+const analysisSnapshot = (analysis: RentalAnalysis) => {
   const listing = materializeListing(analysis);
   const identity = listing.identity;
   const recurring = Object.fromEntries(
@@ -49,8 +37,7 @@ export function assistantContextForAnalysis(
     ]),
   );
   return {
-    activeView: 'current',
-    currentListing: {
+    listing: {
       title: identity.listingTitle?.value,
       address: identity.fullAddress?.value,
       city: identity.city?.value,
@@ -67,7 +54,7 @@ export function assistantContextForAnalysis(
         source,
       })),
     },
-    currentCalculation: {
+    calculation: {
       advertisedRent: listing.recurring.advertisedRent?.value,
       estimatedTrueMonthlyCost: calculateEstimatedTrueMonthlyCost(listing),
       effectiveMonthlyCostAfterConcessions:
@@ -76,6 +63,15 @@ export function assistantContextForAnalysis(
       firstYearHousingCost: calculateFirstYearHousingCost(listing),
       recurring,
       upfront,
+      inputs: {
+        occupants: analysis.occupants,
+        householdProfile: analysis.householdProfile,
+        utilityIncluded: analysis.utilityIncluded,
+        laundryType: analysis.laundryType,
+        paidLaundry: analysis.paidLaundry,
+        customRecurringFees: analysis.customRecurringFees,
+        customOneTimeFees: analysis.customOneTimeFees,
+      },
     },
     extractionNotes: [
       ...(analysis.aiExtraction?.result.notes.map((note) => ({
@@ -110,6 +106,63 @@ export function assistantContextForAnalysis(
           state: identity.state?.value,
           zipCode: identity.zipCode?.value,
         },
+  };
+};
+
+export function assistantContextForAnalysis(
+  analysis: RentalAnalysis | undefined,
+  savedListings: SavedListingRecord[],
+  selectedSavedListingIds: string[] = [],
+): AssistantContext {
+  const selectedIds = new Set(selectedSavedListingIds);
+  const selectedSavedListings = savedListings
+    .filter((record) => selectedIds.has(record.id))
+    .slice(0, MAX_ASSISTANT_SAVED_LISTINGS);
+
+  if (selectedSavedListings.length) {
+    return {
+      activeView: 'saved',
+      extractionNotes: [],
+      userNotes: [],
+      reviewIssues: [],
+      selectedListings: selectedSavedListings.map((record) => {
+        const snapshot = analysisSnapshot(record.analysis);
+        return {
+          id: record.id,
+          savedAt: record.createdAt,
+          updatedAt: record.updatedAt,
+          listing: snapshot.listing,
+          calculation: snapshot.calculation,
+          extractionNotes: snapshot.extractionNotes,
+          userNotes: snapshot.userNotes,
+          reviewIssues: snapshot.reviewIssues,
+          location: snapshot.location,
+        };
+      }),
+    };
+  }
+
+  if (!analysis)
+    return {
+      activeView: 'unavailable',
+      extractionNotes: [],
+      userNotes: [],
+      reviewIssues: [],
+      selectedListings: savedListings.slice(0, 10).map((record) => ({
+        id: record.id,
+        address: record.analysis.listing.identity.fullAddress?.value,
+      })),
+    };
+
+  const snapshot = analysisSnapshot(analysis);
+  return {
+    activeView: 'current',
+    currentListing: snapshot.listing,
+    currentCalculation: snapshot.calculation,
+    extractionNotes: snapshot.extractionNotes,
+    userNotes: snapshot.userNotes,
+    reviewIssues: snapshot.reviewIssues,
+    location: snapshot.location,
     selectedListings: savedListings.slice(0, 10).map((record) => ({
       id: record.id,
       address: record.analysis.listing.identity.fullAddress?.value,
@@ -118,7 +171,19 @@ export function assistantContextForAnalysis(
   };
 }
 
-export const assistantContextRevision = (analysis?: RentalAnalysis): string =>
-  analysis
+export const assistantContextRevision = (
+  analysis?: RentalAnalysis,
+  savedListings: SavedListingRecord[] = [],
+  selectedSavedListingIds: string[] = [],
+): string => {
+  const selectedIds = new Set(selectedSavedListingIds);
+  const savedRevision = savedListings
+    .filter((record) => selectedIds.has(record.id))
+    .slice(0, MAX_ASSISTANT_SAVED_LISTINGS)
+    .map((record) => `${record.id}:${record.updatedAt}`)
+    .join('|');
+  if (savedRevision) return `saved-listings:${savedRevision}`;
+  return analysis
     ? `listing-analysis:${analysis.updatedAt}:${analysis.listing.identity.url?.value ?? ''}`
     : 'workspace:unavailable';
+};

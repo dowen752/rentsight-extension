@@ -100,6 +100,12 @@ export function MembershipBadge() {
   return (
     <aside className="membership-bar">
       <div>
+        <img
+          className="membership-logo"
+          src="/icons/rentsight-mark.svg"
+          alt=""
+          aria-hidden="true"
+        />
         <span>
           <strong>{isPlus ? 'RentSight+ Pass' : 'Free'}</strong>
           <small>{detail}</small>

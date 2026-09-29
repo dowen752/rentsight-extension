@@ -6,7 +6,6 @@ import {
 import {
   applyExtraction,
   applyHouseholdProfile,
-  applyInternetPreference,
   clearField,
   createInitialAnalysis,
   materializeListing,
@@ -17,8 +16,21 @@ import {
   resetField,
 } from '../src/shared/analysis';
 import { emptyExtraction } from '../src/extractors/types';
+import { normalizeHouseholdProfile } from '../src/shared/household';
 
 describe('manual listing analysis integration', () => {
+  it('migrates the legacy pet flag to one cat and drops internet preference', () => {
+    expect(
+      normalizeHouseholdProfile({
+        occupants: 2,
+        smallDogs: 0,
+        largeDogs: 0,
+        otherPets: true,
+        internetMonthlyCost: 85,
+      }),
+    ).toEqual({ occupants: 2, cats: 1, smallDogs: 0, largeDogs: 0 });
+  });
+
   it('connects side-panel edits, custom fees, laundry, and calculations', () => {
     let analysis = createInitialAnalysis(
       'https://example.com/rental/1',
@@ -38,29 +50,23 @@ describe('manual listing analysis integration', () => {
     analysis.customOneTimeFees = [{ id: 'once', label: 'Key fee', amount: 25 }];
 
     const listing = materializeListing(analysis);
-    expect(calculateEstimatedTrueMonthlyCost(listing)).toBeCloseTo(2_319.67, 2);
+    expect(calculateEstimatedTrueMonthlyCost(listing)).toBeCloseTo(2_379.67, 2);
     expect(calculateRequiredMoveInCash(listing)).toBe(2_025);
     expect(listing.identity.fullAddress?.source).toBe('user');
     expect(listing.recurring.water?.value).toBe(0);
   });
 
-  it('leaves internet blank until a global preference is supplied', () => {
+  it('uses a fixed default internet estimate', () => {
     const analysis = createInitialAnalysis(
-      'https://example.com/rental/internet-blank',
-      'Internet preference',
+      'https://example.com/rental/default-internet',
+      'Internet estimate',
     );
-    expect(analysis.listing.recurring.internet).toBeUndefined();
-    expect(materializeListing(analysis).recurring.internet).toBeUndefined();
-
-    const preferred = applyInternetPreference(analysis, 50);
-    expect(preferred.listing.recurring.internet).toEqual({
-      value: 50,
-      source: 'user',
-      confidence: 1,
-    });
+    analysis.occupants = 3;
+    expect(analysis.listing.recurring.internet?.value).toBe(60);
+    expect(materializeListing(analysis).recurring.internet?.value).toBe(60);
   });
 
-  it('lets listing-included internet override the global preference', () => {
+  it('lets listing-included internet override the default estimate', () => {
     let analysis = createInitialAnalysis(
       'https://example.com/rental/internet-included',
       'Included internet',
@@ -69,7 +75,6 @@ describe('manual listing analysis integration', () => {
     extraction.includedUtilities = ['internet'];
     extraction.rawUtilityText = 'Internet included in rent';
     analysis = applyExtraction(analysis, extraction);
-    analysis = applyInternetPreference(analysis, 90);
 
     expect(analysis.utilityIncluded.internet).toBe(true);
     expect(analysis.listing.recurring.internet?.value).toBe(0);
@@ -97,24 +102,22 @@ describe('manual listing analysis integration', () => {
     const withoutPets = materializeListing(
       applyHouseholdProfile(analysis, {
         occupants: 2,
+        cats: 0,
         smallDogs: 0,
         largeDogs: 0,
-        otherPets: false,
-        internetMonthlyCost: 65,
       }),
     );
     expect(withoutPets.recurring.petRent?.value).toBe(0);
     expect(withoutPets.upfront.petDeposit?.value).toBe(0);
-    expect(withoutPets.recurring.internet?.value).toBe(65);
+    expect(withoutPets.recurring.internet?.value).toBe(60);
     expect(withoutPets.recurring.electricity?.value).toBe(104);
 
     const withLargeDog = materializeListing(
       applyHouseholdProfile(analysis, {
         occupants: 2,
+        cats: 0,
         smallDogs: 0,
         largeDogs: 1,
-        otherPets: false,
-        internetMonthlyCost: 65,
       }),
     );
     expect(withLargeDog.recurring.petRent?.value).toBe(50);
@@ -138,9 +141,9 @@ describe('manual listing analysis integration', () => {
     const listing = materializeListing(
       applyHouseholdProfile(analysis, {
         occupants: 2,
+        cats: 0,
         smallDogs: 1,
         largeDogs: 1,
-        otherPets: false,
       }),
     );
     expect(listing.recurring.petRent?.value).toBe(60);

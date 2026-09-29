@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">RentSight</title>
+  <desc id="description">A house inside a magnifying glass on an evergreen rounded square.</desc>
+  <defs>
+    <clipPath id="badge-clip">
+      <rect x="18" y="18" width="476" height="476" rx="128" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#badge-clip)">
+    <rect x="18" y="18" width="476" height="476" fill="#05472a" />
+    <circle cx="238" cy="238" r="151" fill="none" stroke="#d9e8d2" stroke-width="42" />
+    <path d="M340 340 441 441" fill="none" stroke="#d9e8d2" stroke-width="48" stroke-linecap="round" />
+    <path d="M159 225 256 149l97 76v129H159Z" fill="#f5f1df" />
+    <path d="m137 217 119-93 119 93-27 34-92-72-92 72Z" fill="#f5f1df" />
+    <path d="M225 354v-53c0-18 14-32 31-32s31 14 31 32v53Z" fill="#05472a" />
+  </g>
+</svg>

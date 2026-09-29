@@ -402,13 +402,11 @@ export function App() {
         const [
           saved,
           storedRecords,
-          storedInternetCost,
           storedHouseholdProfile,
           onboardingCompleted,
         ] = await Promise.all([
           getRentalAnalysis(response.payload.url),
           extensionStorage.get('savedListings'),
-          extensionStorage.get('internetMonthlyCost'),
           extensionStorage.get('householdProfile'),
           extensionStorage.get('onboardingCompleted'),
         ]);
@@ -418,26 +416,21 @@ export function App() {
         if (response.payload.extraction) {
           analysis = applyExtraction(analysis, response.payload.extraction);
         }
-        const legacyInternetCost =
-          !analysis.utilityIncluded.internet &&
-          analysis.listing.recurring.internet?.source === 'user'
-            ? analysis.listing.recurring.internet.value
-            : undefined;
-        const internetCost = storedInternetCost ?? legacyInternetCost;
-        if (
-          storedInternetCost === undefined &&
-          legacyInternetCost !== undefined
-        )
-          await extensionStorage.set('internetMonthlyCost', legacyInternetCost);
         const householdProfile = normalizeHouseholdProfile(
           storedHouseholdProfile ?? {
             occupants: analysis.occupants,
-            internetMonthlyCost: internetCost,
           },
         );
         analysis = applyHouseholdProfile(analysis, householdProfile);
-        if (storedHouseholdProfile === undefined)
-          await extensionStorage.set('householdProfile', householdProfile);
+        await extensionStorage.set('householdProfile', householdProfile);
+        void extensionStorage
+          .remove('internetMonthlyCost')
+          .catch((error) =>
+            console.warn(
+              '[RentSight] Could not remove the legacy internet preference',
+              error,
+            ),
+          );
         let savedListings: SavedListingRecord[] = [];
         try {
           savedListings = migrateSavedRecords(storedRecords);
@@ -631,29 +624,7 @@ export function App() {
   const update = (transform: (analysis: RentalAnalysis) => RentalAnalysis) => {
     setView((current) => {
       if (current.status !== 'ready') return current;
-      const next = transform(current.analysis);
-      const previousInternet = current.analysis.listing.recurring.internet;
-      const nextInternet = next.listing.recurring.internet;
-      const inclusionChanged =
-        current.analysis.utilityIncluded.internet !==
-        next.utilityIncluded.internet;
-      if (
-        !inclusionChanged &&
-        (previousInternet?.value !== nextInternet?.value ||
-          previousInternet?.source !== nextInternet?.source)
-      ) {
-        const write =
-          nextInternet?.source === 'user'
-            ? extensionStorage.set('internetMonthlyCost', nextInternet.value)
-            : extensionStorage.remove('internetMonthlyCost');
-        void write.catch((error: unknown) =>
-          console.error(
-            '[RentSight] Could not save internet preference',
-            error,
-          ),
-        );
-      }
-      return { ...current, analysis: next };
+      return { ...current, analysis: transform(current.analysis) };
     });
   };
 
@@ -744,6 +715,7 @@ export function App() {
   if (view.status === 'error') {
     return (
       <UnavailableWorkspace
+        hasActivePass={account.status === 'plus'}
         clearAllData={clearAllData}
         refreshCurrent={() => window.location.reload()}
       >
@@ -775,6 +747,7 @@ export function App() {
   if (view.status === 'unit-selection-required') {
     return (
       <UnavailableWorkspace
+        hasActivePass={account.status === 'plus'}
         clearAllData={clearAllData}
         refreshCurrent={() => window.location.reload()}
       >
@@ -794,6 +767,7 @@ export function App() {
   const exportPage = view.aiPage?.aiCapture ? view.aiPage : undefined;
   return (
     <Workspace
+      hasActivePass={account.status === 'plus'}
       aiControls={aiControls}
       analysis={view.analysis}
       savedListings={view.savedListings}
@@ -824,6 +798,11 @@ const WORKSPACE_TABS: readonly WorkspaceTab[] = [
   'about',
 ];
 
+const availableWorkspaceTabs = (hasActivePass: boolean) =>
+  hasActivePass
+    ? WORKSPACE_TABS
+    : WORKSPACE_TABS.filter((tab) => tab !== 'ask');
+
 function workspaceTabLabel(
   tab: WorkspaceTab,
   savedCount: number,
@@ -839,16 +818,21 @@ function workspaceTabLabel(
 
 export function UnavailableWorkspace({
   children,
+  hasActivePass,
   clearAllData,
   refreshCurrent,
 }: {
   children: ReactNode;
+  hasActivePass: boolean;
   clearAllData: () => Promise<void>;
   refreshCurrent: () => void;
 }) {
   const [tab, setTab] = useState<WorkspaceTab>('current');
   const [savedListings, setSavedListings] = useState<SavedListingRecord[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
+  const [assistantSavedListingIds, setAssistantSavedListingIds] = useState<
+    string[]
+  >([]);
   const [notice, setNotice] = useState('');
   const [householdProfile, setHouseholdProfile] = useState<HouseholdProfile>({
     ...DEFAULT_HOUSEHOLD_PROFILE,
@@ -872,7 +856,20 @@ export function UnavailableWorkspace({
     void extensionStorage
       .get('householdProfile')
       .then((profile) => {
-        if (active) setHouseholdProfile(normalizeHouseholdProfile(profile));
+        if (!active) return;
+        const normalized = normalizeHouseholdProfile(profile);
+        setHouseholdProfile(normalized);
+        void Promise.all([
+          extensionStorage.set('householdProfile', normalized),
+          extensionStorage.remove('internetMonthlyCost'),
+        ]).catch((error: unknown) => {
+          if (active)
+            setNotice(
+              error instanceof Error
+                ? error.message
+                : 'Could not migrate the household profile.',
+            );
+        });
       })
       .catch((error: unknown) => {
         if (active)
@@ -905,35 +902,40 @@ export function UnavailableWorkspace({
         ),
       );
   };
+  const activeTab = hasActivePass || tab !== 'ask' ? tab : 'current';
 
   return (
     <>
       <MembershipBadge />
       <nav className="workspace-tabs" aria-label="RentSight views">
-        {WORKSPACE_TABS.map((item) => (
+        {availableWorkspaceTabs(hasActivePass).map((item) => (
           <button
             key={item}
             type="button"
-            aria-current={tab === item ? 'page' : undefined}
+            aria-current={activeTab === item ? 'page' : undefined}
             onClick={() => setTab(item)}
           >
             {workspaceTabLabel(item, savedListings.length, selected.length)}
           </button>
         ))}
       </nav>
-      {tab === 'find' && (
+      {activeTab === 'find' && (
         <FindRentalsView
           householdProfile={householdProfile}
           updateHouseholdProfile={updateHouseholdProfile}
         />
       )}
-      <div hidden={tab !== 'ask'}>
-        <AssistantView
-          savedListings={savedListings}
-          navigate={(destination) => setTab(destination)}
-        />
-      </div>
-      {tab === 'current' && (
+      {hasActivePass ? (
+        <div hidden={activeTab !== 'ask'}>
+          <AssistantView
+            savedListings={savedListings}
+            selectedSavedListingIds={assistantSavedListingIds}
+            setSelectedSavedListingIds={setAssistantSavedListingIds}
+            navigate={(destination) => setTab(destination)}
+          />
+        </div>
+      ) : null}
+      {activeTab === 'current' && (
         <div className="current-actions">
           <RefreshListingButton onClick={refreshCurrent} />
         </div>
@@ -943,8 +945,8 @@ export function UnavailableWorkspace({
           {notice}
         </p>
       )}
-      {tab === 'current' && children}
-      {tab === 'saved' && (
+      {activeTab === 'current' && children}
+      {activeTab === 'saved' && (
         <SavedListingsView
           records={savedListings}
           householdProfile={householdProfile}
@@ -955,20 +957,39 @@ export function UnavailableWorkspace({
           onDelete={async (record) => {
             await setRecords(deleteListing(savedListings, record.id));
             setSelected((current) => current.filter((id) => id !== record.id));
+            setAssistantSavedListingIds((current) =>
+              current.filter((id) => id !== record.id),
+            );
             setNotice('Saved listing deleted.');
           }}
           openCompare={() => setTab('compare')}
+          askAboutListings={
+            hasActivePass
+              ? (ids) => {
+                  setAssistantSavedListingIds(ids);
+                  setTab('ask');
+                }
+              : undefined
+          }
         />
       )}
-      {tab === 'compare' && (
+      {activeTab === 'compare' && (
         <ComparisonView
           records={savedListings.filter((record) =>
             selected.includes(record.id),
           )}
           householdProfile={householdProfile}
+          askAboutListings={
+            hasActivePass
+              ? (ids) => {
+                  setAssistantSavedListingIds(ids);
+                  setTab('ask');
+                }
+              : undefined
+          }
         />
       )}
-      {tab === 'about' && (
+      {activeTab === 'about' && (
         <AboutPrivacy
           clearAllData={clearAllData}
           replayTour={() => {
@@ -982,6 +1003,7 @@ export function UnavailableWorkspace({
 }
 
 function Workspace({
+  hasActivePass,
   aiControls,
   analysis,
   savedListings,
@@ -994,6 +1016,7 @@ function Workspace({
   refreshCurrent,
   exportExtractionCapture,
 }: {
+  hasActivePass: boolean;
   aiControls: AiControls;
   analysis: RentalAnalysis;
   savedListings: SavedListingRecord[];
@@ -1010,6 +1033,9 @@ function Workspace({
     onboardingCompleted ? 'current' : 'find',
   );
   const [selected, setSelected] = useState<string[]>([]);
+  const [assistantSavedListingIds, setAssistantSavedListingIds] = useState<
+    string[]
+  >([]);
   const [notice, setNotice] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [tourStep, setTourStep] = useState<number | undefined>(
@@ -1066,6 +1092,9 @@ function Workspace({
     const index = savedListings.findIndex((item) => item.id === record.id);
     await setSavedListings(deleteListing(savedListings, record.id));
     setSelected((current) => current.filter((id) => id !== record.id));
+    setAssistantSavedListingIds((current) =>
+      current.filter((id) => id !== record.id),
+    );
     setDeletedRecord({ record, index });
     setNotice('Saved listing deleted.');
   };
@@ -1084,6 +1113,7 @@ function Workspace({
       );
     }
   };
+  const activeTab = hasActivePass || tab !== 'ask' ? tab : 'current';
 
   return (
     <>
@@ -1092,13 +1122,13 @@ function Workspace({
         className={`workspace-tabs${tourStep !== undefined ? ' tour-active' : ''}`}
         aria-label="RentSight views"
       >
-        {WORKSPACE_TABS.map((item) => (
+        {availableWorkspaceTabs(hasActivePass).map((item) => (
           <button
             key={item}
             type="button"
-            aria-current={tab === item ? 'page' : undefined}
+            aria-current={activeTab === item ? 'page' : undefined}
             className={
-              tourStep !== undefined && tab === item
+              tourStep !== undefined && activeTab === item
                 ? 'tour-highlight'
                 : undefined
             }
@@ -1108,32 +1138,36 @@ function Workspace({
           </button>
         ))}
       </nav>
-      {tab === 'find' && (
+      {activeTab === 'find' && (
         <FindRentalsView
           householdProfile={householdProfile}
           updateHouseholdProfile={updateHouseholdProfile}
         />
       )}
-      <div hidden={tab !== 'ask'}>
-        <AssistantView
-          analysis={analysis}
-          savedListings={savedListings}
-          navigate={(destination) => setTab(destination)}
-          updateAnalysis={(proposal: AssistantProposal) => {
-            if (proposal.type === 'analysis.set_cost')
-              update((current) => applyCostProposal(current, proposal));
-            else if (proposal.type === 'property_note.add')
-              update((current) =>
-                addAssistantPropertyNote(
-                  current,
-                  proposal.id,
-                  proposal.arguments.text,
-                ),
-              );
-          }}
-        />
-      </div>
-      {tab === 'current' && (
+      {hasActivePass ? (
+        <div hidden={activeTab !== 'ask'}>
+          <AssistantView
+            analysis={analysis}
+            savedListings={savedListings}
+            selectedSavedListingIds={assistantSavedListingIds}
+            setSelectedSavedListingIds={setAssistantSavedListingIds}
+            navigate={(destination) => setTab(destination)}
+            updateAnalysis={(proposal: AssistantProposal) => {
+              if (proposal.type === 'analysis.set_cost')
+                update((current) => applyCostProposal(current, proposal));
+              else if (proposal.type === 'property_note.add')
+                update((current) =>
+                  addAssistantPropertyNote(
+                    current,
+                    proposal.id,
+                    proposal.arguments.text,
+                  ),
+                );
+            }}
+          />
+        </div>
+      ) : null}
+      {activeTab === 'current' && (
         <div className="current-actions">
           <RefreshListingButton
             refreshing={refreshing}
@@ -1156,7 +1190,7 @@ function Workspace({
           )}
         </p>
       )}
-      {tab === 'current' &&
+      {activeTab === 'current' &&
         !analysis.listing.recurring.advertisedRent &&
         !notice && (
           <p className="workspace-note" role="status">
@@ -1164,13 +1198,12 @@ function Workspace({
             an AI review.
           </p>
         )}
-      {tab === 'current' && (
+      {activeTab === 'current' && (
         <AnalysisEditor
           aiControls={aiControls}
           analysis={analysis}
           update={update}
           householdProfile={householdProfile}
-          updateHouseholdProfile={updateHouseholdProfile}
           toolbar={
             <button
               type="button"
@@ -1182,7 +1215,7 @@ function Workspace({
           }
         />
       )}
-      {tab === 'saved' && (
+      {activeTab === 'saved' && (
         <SavedListingsView
           records={savedListings}
           householdProfile={householdProfile}
@@ -1192,17 +1225,33 @@ function Workspace({
           setNotice={setNotice}
           onDelete={removeSavedListing}
           openCompare={() => setTab('compare')}
+          askAboutListings={
+            hasActivePass
+              ? (ids) => {
+                  setAssistantSavedListingIds(ids);
+                  setTab('ask');
+                }
+              : undefined
+          }
         />
       )}
-      {tab === 'compare' && (
+      {activeTab === 'compare' && (
         <ComparisonView
           records={savedListings.filter((record) =>
             selected.includes(record.id),
           )}
           householdProfile={householdProfile}
+          askAboutListings={
+            hasActivePass
+              ? (ids) => {
+                  setAssistantSavedListingIds(ids);
+                  setTab('ask');
+                }
+              : undefined
+          }
         />
       )}
-      {tab === 'about' && (
+      {activeTab === 'about' && (
         <AboutPrivacy clearAllData={clearAllData} replayTour={startTour} />
       )}
       {tourStep !== undefined && (
@@ -1550,6 +1599,7 @@ function SavedListingsView({
   setNotice,
   onDelete,
   openCompare,
+  askAboutListings,
 }: {
   records: SavedListingRecord[];
   householdProfile: HouseholdProfile;
@@ -1559,11 +1609,13 @@ function SavedListingsView({
   setNotice: (notice: string) => void;
   onDelete: (record: SavedListingRecord) => Promise<void>;
   openCompare: () => void;
+  askAboutListings?: (ids: string[]) => void;
 }) {
   const selectedRecords = records.filter((record) =>
     selected.includes(record.id),
   );
   const exportedRecords = selectedRecords.length ? selectedRecords : records;
+  const exportScope = selectedRecords.length ? 'selected' : 'all';
   const importFile = async (file?: File) => {
     if (!file) return;
     try {
@@ -1588,8 +1640,9 @@ function SavedListingsView({
         <span className="eyebrow">Your shortlist</span>
         <h1>Saved listings</h1>
         <p>
-          Select listings to compare or export. Saved records stay in this
-          Chrome profile.
+          Select listings to compare
+          {askAboutListings ? ' or ask RentSight' : ''}. Saved records stay in
+          this Chrome profile.
         </p>
       </header>
       <div className="collection-actions">
@@ -1601,38 +1654,24 @@ function SavedListingsView({
         >
           Compare Selected
         </button>
-        <button
-          type="button"
-          onClick={() =>
-            downloadData(
-              'rentsight-listings.json',
-              exportListingsJson(exportedRecords),
-              'application/json',
-            )
-          }
-        >
-          Export JSON
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            downloadData(
-              'rentsight-listings.csv',
-              exportListingsCsv(exportedRecords, householdProfile),
-              'text/csv',
-            )
-          }
-        >
-          Export CSV
-        </button>
-        <label className="import-button">
-          Import JSON
-          <input
-            type="file"
-            accept="application/json,.json"
-            onChange={(event) => void importFile(event.target.files?.[0])}
-          />
-        </label>
+        {askAboutListings ? (
+          <button
+            type="button"
+            disabled={selected.length === 0 || selected.length > 5}
+            title={
+              selected.length > 5
+                ? 'Choose up to five saved listings for one chat.'
+                : undefined
+            }
+            onClick={() =>
+              askAboutListings(selectedRecords.map(({ id }) => id))
+            }
+          >
+            {selected.length > 5
+              ? 'Select up to 5 to ask'
+              : 'Ask about selected'}
+          </button>
+        ) : null}
         <button
           type="button"
           disabled={records.length === 0 || selected.length === records.length}
@@ -1640,6 +1679,48 @@ function SavedListingsView({
         >
           Select all
         </button>
+        <details className="collection-more">
+          <summary>
+            <span>More options</span>
+            <span className="disclosure-icon" aria-hidden="true" />
+          </summary>
+          <div className="collection-more-options">
+            <button
+              type="button"
+              disabled={exportedRecords.length === 0}
+              onClick={() =>
+                downloadData(
+                  'rentsight-listings.json',
+                  exportListingsJson(exportedRecords),
+                  'application/json',
+                )
+              }
+            >
+              Download {exportScope} backup
+            </button>
+            <label className="import-button">
+              Restore RentSight backup
+              <input
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) => void importFile(event.target.files?.[0])}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={exportedRecords.length === 0}
+              onClick={() =>
+                downloadData(
+                  'rentsight-listings.csv',
+                  exportListingsCsv(exportedRecords, householdProfile),
+                  'text/csv',
+                )
+              }
+            >
+              Download {exportScope} spreadsheet
+            </button>
+          </div>
+        </details>
       </div>
       {records.length === 0 ? (
         <section>
@@ -1674,6 +1755,15 @@ function SavedListingsView({
                 <a href={record.url} target="_blank" rel="noreferrer">
                   Open listing
                 </a>
+                {askAboutListings ? (
+                  <button
+                    type="button"
+                    className="ask-saved"
+                    onClick={() => askAboutListings([record.id])}
+                  >
+                    Ask RentSight
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="remove"
@@ -1732,9 +1822,11 @@ function comparableValue(value: unknown): number | undefined {
 function ComparisonView({
   records,
   householdProfile,
+  askAboutListings,
 }: {
   records: SavedListingRecord[];
   householdProfile: HouseholdProfile;
+  askAboutListings?: (ids: string[]) => void;
 }) {
   const items = records.map((record) =>
     createComparison(record, householdProfile),
@@ -1773,6 +1865,15 @@ function ComparisonView({
           Compare known listing costs and features side by side. It is not a
           financial recommendation.
         </p>
+        {askAboutListings && records.length >= 2 && records.length <= 5 ? (
+          <button
+            type="button"
+            className="comparison-ask"
+            onClick={() => askAboutListings(records.map(({ id }) => id))}
+          >
+            Ask RentSight about these listings
+          </button>
+        ) : null}
       </header>
       {items.length < 2 ? (
         <section>
@@ -1900,7 +2001,6 @@ interface AnalysisEditorProps {
   update: (transform: (analysis: RentalAnalysis) => RentalAnalysis) => void;
   toolbar?: ReactNode;
   householdProfile?: HouseholdProfile;
-  updateHouseholdProfile?: (profile: HouseholdProfile) => void;
 }
 
 function PropertyNotesEditor({
@@ -1973,7 +2073,6 @@ export function AnalysisEditor({
   update: updateAnalysis,
   toolbar,
   householdProfile = normalizeHouseholdProfile(analysis.householdProfile),
-  updateHouseholdProfile = () => undefined,
 }: AnalysisEditorProps) {
   const [confirmedRevision, setConfirmedRevision] = useState<
     string | undefined
@@ -2265,22 +2364,9 @@ export function AnalysisEditor({
                   field={analysis.listing.recurring[category]}
                   baseline={analysis.baseline.recurring[category]}
                   disabled={analysis.utilityIncluded[category]}
-                  allowReset={category === 'internet'}
-                  onChange={(value) =>
-                    category === 'internet'
-                      ? updateHouseholdProfile({
-                          ...householdProfile,
-                          internetMonthlyCost: value,
-                        })
-                      : recurring(category, value)
-                  }
+                  onChange={(value) => recurring(category, value)}
                   onReset={() =>
-                    category === 'internet'
-                      ? updateHouseholdProfile({
-                          ...householdProfile,
-                          internetMonthlyCost: undefined,
-                        })
-                      : update((current) => resetUtility(current, category))
+                    update((current) => resetUtility(current, category))
                   }
                 />
                 <label className="included">

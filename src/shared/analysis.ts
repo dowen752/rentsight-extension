@@ -9,7 +9,7 @@ import type {
   UtilityCategory,
   ValueSource,
 } from '../calculations';
-import { estimateUtilities } from '../calculations';
+import { DEFAULT_COST_ASSUMPTIONS, estimateUtilities } from '../calculations';
 import type { ListingExtraction } from '../extractors';
 import type { LocationEstimate } from '../location';
 import {
@@ -91,6 +91,10 @@ export function createInitialAnalysis(
       water: estimated(35, 'National placeholder estimate.'),
       sewer: estimated(25, 'National placeholder estimate.'),
       trash: estimated(25, 'National placeholder estimate.'),
+      internet: estimated(
+        DEFAULT_COST_ASSUMPTIONS.utilities.internet,
+        'Default monthly internet assumption.',
+      ),
       rentersInsurance: estimated(15, 'Default renters-insurance assumption.'),
     },
     upfront: {},
@@ -160,14 +164,18 @@ export function materializeListing(analysis: RentalAnalysis): RentalListing {
     },
   });
   for (const category of UTILITY_CATEGORIES) {
-    if (category === 'internet' && !listing.recurring.internet) continue;
     if (
       listing.recurring[category]?.source !== 'user' &&
       listing.recurring[category]?.source !== 'listing' &&
       !analysis.userClearedFields?.includes(`recurring.${category}`)
     ) {
       const estimate = utilityEstimates[category];
-      if (estimate && analysis.locationEstimate && estimate.value > 0) {
+      if (
+        category !== 'internet' &&
+        estimate &&
+        analysis.locationEstimate &&
+        estimate.value > 0
+      ) {
         listing.recurring[category] = {
           ...estimate,
           value: Math.round(
@@ -206,8 +214,7 @@ export function materializeListing(analysis: RentalAnalysis): RentalListing {
       note: 'Includes custom one-time fees.',
     };
   }
-  const petCount =
-    household.smallDogs + household.largeDogs + Number(household.otherPets);
+  const petCount = household.cats + household.smallDogs + household.largeDogs;
   if (petCount > 0) {
     for (const field of [
       listing.recurring.petRent,
@@ -274,9 +281,21 @@ export function applyHouseholdProfile(
   const household = normalizeHouseholdProfile(profile);
   next.householdProfile = household;
   next.occupants = household.occupants;
-  const applied = applyInternetPreference(next, household.internetMonthlyCost);
-  applied.updatedAt = new Date().toISOString();
-  return applied;
+  if (
+    !next.listing.recurring.internet &&
+    !next.userClearedFields?.includes('recurring.internet')
+  )
+    next.listing.recurring.internet = estimated(
+      DEFAULT_COST_ASSUMPTIONS.utilities.internet,
+      'Default monthly internet assumption.',
+    );
+  if (!next.baseline.recurring.internet)
+    next.baseline.recurring.internet = estimated(
+      DEFAULT_COST_ASSUMPTIONS.utilities.internet,
+      'Default monthly internet assumption.',
+    );
+  next.updatedAt = new Date().toISOString();
+  return next;
 }
 
 export function applyLocationEstimate(
@@ -297,7 +316,6 @@ export function applyLocationEstimate(
   });
   for (const category of UTILITY_CATEGORIES) {
     const current = next.listing.recurring[category];
-    if (category === 'internet' && !current) continue;
     const base = utilityEstimates[category];
     if (
       base &&
@@ -307,12 +325,15 @@ export function applyLocationEstimate(
       !next.userClearedFields?.includes(`recurring.${category}`) &&
       next.utilityIncludedSource[category] !== 'listing'
     ) {
-      const adjusted: SourcedValue<number> = {
-        value: Math.round(base.value * estimate.utilityAdjustmentFactor),
-        source: 'location_estimate',
-        confidence: 0.5,
-        note: `Adjusted ${estimate.utilityAdjustmentFactor.toFixed(2)}× for ${estimate.location.state} using local configuration.`,
-      };
+      const adjusted: SourcedValue<number> =
+        category === 'internet'
+          ? base
+          : {
+              value: Math.round(base.value * estimate.utilityAdjustmentFactor),
+              source: 'location_estimate',
+              confidence: 0.5,
+              note: `Adjusted ${estimate.utilityAdjustmentFactor.toFixed(2)}× for ${estimate.location.state} using local configuration.`,
+            };
       next.listing.recurring[category] = adjusted;
       next.baseline.recurring[category] = structuredClone(adjusted);
     }
@@ -340,24 +361,6 @@ export function applyLocationEstimate(
     }
   }
   next.updatedAt = new Date().toISOString();
-  return next;
-}
-
-export function applyInternetPreference(
-  analysis: RentalAnalysis,
-  monthlyCost: number | undefined,
-): RentalAnalysis {
-  const next = structuredClone(analysis);
-  const listingIncludesInternet =
-    next.utilityIncluded.internet &&
-    next.utilityIncludedSource.internet === 'listing';
-  if (listingIncludesInternet) return next;
-  if (monthlyCost === undefined) {
-    if (next.listing.recurring.internet?.source !== 'listing')
-      delete next.listing.recurring.internet;
-  } else {
-    next.listing.recurring.internet = userValue(monthlyCost);
-  }
   return next;
 }
 

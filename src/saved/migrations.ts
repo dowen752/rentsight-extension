@@ -1,5 +1,6 @@
 import validateAiResponse from '../ai/contracts/response.validator.js';
 import { createInitialAnalysis, type RentalAnalysis } from '../shared/analysis';
+import { normalizeHouseholdProfile } from '../shared/household';
 import { SAVED_LISTING_SCHEMA_VERSION, type SavedListingRecord } from './types';
 import { compactAnalysisForStorage } from './repository';
 
@@ -190,6 +191,9 @@ function normalizeAnalysis(
       ...defaults.utilityIncludedSource,
       ...analysis.utilityIncludedSource,
     },
+    householdProfile: normalizeHouseholdProfile(
+      analysis.householdProfile ?? { occupants: analysis.occupants },
+    ),
     userClearedFields: Array.isArray(analysis.userClearedFields)
       ? analysis.userClearedFields.filter(
           (path): path is string => typeof path === 'string',

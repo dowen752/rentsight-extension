@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   SEARCH_CRITERION_LABELS,
   SEARCH_PROPERTY_TYPES,
+  applyHouseholdPetFilters,
   buildSearchLinks,
   getSearchProfile,
   launchApartmentsSearch,
@@ -86,8 +87,9 @@ function HouseholdDetails({
     >
       <h2 id="search-household-heading">Your household</h2>
       <p>
-        Saved across sessions and used for utility estimates and applicable pet
-        costs. These details are not sent to rental sites.
+        Saved across sessions and used for utility estimates, pet-friendly
+        search filters, and applicable pet costs. Pet counts stay in RentSight;
+        only matching cat or dog filters are applied to rental sites.
       </p>
       <div className="household-fields">
         <SearchNumberInput
@@ -97,9 +99,9 @@ function HouseholdDetails({
           onChange={(value) => update('occupants', value ?? 1)}
         />
         <SearchNumberInput
-          label="Internet / month ($)"
-          value={profile.internetMonthlyCost}
-          onChange={(value) => update('internetMonthlyCost', value)}
+          label="Cats"
+          value={profile.cats}
+          onChange={(value) => update('cats', value ?? 0)}
         />
         <SearchNumberInput
           label="Small dogs"
@@ -111,14 +113,6 @@ function HouseholdDetails({
           value={profile.largeDogs}
           onChange={(value) => update('largeDogs', value ?? 0)}
         />
-        <label className="pet-presence">
-          <input
-            type="checkbox"
-            checked={profile.otherPets}
-            onChange={(event) => update('otherPets', event.target.checked)}
-          />
-          Cats or other pets
-        </label>
       </div>
     </section>
   );
@@ -213,9 +207,17 @@ export function FindRentalsView({
   }, []);
 
   const results = useMemo(
-    () => (submittedSearch ? buildSearchLinks(submittedSearch) : []),
-    [submittedSearch],
+    () =>
+      submittedSearch
+        ? buildSearchLinks(
+            applyHouseholdPetFilters(submittedSearch, householdProfile),
+          )
+        : [],
+    [householdProfile, submittedSearch],
   );
+  const activeSearch = submittedSearch
+    ? applyHouseholdPetFilters(submittedSearch, householdProfile)
+    : undefined;
 
   const update = <K extends keyof RentalSearch>(
     key: K,
@@ -288,38 +290,38 @@ export function FindRentalsView({
   const launch = async (siteId: string, url: string) => {
     setMessage('');
     try {
-      if (siteId === 'apartments' && submittedSearch) {
-        const outcome = await openApartments(submittedSearch, url);
+      if (siteId === 'apartments' && activeSearch) {
+        const outcome = await openApartments(activeSearch, url);
         if (outcome.message) setMessage(outcome.message);
         return;
       }
-      if (siteId === 'zillow' && submittedSearch) {
-        const outcome = await openZillow(submittedSearch, url);
+      if (siteId === 'zillow' && activeSearch) {
+        const outcome = await openZillow(activeSearch, url);
         if (outcome.message) setMessage(outcome.message);
         return;
       }
-      if (siteId === 'realtor' && submittedSearch) {
-        const outcome = await openRealtor(submittedSearch, url);
+      if (siteId === 'realtor' && activeSearch) {
+        const outcome = await openRealtor(activeSearch, url);
         if (outcome.message) setMessage(outcome.message);
         return;
       }
-      if (siteId === 'redfin' && submittedSearch) {
-        const outcome = await openRedfin(submittedSearch, url);
+      if (siteId === 'redfin' && activeSearch) {
+        const outcome = await openRedfin(activeSearch, url);
         if (outcome.message) setMessage(outcome.message);
         return;
       }
-      if (siteId === 'rent' && submittedSearch) {
-        const outcome = await openRent(submittedSearch, url);
+      if (siteId === 'rent' && activeSearch) {
+        const outcome = await openRent(activeSearch, url);
         if (outcome.message) setMessage(outcome.message);
         return;
       }
-      if (siteId === 'hotpads' && submittedSearch) {
-        const outcome = await openHotpads(submittedSearch, url);
+      if (siteId === 'hotpads' && activeSearch) {
+        const outcome = await openHotpads(activeSearch, url);
         if (outcome.message) setMessage(outcome.message);
         return;
       }
-      if (siteId === 'zumper' && submittedSearch) {
-        const outcome = await openZumper(submittedSearch, url);
+      if (siteId === 'zumper' && activeSearch) {
+        const outcome = await openZumper(activeSearch, url);
         if (outcome.message) setMessage(outcome.message);
         return;
       }
@@ -405,50 +407,6 @@ export function FindRentalsView({
                   {PROPERTY_TYPE_LABELS[propertyType]}
                 </label>
               ))}
-            </div>
-          </fieldset>
-          <fieldset>
-            <legend>Pet-friendly filters</legend>
-            <div className="search-check-grid">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={search.catsAllowed === true}
-                  onChange={(event) =>
-                    update(
-                      'catsAllowed',
-                      event.target.checked ? true : undefined,
-                    )
-                  }
-                />
-                Cats allowed
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={search.smallDogsAllowed === true}
-                  onChange={(event) =>
-                    update(
-                      'smallDogsAllowed',
-                      event.target.checked ? true : undefined,
-                    )
-                  }
-                />
-                Small dogs allowed
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={search.largeDogsAllowed === true}
-                  onChange={(event) =>
-                    update(
-                      'largeDogsAllowed',
-                      event.target.checked ? true : undefined,
-                    )
-                  }
-                />
-                Large dogs allowed
-              </label>
             </div>
           </fieldset>
         </section>

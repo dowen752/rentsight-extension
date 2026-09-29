@@ -39,6 +39,7 @@ type AssistantTab = 'find' | 'current' | 'saved' | 'compare';
 type ConversationMessage = StoredAssistantMessage & {
   animate?: boolean;
   historical?: boolean;
+  savedScope?: boolean;
 };
 
 interface AssistantHistoryApi {
@@ -64,6 +65,10 @@ const DEFAULT_HISTORY_API: AssistantHistoryApi = {
 
 const HISTORY_PAGE_SIZE = 20;
 const TURN_PAGE_SIZE = 20;
+const SAVED_LISTING_ACTION_VERSIONS = {
+  'search.patch': ASSISTANT_ACTION_VERSIONS['search.patch'],
+  'workspace.navigate': ASSISTANT_ACTION_VERSIONS['workspace.navigate'],
+};
 
 const emptyConversation = (): StoredAssistantConversation => ({
   schemaVersion: '1.0',
@@ -106,6 +111,11 @@ const formatUpdatedTime = (value: string) => {
     minute: '2-digit',
   }).format(date);
 };
+
+const savedListingLabel = (record: SavedListingRecord) =>
+  record.analysis.listing.identity.listingTitle?.value ||
+  record.analysis.listing.identity.fullAddress?.value ||
+  'Saved rental';
 
 const messagesForTurns = (
   conversationId: string,
@@ -268,7 +278,13 @@ function ConversationMessageCard({
       ) : null}
       {revealComplete
         ? message.response?.proposals
-            .filter((proposal) => !message.historical || statusFor(proposal.id))
+            .filter((proposal) => {
+              if (message.historical) return Boolean(statusFor(proposal.id));
+              if (!message.savedScope) return true;
+              return ['search.patch', 'workspace.navigate'].includes(
+                proposal.type,
+              );
+            })
             .map((proposal) => (
               <ProposalCard
                 key={proposal.id}
@@ -478,6 +494,8 @@ function ConversationHistory({
 export function AssistantView({
   analysis,
   savedListings,
+  selectedSavedListingIds,
+  setSelectedSavedListingIds,
   updateAnalysis,
   navigate,
   sendMessage = (request) => rentSightApi.sendAssistantMessage(request),
@@ -486,6 +504,8 @@ export function AssistantView({
 }: {
   analysis?: RentalAnalysis;
   savedListings: SavedListingRecord[];
+  selectedSavedListingIds?: string[];
+  setSelectedSavedListingIds?: (ids: string[]) => void;
   updateAnalysis?: (proposal: AssistantProposal) => void;
   navigate: (tab: AssistantTab) => void;
   sendMessage?: (request: AssistantRequest) => Promise<AssistantResponse>;
@@ -493,6 +513,9 @@ export function AssistantView({
   animateResponses?: boolean;
 }) {
   const [draft, setDraft] = useState('');
+  const [localSavedListingIds, setLocalSavedListingIds] = useState<string[]>(
+    [],
+  );
   const [conversationId, setConversationId] = useState<string>();
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [outcomes, setOutcomes] = useState<AssistantActionOutcome[]>([]);
@@ -520,10 +543,32 @@ export function AssistantView({
   const [deletingId, setDeletingId] = useState<string>();
   const persistenceQueue = useRef<Promise<void>>(Promise.resolve());
   const threadRef = useRef<HTMLElement>(null);
-  const revision = assistantContextRevision(analysis);
+  const requestedSavedListingIds =
+    selectedSavedListingIds ?? localSavedListingIds;
+  const scopedSavedListings = useMemo(() => {
+    const ids = new Set(requestedSavedListingIds);
+    return savedListings.filter((record) => ids.has(record.id)).slice(0, 5);
+  }, [requestedSavedListingIds, savedListings]);
+  const activeSavedListingIds = useMemo(
+    () => scopedSavedListings.map((record) => record.id),
+    [scopedSavedListings],
+  );
+  const updateSavedListingScope =
+    setSelectedSavedListingIds ?? setLocalSavedListingIds;
+  const usingSavedListings = activeSavedListingIds.length > 0;
+  const revision = assistantContextRevision(
+    analysis,
+    savedListings,
+    activeSavedListingIds,
+  );
   const context = useMemo(
-    () => assistantContextForAnalysis(analysis, savedListings),
-    [analysis, savedListings],
+    () =>
+      assistantContextForAnalysis(
+        analysis,
+        savedListings,
+        activeSavedListingIds,
+      ),
+    [activeSavedListingIds, analysis, savedListings],
   );
 
   const persistConversation = useCallback(
@@ -788,6 +833,7 @@ export function AssistantView({
           response,
           animate: true,
           historical: false,
+          savedScope: request.context?.activeView === 'saved',
         },
       ]);
       setPendingOutcomes([]);
@@ -822,7 +868,11 @@ export function AssistantView({
       message: trimmed,
       contextRevision: revision,
       context,
-      capabilities: { actions: ASSISTANT_ACTION_VERSIONS },
+      capabilities: {
+        actions: usingSavedListings
+          ? SAVED_LISTING_ACTION_VERSIONS
+          : ASSISTANT_ACTION_VERSIONS,
+      },
       ...(pendingOutcomes.length ? { actionOutcomes: pendingOutcomes } : {}),
     };
     await executeRequest(request, true);
@@ -883,6 +933,17 @@ export function AssistantView({
     setHistoryOpen(false);
   };
 
+  const currentListingLabel =
+    analysis?.listing.identity.listingTitle?.value ||
+    analysis?.listing.identity.fullAddress?.value;
+  const contextLabel = usingSavedListings
+    ? activeSavedListingIds.length === 1
+      ? `Using saved rental: ${savedListingLabel(scopedSavedListings[0])}`
+      : `Using ${activeSavedListingIds.length} saved rentals`
+    : currentListingLabel
+      ? `Using current rental: ${currentListingLabel}`
+      : 'Choose saved rentals for this chat';
+
   return (
     <main className="assistant-workspace">
       <div className="assistant-actions">
@@ -938,20 +999,100 @@ export function AssistantView({
       ) : null}
       <header className="assistant-heading">
         <span className="eyebrow">RentSight assistant</span>
-        <h1>Ask about your rental</h1>
+        <h1>
+          {usingSavedListings
+            ? activeSavedListingIds.length === 1
+              ? 'Ask about this saved rental'
+              : 'Ask about your saved rentals'
+            : 'Ask about your rental'}
+        </h1>
         <p>
-          Understand costs, explore an area, or describe the rental you want to
-          find.
+          {usingSavedListings
+            ? 'Review saved costs, fees, notes, or compare the rentals in this chat.'
+            : 'Understand costs, explore an area, or describe the rental you want to find.'}
         </p>
-        <span className="assistant-context">
-          {analysis?.listing.identity.fullAddress?.value
-            ? `Using ${analysis.listing.identity.fullAddress.value}`
-            : 'No current listing — Search and saved rentals are still available'}
-        </span>
+        {savedListings.length ? (
+          <details className="assistant-context-picker">
+            <summary>
+              <span className="assistant-context">{contextLabel}</span>
+              <span className="disclosure-icon" aria-hidden="true" />
+            </summary>
+            <div className="assistant-context-options">
+              <p>Choose the current page or up to five saved rentals.</p>
+              {analysis ? (
+                <div className="assistant-context-group">
+                  <span className="assistant-context-group-label">
+                    Current page
+                  </span>
+                  <button
+                    type="button"
+                    className={`assistant-context-option${!usingSavedListings ? ' selected' : ''}`}
+                    aria-pressed={!usingSavedListings}
+                    onClick={() => updateSavedListingScope([])}
+                  >
+                    <span className="assistant-context-option-copy">
+                      <strong>{currentListingLabel || 'Current rental'}</strong>
+                      <small>Open in this tab</small>
+                    </span>
+                    {!usingSavedListings ? (
+                      <span className="assistant-context-option-state">
+                        In chat
+                      </span>
+                    ) : null}
+                  </button>
+                </div>
+              ) : null}
+              <div className="assistant-context-group">
+                <span className="assistant-context-group-label">
+                  Saved rentals
+                </span>
+                {savedListings.map((record) => {
+                  const selected = activeSavedListingIds.includes(record.id);
+                  return (
+                    <button
+                      type="button"
+                      className={`assistant-context-option${selected ? ' selected' : ''}`}
+                      aria-pressed={selected}
+                      disabled={!selected && activeSavedListingIds.length >= 5}
+                      key={record.id}
+                      onClick={() =>
+                        updateSavedListingScope(
+                          !selected
+                            ? [...activeSavedListingIds, record.id]
+                            : activeSavedListingIds.filter(
+                                (id) => id !== record.id,
+                              ),
+                        )
+                      }
+                    >
+                      <span className="assistant-context-option-copy">
+                        <strong>{savedListingLabel(record)}</strong>
+                        <small>Saved rental</small>
+                      </span>
+                      {selected ? (
+                        <span className="assistant-context-option-state">
+                          In chat
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </details>
+        ) : (
+          <span className="assistant-context">{contextLabel}</span>
+        )}
+        {usingSavedListings ? (
+          <span className="assistant-history-context">
+            Answers use the details saved in RentSight. These rentals are not
+            reopened or changed by the chat.
+          </span>
+        ) : null}
         {conversationId ? (
           <span className="assistant-history-context">
-            Continuing this chat uses your current rental and calculation
-            context. Opening history does not restore old listing inputs.
+            Continuing this chat uses the context selected above. Opening
+            history does not restore old listing inputs.
           </span>
         ) : null}
       </header>
@@ -976,15 +1117,24 @@ export function AssistantView({
         ) : null}
         {conversationLoaded && !messages.length && (
           <div className="assistant-starters">
-            {[
-              ...(analysis
-                ? [
-                    'Why does this cost more than the listed rent?',
-                    'What should I verify before applying?',
-                  ]
-                : []),
-              'Find me a two-bedroom under $2,800 with in-unit laundry.',
-            ].map((suggestion) => (
+            {(usingSavedListings
+              ? [
+                  ...(activeSavedListingIds.length > 1
+                    ? ['Compare the true monthly costs of these rentals.']
+                    : []),
+                  'What fees or costs should I verify?',
+                  'Summarize the most important saved details.',
+                ]
+              : [
+                  ...(analysis
+                    ? [
+                        'Why does this cost more than the listed rent?',
+                        'What should I verify before applying?',
+                      ]
+                    : []),
+                  'Find me a two-bedroom under $2,800 with in-unit laundry.',
+                ]
+            ).map((suggestion) => (
               <button
                 key={suggestion}
                 type="button"

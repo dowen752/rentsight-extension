@@ -44,9 +44,9 @@ describe('Search workflow', () => {
     const updateHouseholdProfile = vi.fn();
     const householdProfile: HouseholdProfile = {
       occupants: 1,
-      smallDogs: 0,
-      largeDogs: 0,
-      otherPets: false,
+      cats: 1,
+      smallDogs: 1,
+      largeDogs: 1,
     };
     const root = createRoot(container);
     await act(async () => {
@@ -108,8 +108,11 @@ describe('Search workflow', () => {
       'Will apply: location, maximum rent, parking',
     );
     expect(container.textContent).toContain('Check on site: parking');
-    expect(container.textContent).toContain('Small dogs allowed');
-    expect(container.textContent).toContain('Large dogs allowed');
+    expect(container.textContent).toContain('small dogs allowed');
+    expect(container.textContent).toContain('large dogs allowed');
+    expect(container.textContent).toContain('cats allowed');
+    expect(container.textContent).not.toContain('Pet-friendly filters');
+    expect(container.textContent).not.toContain('Internet / month');
 
     await act(async () => {
       Array.from(container.querySelectorAll('button'))
@@ -117,6 +120,11 @@ describe('Search workflow', () => {
         .click();
     });
     expect(openZillow).toHaveBeenCalledOnce();
+    expect(openZillow.mock.calls[0][0]).toMatchObject({
+      catsAllowed: true,
+      smallDogsAllowed: true,
+      largeDogsAllowed: true,
+    });
     expect(new URL(openZillow.mock.calls[0][1]).origin).toBe(
       'https://www.zillow.com',
     );
