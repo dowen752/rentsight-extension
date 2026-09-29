@@ -111,7 +111,7 @@ describe('RentSight+ purchase information overlay', () => {
       'across a wider range of rental sites, including smaller or niche sites where standard extraction can fall short',
     );
     expect(container.textContent).toContain(
-      'prefill your rental search and suggest updates to costs and notes in your current or saved listings for your approval',
+      'prefill your rental search, suggest cost and note updates for the current listing, and help revise saved property details—all with your approval',
     );
     expect(document.body.style.overflow).toBe('hidden');
     expect(document.activeElement?.getAttribute('aria-label')).toBe(

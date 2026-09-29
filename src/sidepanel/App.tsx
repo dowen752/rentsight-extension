@@ -1119,9 +1119,12 @@ function Workspace({
   const updateSavedListingFromAssistant = async (
     proposal: SavedListingProposal,
   ): Promise<string> => {
+    const previous = savedListings.find(
+      (record) => record.id === proposal.arguments.listingId,
+    );
     const result = applySavedListingProposal(savedListings, proposal);
     await setSavedListings(result.records);
-    if (result.record.url === currentUrl)
+    if (previous?.url === currentUrl)
       update((current) =>
         applySavedListingProposalToAnalysis(current, proposal),
       );

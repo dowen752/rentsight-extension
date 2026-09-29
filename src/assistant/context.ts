@@ -49,7 +49,8 @@ const analysisSnapshot = (analysis: RentalAnalysis) => {
       recurring,
       upfront,
       concessions: listing.concessions,
-      propertyNotes: analysis.propertyNotes.map(({ text, source }) => ({
+      propertyNotes: analysis.propertyNotes.map(({ id, text, source }) => ({
+        id,
         text,
         source,
       })),

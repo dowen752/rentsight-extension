@@ -1,6 +1,8 @@
 import { normalizeRentalSearch, type SearchCriterion } from '../search';
 import {
   ASSISTANT_COST_FREQUENCIES,
+  SAVED_LISTING_CLEARABLE_FIELDS,
+  SAVED_LISTING_SETTABLE_FIELDS,
   type AssistantConversationPage,
   type AssistantConversationTurnsPage,
   type AssistantHistoryTurn,
@@ -119,6 +121,63 @@ const validCostArguments = (args: Record<string, unknown>) => {
   );
 };
 
+const SETTABLE_SAVED_FIELDS = new Set<string>(SAVED_LISTING_SETTABLE_FIELDS);
+const CLEARABLE_SAVED_FIELDS = new Set<string>(SAVED_LISTING_CLEARABLE_FIELDS);
+const SAVED_TEXT_FIELDS = new Set([
+  'identity.listingTitle',
+  'identity.fullAddress',
+  'identity.city',
+  'identity.state',
+  'identity.zipCode',
+  'identity.url',
+]);
+const SAVED_UTILITY_FIELDS = new Set([
+  'utilityIncluded.electricity',
+  'utilityIncluded.naturalGas',
+  'utilityIncluded.water',
+  'utilityIncluded.sewer',
+  'utilityIncluded.trash',
+  'utilityIncluded.internet',
+]);
+
+const finiteAmount = (value: unknown): value is number =>
+  typeof value === 'number' &&
+  Number.isFinite(value) &&
+  value >= 0 &&
+  value <= 1_000_000;
+
+const validSavedFieldValue = (field: string, value: unknown) => {
+  if (SAVED_TEXT_FIELDS.has(field)) {
+    if (
+      typeof value !== 'string' ||
+      !value.trim() ||
+      value.length > (field === 'identity.url' ? 2_000 : 500)
+    )
+      return false;
+    if (field !== 'identity.url') return true;
+    try {
+      return ['http:', 'https:'].includes(new URL(value).protocol);
+    } catch {
+      return false;
+    }
+  }
+  if (SAVED_UTILITY_FIELDS.has(field)) return typeof value === 'boolean';
+  if (field === 'laundryType')
+    return [
+      'in_unit',
+      'shared_paid',
+      'shared_free',
+      'hookups_only',
+      'none',
+      'unknown',
+    ].includes(String(value));
+  if (!finiteAmount(value)) return false;
+  return (
+    field !== 'concessions.leaseMonths' ||
+    (Number.isInteger(value) && value >= 1 && value <= 120)
+  );
+};
+
 export function acceptAssistantProposal(
   value: unknown,
 ): AssistantProposal | undefined {
@@ -180,6 +239,95 @@ export function acceptAssistantProposal(
       return undefined;
     return value as unknown as AssistantProposal;
   }
+  if (value.type === 'saved_listing.set_field') {
+    if (
+      !hasExactKeys(value, [
+        'id',
+        'type',
+        'explanation',
+        'contextRevision',
+        'arguments',
+      ]) ||
+      !hasExactKeys(args, ['listingId', 'field', 'value']) ||
+      !text(value.contextRevision, 2_000) ||
+      !text(args.listingId, 200) ||
+      typeof args.field !== 'string' ||
+      !SETTABLE_SAVED_FIELDS.has(args.field) ||
+      !validSavedFieldValue(args.field, args.value)
+    )
+      return undefined;
+    return value as unknown as AssistantProposal;
+  }
+  if (value.type === 'saved_listing.clear_field') {
+    if (
+      !hasExactKeys(value, [
+        'id',
+        'type',
+        'explanation',
+        'contextRevision',
+        'arguments',
+      ]) ||
+      !hasExactKeys(args, ['listingId', 'field']) ||
+      !text(value.contextRevision, 2_000) ||
+      !text(args.listingId, 200) ||
+      typeof args.field !== 'string' ||
+      !CLEARABLE_SAVED_FIELDS.has(args.field)
+    )
+      return undefined;
+    return value as unknown as AssistantProposal;
+  }
+  if (value.type === 'saved_listing.add_custom_fee') {
+    if (
+      !hasExactKeys(value, [
+        'id',
+        'type',
+        'explanation',
+        'contextRevision',
+        'arguments',
+      ]) ||
+      !hasExactKeys(args, ['listingId', 'cadence', 'label', 'amount']) ||
+      !text(value.contextRevision, 2_000) ||
+      !text(args.listingId, 200) ||
+      !['monthly', 'one_time'].includes(String(args.cadence)) ||
+      !text(args.label, 200) ||
+      !(args.label as string).trim() ||
+      !finiteAmount(args.amount)
+    )
+      return undefined;
+    return value as unknown as AssistantProposal;
+  }
+  if (
+    value.type === 'saved_listing.update_custom_fee' ||
+    value.type === 'saved_listing.remove_custom_fee'
+  ) {
+    const keys =
+      value.type === 'saved_listing.update_custom_fee'
+        ? ['listingId', 'cadence', 'feeId', 'label', 'amount']
+        : ['listingId', 'cadence', 'feeId'];
+    if (
+      !hasExactKeys(value, [
+        'id',
+        'type',
+        'explanation',
+        'contextRevision',
+        'arguments',
+      ]) ||
+      !hasExactKeys(args, keys) ||
+      !text(value.contextRevision, 2_000) ||
+      !text(args.listingId, 200) ||
+      !['monthly', 'one_time'].includes(String(args.cadence)) ||
+      !text(args.feeId, 200)
+    )
+      return undefined;
+    if (
+      value.type === 'saved_listing.update_custom_fee' &&
+      (!text(args.label, 200) ||
+        !(args.label as string).trim() ||
+        !finiteAmount(args.amount))
+    )
+      return undefined;
+    return value as unknown as AssistantProposal;
+  }
   if (value.type === 'saved_listing.add_note') {
     if (
       !hasExactKeys(value, [
@@ -194,6 +342,23 @@ export function acceptAssistantProposal(
       !text(args.listingId, 200) ||
       !text(args.text, 500) ||
       !(args.text as string).trim()
+    )
+      return undefined;
+    return value as unknown as AssistantProposal;
+  }
+  if (value.type === 'saved_listing.remove_note') {
+    if (
+      !hasExactKeys(value, [
+        'id',
+        'type',
+        'explanation',
+        'contextRevision',
+        'arguments',
+      ]) ||
+      !hasExactKeys(args, ['listingId', 'noteId']) ||
+      !text(value.contextRevision, 2_000) ||
+      !text(args.listingId, 200) ||
+      !text(args.noteId, 200)
     )
       return undefined;
     return value as unknown as AssistantProposal;

@@ -5,7 +5,13 @@ export const ASSISTANT_ACTION_VERSIONS = {
   'analysis.set_cost': '1.0',
   'property_note.add': '1.0',
   'saved_listing.set_cost': '1.0',
+  'saved_listing.set_field': '1.0',
+  'saved_listing.clear_field': '1.0',
+  'saved_listing.add_custom_fee': '1.0',
+  'saved_listing.update_custom_fee': '1.0',
+  'saved_listing.remove_custom_fee': '1.0',
   'saved_listing.add_note': '1.0',
+  'saved_listing.remove_note': '1.0',
   'workspace.navigate': '1.0',
 } as const;
 
@@ -116,6 +122,72 @@ export const ASSISTANT_COST_FREQUENCIES = {
 
 export type EditableCostCategory = keyof typeof ASSISTANT_COST_FREQUENCIES;
 
+export const SAVED_LISTING_SETTABLE_FIELDS = [
+  'identity.listingTitle',
+  'identity.fullAddress',
+  'identity.city',
+  'identity.state',
+  'identity.zipCode',
+  'identity.url',
+  'identity.bedrooms',
+  'identity.bathrooms',
+  'identity.squareFootage',
+  'recurring.advertisedRent',
+  'concessions.monthsFree',
+  'concessions.oneTimeCredit',
+  'concessions.leaseMonths',
+  'utilityIncluded.electricity',
+  'utilityIncluded.naturalGas',
+  'utilityIncluded.water',
+  'utilityIncluded.sewer',
+  'utilityIncluded.trash',
+  'utilityIncluded.internet',
+  'laundryType',
+  'paidLaundry.washPrice',
+  'paidLaundry.dryPrice',
+  'paidLaundry.loadsPerWeek',
+] as const;
+export type SavedListingSettableField =
+  (typeof SAVED_LISTING_SETTABLE_FIELDS)[number];
+
+export const SAVED_LISTING_CLEARABLE_FIELDS = [
+  'identity.listingTitle',
+  'identity.fullAddress',
+  'identity.city',
+  'identity.state',
+  'identity.zipCode',
+  'identity.bedrooms',
+  'identity.bathrooms',
+  'identity.squareFootage',
+  'recurring.advertisedRent',
+  'recurring.electricity',
+  'recurring.naturalGas',
+  'recurring.water',
+  'recurring.sewer',
+  'recurring.trash',
+  'recurring.internet',
+  'recurring.parking',
+  'recurring.laundry',
+  'recurring.petRent',
+  'recurring.rentersInsurance',
+  'recurring.amenityFees',
+  'recurring.otherRequiredMonthlyFees',
+  'upfront.applicationFee',
+  'upfront.securityDeposit',
+  'upfront.firstMonthsRent',
+  'upfront.lastMonthsRent',
+  'upfront.petDeposit',
+  'upfront.petFee',
+  'upfront.administrativeFee',
+  'upfront.utilityDeposits',
+  'upfront.otherMoveInFees',
+  'concessions.monthsFree',
+  'concessions.oneTimeCredit',
+  'concessions.leaseMonths',
+] as const;
+export type SavedListingClearableField =
+  (typeof SAVED_LISTING_CLEARABLE_FIELDS)[number];
+
 type CostArguments = {
   [Category in EditableCostCategory]: {
     category: Category;
@@ -136,6 +208,55 @@ export type SavedListingSetCostProposal = ProposalBase & {
   arguments: CostArguments & { listingId: string };
 };
 
+export interface SavedListingSetFieldProposal extends ProposalBase {
+  type: 'saved_listing.set_field';
+  contextRevision: string;
+  arguments: {
+    listingId: string;
+    field: SavedListingSettableField;
+    value: string | number | boolean;
+  };
+}
+
+export interface SavedListingClearFieldProposal extends ProposalBase {
+  type: 'saved_listing.clear_field';
+  contextRevision: string;
+  arguments: { listingId: string; field: SavedListingClearableField };
+}
+
+export interface SavedListingAddCustomFeeProposal extends ProposalBase {
+  type: 'saved_listing.add_custom_fee';
+  contextRevision: string;
+  arguments: {
+    listingId: string;
+    cadence: 'monthly' | 'one_time';
+    label: string;
+    amount: number;
+  };
+}
+
+export interface SavedListingUpdateCustomFeeProposal extends ProposalBase {
+  type: 'saved_listing.update_custom_fee';
+  contextRevision: string;
+  arguments: {
+    listingId: string;
+    cadence: 'monthly' | 'one_time';
+    feeId: string;
+    label: string;
+    amount: number;
+  };
+}
+
+export interface SavedListingRemoveCustomFeeProposal extends ProposalBase {
+  type: 'saved_listing.remove_custom_fee';
+  contextRevision: string;
+  arguments: {
+    listingId: string;
+    cadence: 'monthly' | 'one_time';
+    feeId: string;
+  };
+}
+
 export interface AddPropertyNoteProposal extends ProposalBase {
   type: 'property_note.add';
   arguments: { text: string };
@@ -147,8 +268,21 @@ export interface SavedListingAddNoteProposal extends ProposalBase {
   arguments: { listingId: string; text: string };
 }
 
+export interface SavedListingRemoveNoteProposal extends ProposalBase {
+  type: 'saved_listing.remove_note';
+  contextRevision: string;
+  arguments: { listingId: string; noteId: string };
+}
+
 export type SavedListingProposal =
-  SavedListingSetCostProposal | SavedListingAddNoteProposal;
+  | SavedListingSetCostProposal
+  | SavedListingSetFieldProposal
+  | SavedListingClearFieldProposal
+  | SavedListingAddCustomFeeProposal
+  | SavedListingUpdateCustomFeeProposal
+  | SavedListingRemoveCustomFeeProposal
+  | SavedListingAddNoteProposal
+  | SavedListingRemoveNoteProposal;
 
 export interface NavigateProposal extends ProposalBase {
   type: 'workspace.navigate';

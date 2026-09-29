@@ -257,7 +257,13 @@ describe('assistant workflow', () => {
     expect(captured?.capabilities.actions).toEqual({
       'search.patch': '1.0',
       'saved_listing.set_cost': '1.0',
+      'saved_listing.set_field': '1.0',
+      'saved_listing.clear_field': '1.0',
+      'saved_listing.add_custom_fee': '1.0',
+      'saved_listing.update_custom_fee': '1.0',
+      'saved_listing.remove_custom_fee': '1.0',
       'saved_listing.add_note': '1.0',
+      'saved_listing.remove_note': '1.0',
       'workspace.navigate': '1.0',
     });
     expect(container.textContent).toContain('The saved rent is $2,200.');
@@ -343,7 +349,13 @@ describe('assistant workflow', () => {
     expect(captured?.capabilities.actions).toEqual({
       'search.patch': '1.0',
       'saved_listing.set_cost': '1.0',
+      'saved_listing.set_field': '1.0',
+      'saved_listing.clear_field': '1.0',
+      'saved_listing.add_custom_fee': '1.0',
+      'saved_listing.update_custom_fee': '1.0',
+      'saved_listing.remove_custom_fee': '1.0',
       'saved_listing.add_note': '1.0',
+      'saved_listing.remove_note': '1.0',
       'workspace.navigate': '1.0',
     });
     expect(container.textContent).toContain('Update 500 Saved Ave');

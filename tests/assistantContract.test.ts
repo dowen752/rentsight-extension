@@ -8,6 +8,7 @@ import {
   applySavedListingProposalToAnalysis,
   type EditableCostCategory,
   type SavedListingAddNoteProposal,
+  type SavedListingProposal,
   type SavedListingSetCostProposal,
   type SetCostProposal,
 } from '../src/assistant';
@@ -174,6 +175,19 @@ describe('assistant contract', () => {
         arguments: { listingId: 'saved-1', text: '   ' },
       }),
     ).toBeUndefined();
+    expect(
+      acceptAssistantProposal({
+        id: 'saved-field-1',
+        type: 'saved_listing.set_field',
+        explanation: 'Set the rent.',
+        contextRevision: 'saved-listings:saved-1:revision-1',
+        arguments: {
+          listingId: 'saved-1',
+          field: 'recurring.advertisedRent',
+          value: 'expensive',
+        },
+      }),
+    ).toBeUndefined();
   });
 
   it('updates only the targeted saved record and can synchronize its analysis', () => {
@@ -237,6 +251,209 @@ describe('assistant contract', () => {
     const once = applySavedListingProposal(result.records, noteProposal);
     const twice = applySavedListingProposal(once.records, noteProposal);
     expect(twice.record.analysis.propertyNotes).toHaveLength(1);
+  });
+
+  it('applies the complete saved-listing editable surface', () => {
+    const revision = 'saved-listings:saved-1:expanded';
+    const base = createInitialAnalysis('https://example.com/old');
+    base.customRecurringFees = [{ id: 'fee-1', label: 'Storage', amount: 25 }];
+    base.customOneTimeFees = [{ id: 'fee-2', label: 'Setup', amount: 50 }];
+    base.propertyNotes = [{ id: 'note-1', text: 'Outdated', source: 'user' }];
+    const record = {
+      schemaVersion: 1 as const,
+      id: 'saved-1',
+      url: 'https://example.com/old',
+      analysis: base,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:00.000Z',
+    };
+    const proposals = [
+      {
+        id: 'rent',
+        type: 'saved_listing.set_field',
+        explanation: 'Set advertised rent.',
+        contextRevision: revision,
+        arguments: {
+          listingId: 'saved-1',
+          field: 'recurring.advertisedRent',
+          value: 1999,
+        },
+      },
+      {
+        id: 'title',
+        type: 'saved_listing.set_field',
+        explanation: 'Set the listing name.',
+        contextRevision: revision,
+        arguments: {
+          listingId: 'saved-1',
+          field: 'identity.listingTitle',
+          value: 'Casita Villas',
+        },
+      },
+      {
+        id: 'included',
+        type: 'saved_listing.set_field',
+        explanation: 'Mark water included.',
+        contextRevision: revision,
+        arguments: {
+          listingId: 'saved-1',
+          field: 'utilityIncluded.water',
+          value: true,
+        },
+      },
+      {
+        id: 'url',
+        type: 'saved_listing.set_field',
+        explanation: 'Set the listing URL.',
+        contextRevision: revision,
+        arguments: {
+          listingId: 'saved-1',
+          field: 'identity.url',
+          value: 'https://example.com/new',
+        },
+      },
+      {
+        id: 'lease',
+        type: 'saved_listing.set_field',
+        explanation: 'Set lease duration.',
+        contextRevision: revision,
+        arguments: {
+          listingId: 'saved-1',
+          field: 'concessions.leaseMonths',
+          value: 18,
+        },
+      },
+      {
+        id: 'laundry',
+        type: 'saved_listing.set_field',
+        explanation: 'Set laundry type.',
+        contextRevision: revision,
+        arguments: {
+          listingId: 'saved-1',
+          field: 'laundryType',
+          value: 'shared_paid',
+        },
+      },
+      {
+        id: 'wash',
+        type: 'saved_listing.set_field',
+        explanation: 'Set wash price.',
+        contextRevision: revision,
+        arguments: {
+          listingId: 'saved-1',
+          field: 'paidLaundry.washPrice',
+          value: 3,
+        },
+      },
+      {
+        id: 'clear-electricity',
+        type: 'saved_listing.clear_field',
+        explanation: 'Clear the electricity estimate.',
+        contextRevision: revision,
+        arguments: {
+          listingId: 'saved-1',
+          field: 'recurring.electricity',
+        },
+      },
+      {
+        id: 'fee-add',
+        type: 'saved_listing.add_custom_fee',
+        explanation: 'Add a monthly fee.',
+        contextRevision: revision,
+        arguments: {
+          listingId: 'saved-1',
+          cadence: 'monthly',
+          label: 'Package service',
+          amount: 15,
+        },
+      },
+      {
+        id: 'fee-update',
+        type: 'saved_listing.update_custom_fee',
+        explanation: 'Update storage.',
+        contextRevision: revision,
+        arguments: {
+          listingId: 'saved-1',
+          cadence: 'monthly',
+          feeId: 'fee-1',
+          label: 'Storage locker',
+          amount: 35,
+        },
+      },
+      {
+        id: 'fee-remove',
+        type: 'saved_listing.remove_custom_fee',
+        explanation: 'Remove setup.',
+        contextRevision: revision,
+        arguments: {
+          listingId: 'saved-1',
+          cadence: 'one_time',
+          feeId: 'fee-2',
+        },
+      },
+      {
+        id: 'note-remove',
+        type: 'saved_listing.remove_note',
+        explanation: 'Remove the outdated note.',
+        contextRevision: revision,
+        arguments: { listingId: 'saved-1', noteId: 'note-1' },
+      },
+    ] as const;
+
+    let records = [record];
+    for (const raw of proposals) {
+      const accepted = acceptAssistantProposal(raw);
+      expect(accepted?.type).toBe(raw.type);
+      records = applySavedListingProposal(
+        records,
+        accepted as SavedListingProposal,
+      ).records;
+    }
+    const updated = records[0].analysis;
+    expect(updated.listing.recurring.advertisedRent?.value).toBe(1999);
+    expect(updated.listing.identity.listingTitle?.value).toBe('Casita Villas');
+    expect(records[0].url).toBe('https://example.com/new');
+    expect(updated.utilityIncluded.water).toBe(true);
+    expect(updated.listing.concessions?.leaseMonths?.value).toBe(18);
+    expect(updated.laundryType).toBe('shared_paid');
+    expect(updated.paidLaundry.washPrice).toBe(3);
+    expect(updated.listing.recurring.electricity).toBeUndefined();
+    expect(updated.customRecurringFees).toEqual([
+      { id: 'fee-1', label: 'Storage locker', amount: 35 },
+      {
+        id: 'assistant-fee-add',
+        label: 'Package service',
+        amount: 15,
+      },
+    ]);
+    expect(updated.customOneTimeFees).toEqual([]);
+    expect(updated.propertyNotes).toEqual([]);
+  });
+
+  it('does not let an approved URL edit merge two saved properties', () => {
+    const proposal = acceptAssistantProposal({
+      id: 'url-collision',
+      type: 'saved_listing.set_field',
+      explanation: 'Update the listing URL.',
+      contextRevision: 'saved-listings:two-records',
+      arguments: {
+        listingId: 'saved-1',
+        field: 'identity.url',
+        value: 'https://example.com/saved-2',
+      },
+    }) as SavedListingProposal;
+    const records = ['saved-1', 'saved-2'].map((id) => ({
+      schemaVersion: 1 as const,
+      id,
+      url: `https://example.com/${id}`,
+      analysis: createInitialAnalysis(`https://example.com/${id}`),
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:00.000Z',
+    }));
+
+    expect(() => applySavedListingProposal(records, proposal)).toThrow(
+      'Another saved listing already uses this URL.',
+    );
   });
 
   it('ignores unknown proposals without discarding valid assistant text', () => {

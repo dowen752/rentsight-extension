@@ -69,7 +69,19 @@ const TURN_PAGE_SIZE = 20;
 const SAVED_LISTING_ACTION_VERSIONS = {
   'search.patch': ASSISTANT_ACTION_VERSIONS['search.patch'],
   'saved_listing.set_cost': ASSISTANT_ACTION_VERSIONS['saved_listing.set_cost'],
+  'saved_listing.set_field':
+    ASSISTANT_ACTION_VERSIONS['saved_listing.set_field'],
+  'saved_listing.clear_field':
+    ASSISTANT_ACTION_VERSIONS['saved_listing.clear_field'],
+  'saved_listing.add_custom_fee':
+    ASSISTANT_ACTION_VERSIONS['saved_listing.add_custom_fee'],
+  'saved_listing.update_custom_fee':
+    ASSISTANT_ACTION_VERSIONS['saved_listing.update_custom_fee'],
+  'saved_listing.remove_custom_fee':
+    ASSISTANT_ACTION_VERSIONS['saved_listing.remove_custom_fee'],
   'saved_listing.add_note': ASSISTANT_ACTION_VERSIONS['saved_listing.add_note'],
+  'saved_listing.remove_note':
+    ASSISTANT_ACTION_VERSIONS['saved_listing.remove_note'],
   'workspace.navigate': ASSISTANT_ACTION_VERSIONS['workspace.navigate'],
 };
 const CURRENT_LISTING_ACTION_VERSIONS = {
@@ -180,13 +192,30 @@ const label = (value: string) =>
   COST_LABELS[value] ??
   value.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
 
+const savedFieldSummary = (field: string, value: string | number | boolean) => {
+  const fieldLabel = label(field.replace(/^.*\./, ''));
+  if (field.startsWith('utilityIncluded.'))
+    return `${fieldLabel}: ${value ? 'Included in rent' : 'Not included in rent'}`;
+  if (field === 'recurring.advertisedRent')
+    return `${fieldLabel}: $${Number(value).toLocaleString()} per month`;
+  if (field === 'concessions.oneTimeCredit')
+    return `${fieldLabel}: $${Number(value).toLocaleString()} one time`;
+  if (field === 'paidLaundry.washPrice' || field === 'paidLaundry.dryPrice')
+    return `${fieldLabel}: $${Number(value).toLocaleString()} per load`;
+  if (field === 'laundryType')
+    return `Laundry type: ${label(String(value).replaceAll('_', ' '))}`;
+  return `${fieldLabel}: ${String(value)}`;
+};
+
 const isSavedListingProposal = (
   proposal: AssistantProposal,
 ): proposal is SavedListingProposal =>
-  proposal.type === 'saved_listing.set_cost' ||
-  proposal.type === 'saved_listing.add_note';
+  proposal.type.startsWith('saved_listing.');
 
-function proposalSummary(proposal: AssistantProposal): string {
+function proposalSummary(
+  proposal: AssistantProposal,
+  savedListing?: SavedListingRecord,
+): string {
   if (proposal.type === 'search.patch') {
     const changes = Object.entries(proposal.arguments.set).map(
       ([key, value]) =>
@@ -202,11 +231,33 @@ function proposalSummary(proposal: AssistantProposal): string {
     proposal.type === 'saved_listing.set_cost'
   )
     return `${label(proposal.arguments.category)}: $${proposal.arguments.amount.toLocaleString()} ${proposal.arguments.frequency === 'monthly' ? 'per month' : 'one time'}`;
+  if (proposal.type === 'saved_listing.set_field')
+    return savedFieldSummary(
+      proposal.arguments.field,
+      proposal.arguments.value,
+    );
+  if (proposal.type === 'saved_listing.clear_field')
+    return `Clear ${label(proposal.arguments.field.replace(/^.*\./, ''))}`;
+  if (
+    proposal.type === 'saved_listing.add_custom_fee' ||
+    proposal.type === 'saved_listing.update_custom_fee'
+  )
+    return `${proposal.arguments.label}: $${proposal.arguments.amount.toLocaleString()} ${proposal.arguments.cadence === 'monthly' ? 'per month' : 'one time'}`;
+  if (proposal.type === 'saved_listing.remove_custom_fee')
+    return `Remove ${
+      (proposal.arguments.cadence === 'monthly'
+        ? savedListing?.analysis.customRecurringFees
+        : savedListing?.analysis.customOneTimeFees
+      )?.find((fee) => fee.id === proposal.arguments.feeId)?.label ??
+      'the selected custom fee'
+    }`;
   if (
     proposal.type === 'property_note.add' ||
     proposal.type === 'saved_listing.add_note'
   )
     return proposal.arguments.text;
+  if (proposal.type === 'saved_listing.remove_note')
+    return `Remove “${savedListing?.analysis.propertyNotes.find((note) => note.id === proposal.arguments.noteId)?.text ?? 'the selected property note'}”`;
   return `Open ${proposal.arguments.destination === 'find' ? 'Search' : label(proposal.arguments.destination)}`;
 }
 
@@ -214,13 +265,23 @@ function proposalTitle(
   proposal: AssistantProposal,
   savedListing?: SavedListingRecord,
 ) {
-  if (proposal.type === 'saved_listing.set_cost')
+  if (
+    proposal.type === 'saved_listing.set_cost' ||
+    proposal.type === 'saved_listing.set_field' ||
+    proposal.type === 'saved_listing.clear_field' ||
+    proposal.type === 'saved_listing.add_custom_fee' ||
+    proposal.type === 'saved_listing.update_custom_fee' ||
+    proposal.type === 'saved_listing.remove_custom_fee'
+  )
     return savedListing
       ? `Update ${savedListingLabel(savedListing)}`
       : 'Saved listing cost update';
-  if (proposal.type === 'saved_listing.add_note')
+  if (
+    proposal.type === 'saved_listing.add_note' ||
+    proposal.type === 'saved_listing.remove_note'
+  )
     return savedListing
-      ? `Add a note to ${savedListingLabel(savedListing)}`
+      ? `${proposal.type === 'saved_listing.add_note' ? 'Add a note to' : 'Remove a note from'} ${savedListingLabel(savedListing)}`
       : 'Saved listing note';
   return proposal.explanation;
 }
@@ -241,7 +302,7 @@ function ProposalCard({
   return (
     <div className="assistant-proposal">
       <strong>{proposalTitle(proposal, savedListing)}</strong>
-      <p>{proposalSummary(proposal)}</p>
+      <p>{proposalSummary(proposal, savedListing)}</p>
       {status ? (
         <span className={`assistant-proposal-status ${status}`}>
           {label(status)}
@@ -1079,7 +1140,7 @@ export function AssistantView({
         </h1>
         <p>
           {usingSavedListings
-            ? 'Review saved costs, fees, notes, or compare the rentals in this chat.'
+            ? 'Review or update saved listing details, costs, fees, and notes, or compare rentals in this chat.'
             : 'Understand costs, explore an area, or describe the rental you want to find.'}
         </p>
         {savedListings.length ? (
@@ -1156,8 +1217,8 @@ export function AssistantView({
         )}
         {usingSavedListings ? (
           <span className="assistant-history-context">
-            Answers use the details saved in RentSight. These rentals are not
-            reopened or changed by the chat.
+            Answers use the details saved in RentSight. Suggested changes are
+            applied only after you approve them.
           </span>
         ) : null}
         {conversationId ? (

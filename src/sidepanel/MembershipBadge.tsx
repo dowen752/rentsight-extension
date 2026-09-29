@@ -156,9 +156,9 @@ export function RentSightPlusOverlay({
               <h4>RentSight Assistant</h4>
               <p>
                 Ask about the listing you’re viewing or properties you’ve saved.
-                The Assistant can also prefill your rental search and suggest
-                updates to costs and notes in your current or saved listings for
-                your approval.
+                The Assistant can also prefill your rental search, suggest cost
+                and note updates for the current listing, and help revise saved
+                property details—all with your approval.
               </p>
             </div>
           </article>
