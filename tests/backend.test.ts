@@ -65,6 +65,44 @@ describe('RentSightBackendClient', () => {
     );
   });
 
+  it('deletes the authenticated account only after a 204 response', async () => {
+    const fetcher = vi.fn(async () => new Response(null, { status: 204 }));
+    const client = new RentSightBackendClient({
+      apiOrigin: 'https://api.rentsight.test',
+      getAccessToken: async () => 'firebase-id-token',
+      fetch: fetcher,
+    });
+
+    await expect(client.deleteAccount()).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://api.rentsight.test/v1/account',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer firebase-id-token',
+        }),
+      }),
+    );
+  });
+
+  it('keeps retryable account-deletion failures visible to the caller', async () => {
+    const client = new RentSightBackendClient({
+      apiOrigin: 'https://api.rentsight.test',
+      getAccessToken: async () => 'firebase-id-token',
+      fetch: async () =>
+        Response.json(
+          { message: 'Account deletion is temporarily unavailable.' },
+          { status: 503, headers: { 'Retry-After': '30' } },
+        ),
+    });
+
+    await expect(client.deleteAccount()).rejects.toMatchObject({
+      status: 503,
+      message: 'Account deletion is temporarily unavailable.',
+      retryAfterSeconds: 30,
+    });
+  });
+
   it('sends authenticated assistant turns with an idempotency key', async () => {
     const fetcher = vi.fn(
       async (...requestArgs: [RequestInfo | URL, RequestInit?]) => {

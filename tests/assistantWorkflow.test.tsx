@@ -256,11 +256,202 @@ describe('assistant workflow', () => {
     expect(captured?.contextRevision).toContain('saved-listings:saved-1:');
     expect(captured?.capabilities.actions).toEqual({
       'search.patch': '1.0',
+      'saved_listing.set_cost': '1.0',
+      'saved_listing.add_note': '1.0',
       'workspace.navigate': '1.0',
     });
     expect(container.textContent).toContain('The saved rent is $2,200.');
     expect(container.textContent).not.toContain('Change parking.');
     expect(updateAnalysis).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it('advertises and applies a revision-bound update to the selected saved listing', async () => {
+    const savedAnalysis = setRecurringValue(
+      createInitialAnalysis('https://example.com/saved'),
+      'advertisedRent',
+      2_200,
+    );
+    savedAnalysis.listing.identity.fullAddress = {
+      value: '500 Saved Ave',
+      source: 'user',
+      confidence: 1,
+    };
+    const savedRecord = {
+      schemaVersion: 1 as const,
+      id: 'saved-1',
+      url: 'https://example.com/saved',
+      analysis: savedAnalysis,
+      createdAt: '2026-09-20T12:00:00.000Z',
+      updatedAt: '2026-09-21T12:00:00.000Z',
+    };
+    let captured: AssistantRequest | undefined;
+    const resultRevision = 'saved-listings:saved-1:2026-09-29T12:00:00.000Z';
+    const updateSavedListing = vi.fn(async () => resultRevision);
+    const sendMessage = vi.fn(async (request: AssistantRequest) => {
+      captured = request;
+      return {
+        schemaVersion: '1.0',
+        conversationId: 'conversation-saved-update',
+        messageId: 'message-saved-update',
+        contextRevision: request.contextRevision,
+        message: { format: 'markdown', text: 'I can suggest that update.' },
+        proposals: [
+          {
+            id: 'saved-cost-1',
+            type: 'saved_listing.set_cost',
+            explanation: 'Update a different property.',
+            contextRevision: request.contextRevision!,
+            arguments: {
+              listingId: 'saved-1',
+              category: 'parking',
+              amount: 100,
+              currency: 'USD',
+              frequency: 'monthly',
+            },
+          },
+        ],
+      } satisfies AssistantResponse;
+    });
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <AssistantView
+          savedListings={[savedRecord]}
+          selectedSavedListingIds={['saved-1']}
+          setSelectedSavedListingIds={vi.fn()}
+          navigate={vi.fn()}
+          updateSavedListing={updateSavedListing}
+          sendMessage={sendMessage}
+          animateResponses={false}
+        />,
+      );
+    });
+
+    const composer = container.querySelector<HTMLTextAreaElement>('textarea')!;
+    await act(async () => enter(composer, 'Set parking to $100 per month'));
+    await act(async () => {
+      container
+        .querySelector<HTMLFormElement>('.assistant-composer')!
+        .dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(captured?.capabilities.actions).toEqual({
+      'search.patch': '1.0',
+      'saved_listing.set_cost': '1.0',
+      'saved_listing.add_note': '1.0',
+      'workspace.navigate': '1.0',
+    });
+    expect(container.textContent).toContain('Update 500 Saved Ave');
+    expect(container.textContent).not.toContain('Update a different property.');
+
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent === 'Apply')!
+        .click();
+      await Promise.resolve();
+    });
+    expect(updateSavedListing).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'saved_listing.set_cost',
+        arguments: expect.objectContaining({ listingId: 'saved-1' }),
+      }),
+    );
+    expect(container.textContent).toContain('Applied');
+    await vi.waitFor(() =>
+      expect(extensionStorage.set).toHaveBeenCalledWith(
+        'assistantConversation',
+        expect.objectContaining({
+          outcomes: expect.arrayContaining([
+            {
+              proposalId: 'saved-cost-1',
+              status: 'applied',
+              resultRevision,
+            },
+          ]),
+        }),
+      ),
+    );
+    await act(async () => root.unmount());
+  });
+
+  it('rejects stale revisions and does not expose unselected saved targets', async () => {
+    const savedAnalysis = createInitialAnalysis('https://example.com/saved');
+    savedAnalysis.listing.identity.fullAddress = {
+      value: '500 Saved Ave',
+      source: 'user',
+      confidence: 1,
+    };
+    const savedRecord = {
+      schemaVersion: 1 as const,
+      id: 'saved-1',
+      url: 'https://example.com/saved',
+      analysis: savedAnalysis,
+      createdAt: '2026-09-20T12:00:00.000Z',
+      updatedAt: '2026-09-21T12:00:00.000Z',
+    };
+    const updateSavedListing = vi.fn(async () => 'next-revision');
+    const sendMessage = vi.fn(async (request: AssistantRequest) => ({
+      schemaVersion: '1.0' as const,
+      conversationId: 'conversation-saved-stale',
+      messageId: 'message-saved-stale',
+      contextRevision: request.contextRevision,
+      message: { format: 'markdown' as const, text: 'Review these changes.' },
+      proposals: [
+        {
+          id: 'stale-note',
+          type: 'saved_listing.add_note' as const,
+          explanation: 'Add a note.',
+          contextRevision: 'saved-listings:older-context',
+          arguments: { listingId: 'saved-1', text: 'Assigned parking.' },
+        },
+        {
+          id: 'wrong-target',
+          type: 'saved_listing.add_note' as const,
+          explanation: 'Change an unselected listing.',
+          contextRevision: request.contextRevision!,
+          arguments: { listingId: 'saved-2', text: 'Unselected note.' },
+        },
+      ],
+    }));
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <AssistantView
+          savedListings={[savedRecord]}
+          selectedSavedListingIds={['saved-1']}
+          navigate={vi.fn()}
+          updateSavedListing={updateSavedListing}
+          sendMessage={sendMessage}
+          animateResponses={false}
+        />,
+      );
+    });
+
+    const composer = container.querySelector<HTMLTextAreaElement>('textarea')!;
+    await act(async () => enter(composer, 'Keep a parking note'));
+    await act(async () => {
+      container
+        .querySelector<HTMLFormElement>('.assistant-composer')!
+        .dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const applyButtons = Array.from(
+      container.querySelectorAll('button'),
+    ).filter((button) => button.textContent === 'Apply');
+    expect(applyButtons).toHaveLength(1);
+    expect(container.textContent).not.toContain('Unselected note.');
+    await act(async () => applyButtons[0].click());
+    expect(updateSavedListing).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Stale');
     await act(async () => root.unmount());
   });
 

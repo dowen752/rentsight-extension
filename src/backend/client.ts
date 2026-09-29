@@ -153,6 +153,10 @@ export class RentSightBackendClient {
     );
   }
 
+  async deleteAccount(): Promise<void> {
+    await this.requestNoContent('/v1/account', { method: 'DELETE' });
+  }
+
   sendAssistantMessage(request: AssistantRequest): Promise<AssistantResponse> {
     return this.request(
       '/v1/listings/chat',

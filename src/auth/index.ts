@@ -1,9 +1,11 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import {
+  deleteUser,
   GoogleAuthProvider,
   getAuth,
   indexedDBLocalPersistence,
   onAuthStateChanged,
+  reauthenticateWithCredential,
   setPersistence,
   signInWithCredential,
   signOut as firebaseSignOut,
@@ -73,9 +75,7 @@ export const observeAuthUser = (
 export const getCurrentUser = (): AuthUser | null =>
   publicUser(auth?.currentUser ?? null);
 
-export async function signInWithGoogle(): Promise<AuthUser> {
-  if (!auth) throw new Error('Firebase Authentication is not configured.');
-  await authPersistenceReady;
+async function requestGoogleCredential() {
   const response = (await chrome.runtime.sendMessage({
     type: 'FIREBASE_GOOGLE_SIGN_IN',
   } satisfies GoogleCredentialMessage)) as GoogleCredentialResponse;
@@ -83,12 +83,47 @@ export async function signInWithGoogle(): Promise<AuthUser> {
   if (!response.idToken && !response.accessToken)
     throw new Error('Google sign-in did not return a Firebase credential.');
 
-  const credential = GoogleAuthProvider.credential(
-    response.idToken,
-    response.accessToken,
-  );
+  return GoogleAuthProvider.credential(response.idToken, response.accessToken);
+}
+
+export async function signInWithGoogle(): Promise<AuthUser> {
+  if (!auth) throw new Error('Firebase Authentication is not configured.');
+  await authPersistenceReady;
+  const credential = await requestGoogleCredential();
   const result = await signInWithCredential(auth, credential);
   return publicUser(result.user)!;
+}
+
+const errorCode = (error: unknown): string | undefined =>
+  typeof error === 'object' && error !== null
+    ? String(Reflect.get(error, 'code') ?? '') || undefined
+    : undefined;
+
+export async function deleteCurrentUser(): Promise<void> {
+  if (!auth) throw new Error('Firebase Authentication is not configured.');
+  await authPersistenceReady;
+  await auth.authStateReady();
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sign in again to finish deleting your data.');
+
+  try {
+    await deleteUser(user);
+  } catch (error: unknown) {
+    if (errorCode(error) !== 'auth/requires-recent-login')
+      throw new Error(
+        'Your cloud data was deleted, but RentSight could not finish deleting your sign-in. Try Delete all data again.',
+        { cause: error },
+      );
+    try {
+      await reauthenticateWithCredential(user, await requestGoogleCredential());
+      await deleteUser(user);
+    } catch (reauthenticationError: unknown) {
+      throw new Error(
+        'Your cloud data was deleted, but RentSight could not finish deleting your sign-in. Try Delete all data again.',
+        { cause: reauthenticationError },
+      );
+    }
+  }
 }
 
 export async function signOut(): Promise<void> {

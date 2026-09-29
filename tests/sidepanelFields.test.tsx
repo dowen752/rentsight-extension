@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { NumberField } from '../src/sidepanel/Fields';
 import {
   AnalysisEditor,
+  AboutPrivacy,
   FindRentalsView,
   GuidedTour,
   UnavailableWorkspace,
@@ -246,12 +247,63 @@ describe('guided tour', () => {
   });
 });
 
+describe('about and privacy', () => {
+  it('uses the canonical policy and direct support destinations', () => {
+    const markup = renderToStaticMarkup(
+      <AboutPrivacy
+        signedIn
+        deleteAllData={async () => undefined}
+        replayTour={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('https://umbrellabrand.co/rentsight/privacy');
+    expect(markup).toContain('mailto:support@umbrellabrand.co');
+    expect(markup).toContain('Email support or share feedback');
+    expect(markup).not.toContain('privacy.html');
+    expect(markup).not.toContain('github.com/dowen752');
+  });
+
+  it('offers one complete deletion action for signed-in accounts', () => {
+    const markup = renderToStaticMarkup(
+      <AboutPrivacy
+        signedIn
+        deleteAllData={async () => undefined}
+        replayTour={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('When you use Ask');
+    expect(markup).toContain('values you changed');
+    expect(markup).toContain('household inputs');
+    expect(markup).toContain('stored with your account for up to 30 days');
+    expect(markup).toContain('Permanently delete all of your RentSight data');
+    expect(markup).toContain('>Delete all data</button>');
+    expect(markup).not.toContain('Manage local data');
+    expect(markup).not.toContain('Delete all local data');
+  });
+
+  it('tells signed-out users to sign in before deleting account data', () => {
+    const markup = renderToStaticMarkup(
+      <AboutPrivacy
+        signedIn={false}
+        deleteAllData={async () => undefined}
+        replayTour={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('sign in first');
+    expect(markup).toContain('connected to that account can also be deleted');
+  });
+});
+
 describe('unavailable listing workspace', () => {
   it('keeps the find, saved, compare, and about tabs accessible', () => {
     const markup = renderToStaticMarkup(
       <UnavailableWorkspace
         hasActivePass={false}
-        clearAllData={async () => undefined}
+        signedIn={false}
+        deleteAllData={async () => undefined}
         refreshCurrent={() => undefined}
       >
         <main>
@@ -276,7 +328,8 @@ describe('unavailable listing workspace', () => {
     const markup = renderToStaticMarkup(
       <UnavailableWorkspace
         hasActivePass
-        clearAllData={async () => undefined}
+        signedIn
+        deleteAllData={async () => undefined}
         refreshCurrent={() => undefined}
       >
         <main>Current page cannot be inspected.</main>

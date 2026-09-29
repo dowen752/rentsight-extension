@@ -4,6 +4,8 @@ export const ASSISTANT_ACTION_VERSIONS = {
   'search.patch': '1.0',
   'analysis.set_cost': '1.0',
   'property_note.add': '1.0',
+  'saved_listing.set_cost': '1.0',
+  'saved_listing.add_note': '1.0',
   'workspace.navigate': '1.0',
 } as const;
 
@@ -128,10 +130,25 @@ export type SetCostProposal = ProposalBase & {
   arguments: CostArguments;
 };
 
+export type SavedListingSetCostProposal = ProposalBase & {
+  type: 'saved_listing.set_cost';
+  contextRevision: string;
+  arguments: CostArguments & { listingId: string };
+};
+
 export interface AddPropertyNoteProposal extends ProposalBase {
   type: 'property_note.add';
   arguments: { text: string };
 }
+
+export interface SavedListingAddNoteProposal extends ProposalBase {
+  type: 'saved_listing.add_note';
+  contextRevision: string;
+  arguments: { listingId: string; text: string };
+}
+
+export type SavedListingProposal =
+  SavedListingSetCostProposal | SavedListingAddNoteProposal;
 
 export interface NavigateProposal extends ProposalBase {
   type: 'workspace.navigate';
@@ -142,6 +159,7 @@ export type AssistantProposal =
   | SearchPatchProposal
   | SetCostProposal
   | AddPropertyNoteProposal
+  | SavedListingProposal
   | NavigateProposal;
 
 export interface AssistantCitation {

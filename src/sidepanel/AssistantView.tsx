@@ -19,6 +19,7 @@ import {
   type AssistantProposal,
   type AssistantRequest,
   type AssistantResponse,
+  type SavedListingProposal,
   type StoredAssistantConversation,
   type StoredAssistantMessage,
 } from '../assistant';
@@ -67,6 +68,14 @@ const HISTORY_PAGE_SIZE = 20;
 const TURN_PAGE_SIZE = 20;
 const SAVED_LISTING_ACTION_VERSIONS = {
   'search.patch': ASSISTANT_ACTION_VERSIONS['search.patch'],
+  'saved_listing.set_cost': ASSISTANT_ACTION_VERSIONS['saved_listing.set_cost'],
+  'saved_listing.add_note': ASSISTANT_ACTION_VERSIONS['saved_listing.add_note'],
+  'workspace.navigate': ASSISTANT_ACTION_VERSIONS['workspace.navigate'],
+};
+const CURRENT_LISTING_ACTION_VERSIONS = {
+  'search.patch': ASSISTANT_ACTION_VERSIONS['search.patch'],
+  'analysis.set_cost': ASSISTANT_ACTION_VERSIONS['analysis.set_cost'],
+  'property_note.add': ASSISTANT_ACTION_VERSIONS['property_note.add'],
   'workspace.navigate': ASSISTANT_ACTION_VERSIONS['workspace.navigate'],
 };
 
@@ -171,6 +180,12 @@ const label = (value: string) =>
   COST_LABELS[value] ??
   value.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
 
+const isSavedListingProposal = (
+  proposal: AssistantProposal,
+): proposal is SavedListingProposal =>
+  proposal.type === 'saved_listing.set_cost' ||
+  proposal.type === 'saved_listing.add_note';
+
 function proposalSummary(proposal: AssistantProposal): string {
   if (proposal.type === 'search.patch') {
     const changes = Object.entries(proposal.arguments.set).map(
@@ -182,26 +197,50 @@ function proposalSummary(proposal: AssistantProposal): string {
     );
     return changes.join(' · ');
   }
-  if (proposal.type === 'analysis.set_cost')
+  if (
+    proposal.type === 'analysis.set_cost' ||
+    proposal.type === 'saved_listing.set_cost'
+  )
     return `${label(proposal.arguments.category)}: $${proposal.arguments.amount.toLocaleString()} ${proposal.arguments.frequency === 'monthly' ? 'per month' : 'one time'}`;
-  if (proposal.type === 'property_note.add') return proposal.arguments.text;
+  if (
+    proposal.type === 'property_note.add' ||
+    proposal.type === 'saved_listing.add_note'
+  )
+    return proposal.arguments.text;
   return `Open ${proposal.arguments.destination === 'find' ? 'Search' : label(proposal.arguments.destination)}`;
+}
+
+function proposalTitle(
+  proposal: AssistantProposal,
+  savedListing?: SavedListingRecord,
+) {
+  if (proposal.type === 'saved_listing.set_cost')
+    return savedListing
+      ? `Update ${savedListingLabel(savedListing)}`
+      : 'Saved listing cost update';
+  if (proposal.type === 'saved_listing.add_note')
+    return savedListing
+      ? `Add a note to ${savedListingLabel(savedListing)}`
+      : 'Saved listing note';
+  return proposal.explanation;
 }
 
 function ProposalCard({
   proposal,
+  savedListing,
   status,
   onApply,
   onDismiss,
 }: {
   proposal: AssistantProposal;
+  savedListing?: SavedListingRecord;
   status?: AssistantActionOutcome['status'];
   onApply: () => void;
   onDismiss: () => void;
 }) {
   return (
     <div className="assistant-proposal">
-      <strong>{proposal.explanation}</strong>
+      <strong>{proposalTitle(proposal, savedListing)}</strong>
       <p>{proposalSummary(proposal)}</p>
       {status ? (
         <span className={`assistant-proposal-status ${status}`}>
@@ -232,6 +271,7 @@ function ConversationMessageCard({
   apply,
   dismiss,
   submitMessage,
+  resolveSavedListing,
 }: {
   message: ConversationMessage;
   animateResponse: boolean;
@@ -244,6 +284,9 @@ function ConversationMessageCard({
   ) => Promise<void>;
   dismiss: (proposalId: string) => void;
   submitMessage: (message: string) => Promise<void>;
+  resolveSavedListing: (
+    proposal: SavedListingProposal,
+  ) => SavedListingRecord | undefined;
 }) {
   const [revealComplete, setRevealComplete] = useState(
     message.role === 'user' || !animateResponse,
@@ -280,7 +323,9 @@ function ConversationMessageCard({
         ? message.response?.proposals
             .filter((proposal) => {
               if (message.historical) return Boolean(statusFor(proposal.id));
-              if (!message.savedScope) return true;
+              if (!message.savedScope) return !isSavedListingProposal(proposal);
+              if (isSavedListingProposal(proposal))
+                return Boolean(resolveSavedListing(proposal));
               return ['search.patch', 'workspace.navigate'].includes(
                 proposal.type,
               );
@@ -289,6 +334,11 @@ function ConversationMessageCard({
               <ProposalCard
                 key={proposal.id}
                 proposal={proposal}
+                savedListing={
+                  isSavedListingProposal(proposal)
+                    ? resolveSavedListing(proposal)
+                    : undefined
+                }
                 status={statusFor(proposal.id)}
                 onApply={() => void apply(proposal, message.response!)}
                 onDismiss={() => dismiss(proposal.id)}
@@ -497,6 +547,7 @@ export function AssistantView({
   selectedSavedListingIds,
   setSelectedSavedListingIds,
   updateAnalysis,
+  updateSavedListing,
   navigate,
   sendMessage = (request) => rentSightApi.sendAssistantMessage(request),
   historyApi = DEFAULT_HISTORY_API,
@@ -507,6 +558,7 @@ export function AssistantView({
   selectedSavedListingIds?: string[];
   setSelectedSavedListingIds?: (ids: string[]) => void;
   updateAnalysis?: (proposal: AssistantProposal) => void;
+  updateSavedListing?: (proposal: SavedListingProposal) => Promise<string>;
   navigate: (tab: AssistantTab) => void;
   sendMessage?: (request: AssistantRequest) => Promise<AssistantResponse>;
   historyApi?: AssistantHistoryApi;
@@ -871,7 +923,7 @@ export function AssistantView({
       capabilities: {
         actions: usingSavedListings
           ? SAVED_LISTING_ACTION_VERSIONS
-          : ASSISTANT_ACTION_VERSIONS,
+          : CURRENT_LISTING_ACTION_VERSIONS,
       },
       ...(pendingOutcomes.length ? { actionOutcomes: pendingOutcomes } : {}),
     };
@@ -881,10 +933,11 @@ export function AssistantView({
   const setOutcome = (
     proposalId: string,
     status: AssistantActionOutcome['status'],
+    resultRevision?: string,
   ) => {
     const update = (current: AssistantActionOutcome[]) => [
       ...current.filter((item) => item.proposalId !== proposalId),
-      { proposalId, status },
+      { proposalId, status, ...(resultRevision ? { resultRevision } : {}) },
     ];
     setOutcomes(update);
     setPendingOutcomes(update);
@@ -911,6 +964,24 @@ export function AssistantView({
       if (proposal.type === 'workspace.navigate') {
         setOutcome(proposal.id, 'applied');
         navigate(proposal.arguments.destination);
+        return;
+      }
+      if (isSavedListingProposal(proposal)) {
+        const matchingTargets = scopedSavedListings.filter(
+          (record) => record.id === proposal.arguments.listingId,
+        );
+        if (
+          !response.contextRevision ||
+          proposal.contextRevision !== response.contextRevision ||
+          proposal.contextRevision !== revision ||
+          matchingTargets.length !== 1 ||
+          !updateSavedListing
+        ) {
+          setOutcome(proposal.id, 'stale');
+          return;
+        }
+        const resultRevision = await updateSavedListing(proposal);
+        setOutcome(proposal.id, 'applied', resultRevision);
         return;
       }
       if (!analysis || !updateAnalysis) {
@@ -1158,6 +1229,11 @@ export function AssistantView({
             apply={apply}
             dismiss={(proposalId) => setOutcome(proposalId, 'rejected')}
             submitMessage={submitMessage}
+            resolveSavedListing={(proposal) =>
+              scopedSavedListings.find(
+                (record) => record.id === proposal.arguments.listingId,
+              )
+            }
           />
         ))}
         {pending && (

@@ -1,4 +1,5 @@
 import { accountSession, rentSightApi } from '../backend/services';
+import { deleteCurrentUser } from '../auth';
 import { ExtractionSession } from '../ai/session';
 import { canonicalizeListingUrl } from '../ai/identity';
 import { downloadExtractionCapture } from '../ai/request';
@@ -100,7 +101,11 @@ import { AssistantView } from './AssistantView';
 import {
   addAssistantPropertyNote,
   applyCostProposal,
+  applySavedListingProposal,
+  applySavedListingProposalToAnalysis,
+  assistantContextRevision,
   type AssistantProposal,
+  type SavedListingProposal,
 } from '../assistant';
 export { FindRentalsView } from './FindRentalsView';
 import {
@@ -110,6 +115,7 @@ import {
   shouldPreserveActiveExtraction,
   type ViewState,
 } from './lifecycle';
+import { deleteAllRentSightData } from './deleteAllData';
 
 const EMPTY_INSPECTION_MESSAGE =
   'Open a rental listing, then click the RentSight toolbar icon to inspect it.';
@@ -693,11 +699,19 @@ export function App() {
     );
   };
 
-  const clearAllData = async () => {
+  const deleteAllData = async () => {
     clearingDataRef.current = true;
     aiSession.invalidate();
     try {
-      await clearAllRentSightData();
+      await deleteAllRentSightData({
+        ...(account.user
+          ? {
+              deleteCloudAccount: () => rentSightApi.deleteAccount(),
+              deleteAuthenticationAccount: deleteCurrentUser,
+            }
+          : {}),
+        clearLocalData: clearAllRentSightData,
+      });
       setView({ status: 'data-cleared' });
     } catch (error: unknown) {
       clearingDataRef.current = false;
@@ -716,7 +730,8 @@ export function App() {
     return (
       <UnavailableWorkspace
         hasActivePass={account.status === 'plus'}
-        clearAllData={clearAllData}
+        signedIn={Boolean(account.user)}
+        deleteAllData={deleteAllData}
         refreshCurrent={() => window.location.reload()}
       >
         <main>
@@ -728,12 +743,9 @@ export function App() {
   if (view.status === 'data-cleared') {
     return (
       <main className="data-cleared">
-        <span className="eyebrow">Local data removed</span>
-        <h1>RentSight has been reset</h1>
-        <p>
-          Drafts, saved listings, preferences, and cached estimates were deleted
-          from this Chrome profile.
-        </p>
+        <span className="eyebrow">Deletion complete</span>
+        <h1>Your RentSight data was deleted</h1>
+        <p>RentSight has been reset on this Chrome profile.</p>
         <button
           type="button"
           className="primary-action"
@@ -748,7 +760,8 @@ export function App() {
     return (
       <UnavailableWorkspace
         hasActivePass={account.status === 'plus'}
-        clearAllData={clearAllData}
+        signedIn={Boolean(account.user)}
+        deleteAllData={deleteAllData}
         refreshCurrent={() => window.location.reload()}
       >
         <main>
@@ -768,6 +781,7 @@ export function App() {
   return (
     <Workspace
       hasActivePass={account.status === 'plus'}
+      signedIn={Boolean(account.user)}
       aiControls={aiControls}
       analysis={view.analysis}
       savedListings={view.savedListings}
@@ -777,7 +791,7 @@ export function App() {
       householdProfile={view.householdProfile}
       updateHouseholdProfile={updateHouseholdProfile}
       refreshCurrent={refreshCurrent}
-      clearAllData={clearAllData}
+      deleteAllData={deleteAllData}
       exportExtractionCapture={
         import.meta.env.DEV && exportPage
           ? () => downloadExtractionCapture(exportPage)
@@ -819,12 +833,14 @@ function workspaceTabLabel(
 export function UnavailableWorkspace({
   children,
   hasActivePass,
-  clearAllData,
+  signedIn,
+  deleteAllData,
   refreshCurrent,
 }: {
   children: ReactNode;
   hasActivePass: boolean;
-  clearAllData: () => Promise<void>;
+  signedIn: boolean;
+  deleteAllData: () => Promise<void>;
   refreshCurrent: () => void;
 }) {
   const [tab, setTab] = useState<WorkspaceTab>('current');
@@ -932,6 +948,15 @@ export function UnavailableWorkspace({
             selectedSavedListingIds={assistantSavedListingIds}
             setSelectedSavedListingIds={setAssistantSavedListingIds}
             navigate={(destination) => setTab(destination)}
+            updateSavedListing={async (proposal: SavedListingProposal) => {
+              const result = applySavedListingProposal(savedListings, proposal);
+              await setRecords(result.records);
+              return assistantContextRevision(
+                undefined,
+                result.records,
+                assistantSavedListingIds,
+              );
+            }}
           />
         </div>
       ) : null}
@@ -991,7 +1016,8 @@ export function UnavailableWorkspace({
       )}
       {activeTab === 'about' && (
         <AboutPrivacy
-          clearAllData={clearAllData}
+          signedIn={signedIn}
+          deleteAllData={deleteAllData}
           replayTour={() => {
             setTab('current');
             setNotice('Open a rental listing to replay the guided tour.');
@@ -1004,12 +1030,13 @@ export function UnavailableWorkspace({
 
 function Workspace({
   hasActivePass,
+  signedIn,
   aiControls,
   analysis,
   savedListings,
   update,
   setSavedListings,
-  clearAllData,
+  deleteAllData,
   onboardingCompleted,
   householdProfile,
   updateHouseholdProfile,
@@ -1017,12 +1044,13 @@ function Workspace({
   exportExtractionCapture,
 }: {
   hasActivePass: boolean;
+  signedIn: boolean;
   aiControls: AiControls;
   analysis: RentalAnalysis;
   savedListings: SavedListingRecord[];
   update: (transform: (analysis: RentalAnalysis) => RentalAnalysis) => void;
   setSavedListings: (records: SavedListingRecord[]) => Promise<void>;
-  clearAllData: () => Promise<void>;
+  deleteAllData: () => Promise<void>;
   onboardingCompleted: boolean;
   householdProfile: HouseholdProfile;
   updateHouseholdProfile: (profile: HouseholdProfile) => void;
@@ -1086,6 +1114,22 @@ function Workspace({
         error instanceof Error ? error.message : 'Could not save listing.',
       );
     }
+  };
+
+  const updateSavedListingFromAssistant = async (
+    proposal: SavedListingProposal,
+  ): Promise<string> => {
+    const result = applySavedListingProposal(savedListings, proposal);
+    await setSavedListings(result.records);
+    if (result.record.url === currentUrl)
+      update((current) =>
+        applySavedListingProposalToAnalysis(current, proposal),
+      );
+    return assistantContextRevision(
+      undefined,
+      result.records,
+      assistantSavedListingIds,
+    );
   };
 
   const removeSavedListing = async (record: SavedListingRecord) => {
@@ -1164,6 +1208,7 @@ function Workspace({
                   ),
                 );
             }}
+            updateSavedListing={updateSavedListingFromAssistant}
           />
         </div>
       ) : null}
@@ -1252,7 +1297,11 @@ function Workspace({
         />
       )}
       {activeTab === 'about' && (
-        <AboutPrivacy clearAllData={clearAllData} replayTour={startTour} />
+        <AboutPrivacy
+          signedIn={signedIn}
+          deleteAllData={deleteAllData}
+          replayTour={startTour}
+        />
       )}
       {tourStep !== undefined && (
         <GuidedTour
@@ -1466,28 +1515,38 @@ export function GuidedTour({
   );
 }
 
-function AboutPrivacy({
-  clearAllData,
+export function AboutPrivacy({
+  signedIn,
+  deleteAllData,
   replayTour,
 }: {
-  clearAllData: () => Promise<void>;
+  signedIn: boolean;
+  deleteAllData: () => Promise<void>;
   replayTour: () => void;
 }) {
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearError, setClearError] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const version =
     typeof chrome !== 'undefined' && chrome.runtime?.getManifest
       ? chrome.runtime.getManifest().version
       : '0.1.0';
 
   const clear = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    setClearError('');
     try {
-      await clearAllData();
+      await deleteAllData();
     } catch (error: unknown) {
       setConfirmClear(false);
       setClearError(
-        error instanceof Error ? error.message : 'Could not delete local data.',
+        error instanceof Error
+          ? error.message
+          : 'Your data could not be deleted. Try again.',
       );
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -1505,39 +1564,60 @@ function AboutPrivacy({
       <section aria-labelledby="privacy-heading">
         <h2 id="privacy-heading">Listing data and AI review</h2>
         <p>
-          Drafts, customer edits, saved listings, and estimates are stored in
-          this Chrome profile. For signed-in RentSight+ accounts, AI review
-          automatically sends captured listing text, structured listing data,
-          the listing URL, selected unit, and preliminary values to RentSight’s
-          backend and OpenAI. Customer overrides and household financial
-          assumptions are not included in extraction requests. Full page
-          captures are not saved locally. RentSight also contacts its backend
-          for account and billing services.
+          Drafts, customer edits, saved listings, estimates, preferences, and
+          the current chat draft are stored in this Chrome profile. For
+          signed-in RentSight+ accounts, AI review sends captured listing text,
+          structured listing data, the listing URL, selected unit, and
+          preliminary values to RentSight’s backend and OpenAI. Customer
+          overrides and household inputs are not included in extraction
+          requests.
+        </p>
+        <p>
+          When you use Ask, RentSight sends your message and relevant context
+          from the current or selected saved listings to RentSight’s backend and
+          OpenAI. That context can include listing details, calculations, values
+          you changed, property notes, and household inputs. Successful
+          conversations are stored with your account for up to 30 days so you
+          can reopen them, and you can delete them in Ask.
         </p>
         <p>
           RentSight inspects only the active page after you click its toolbar
-          icon. JSON and CSV exports may contain property addresses and your
-          financial assumptions, so store and share them carefully.
+          icon. Full page captures are not saved locally. JSON and CSV exports
+          may contain property addresses and your financial assumptions, so
+          store and share them carefully.
         </p>
-        <a href="privacy.html" target="_blank" rel="noreferrer">
-          Read the full privacy policy
-        </a>
         <a
-          href="https://github.com/dowen752/rentsight-extension/issues"
+          href="https://umbrellabrand.co/rentsight/privacy"
           target="_blank"
           rel="noreferrer"
         >
-          Report a problem or share feedback
+          Read the full privacy policy
+        </a>
+      </section>
+
+      <section aria-labelledby="support-heading">
+        <h2 id="support-heading">Help and feedback</h2>
+        <p>
+          Email Umbrella Brand for product questions, problems, privacy
+          requests, or feedback about RentSight.
+        </p>
+        <a href="mailto:support@umbrellabrand.co?subject=RentSight%20support%20and%20feedback">
+          Email support or share feedback
         </a>
       </section>
 
       <section className="data-controls" aria-labelledby="data-heading">
-        <h2 id="data-heading">Manage local data</h2>
+        <h2 id="data-heading">Data</h2>
         <p>
-          Delete every RentSight draft, saved listing, preference, and cached
-          estimate from this Chrome profile. Export saved listings first if you
-          want a backup.
+          Permanently delete all of your RentSight data. Export anything you
+          want to keep before continuing.
         </p>
+        {!signedIn && (
+          <p>
+            If you previously used a RentSight account, sign in first so the
+            data connected to that account can also be deleted.
+          </p>
+        )}
         {clearError && (
           <p className="status error" role="alert">
             {clearError}
@@ -1546,17 +1626,31 @@ function AboutPrivacy({
         {confirmClear ? (
           <div className="clear-confirmation">
             <p>
-              <strong>Delete all local RentSight data?</strong>
+              <strong>Delete all RentSight data?</strong>
             </p>
-            <p>This cannot be undone.</p>
+            <p>
+              {signedIn
+                ? 'This permanently deletes your RentSight account and data. Any remaining RentSight+ access will be lost. Some payment records may be retained where required.'
+                : 'This permanently deletes the RentSight data on this Chrome profile. Sign in first if you also need to delete data connected to a RentSight account.'}{' '}
+              This cannot be undone.
+            </p>
             <button
               type="button"
               className="remove"
+              disabled={deleting}
               onClick={() => void clear()}
             >
-              Delete all data
+              {deleting
+                ? 'Deleting…'
+                : signedIn
+                  ? 'Delete account and all data'
+                  : 'Delete all data'}
             </button>
-            <button type="button" onClick={() => setConfirmClear(false)}>
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => setConfirmClear(false)}
+            >
               Cancel
             </button>
           </div>
@@ -1566,7 +1660,7 @@ function AboutPrivacy({
             className="remove"
             onClick={() => setConfirmClear(true)}
           >
-            Delete all local data
+            Delete all data
           </button>
         )}
       </section>

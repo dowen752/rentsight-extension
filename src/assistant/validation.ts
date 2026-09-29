@@ -91,6 +91,34 @@ const SEARCH_KEYS = new Set<SearchCriterion>([
 const proposalBase = (value: Record<string, unknown>) =>
   text(value.id, 200) && text(value.explanation, 500);
 
+const hasExactKeys = (value: Record<string, unknown>, keys: string[]) => {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return (
+    actual.length === expected.length &&
+    actual.every((key, index) => key === expected[index])
+  );
+};
+
+const validCostArguments = (args: Record<string, unknown>) => {
+  if (
+    typeof args.category !== 'string' ||
+    !Object.hasOwn(ASSISTANT_COST_FREQUENCIES, args.category) ||
+    typeof args.amount !== 'number' ||
+    !Number.isFinite(args.amount) ||
+    args.amount < 0 ||
+    args.amount > 1_000_000 ||
+    args.currency !== 'USD' ||
+    !['monthly', 'one_time'].includes(String(args.frequency))
+  )
+    return false;
+  return (
+    ASSISTANT_COST_FREQUENCIES[
+      args.category as keyof typeof ASSISTANT_COST_FREQUENCIES
+    ] === args.frequency
+  );
+};
+
 export function acceptAssistantProposal(
   value: unknown,
 ): AssistantProposal | undefined {
@@ -122,25 +150,52 @@ export function acceptAssistantProposal(
     };
   }
   if (value.type === 'analysis.set_cost') {
-    if (
-      typeof args.category !== 'string' ||
-      !Object.hasOwn(ASSISTANT_COST_FREQUENCIES, args.category) ||
-      typeof args.amount !== 'number' ||
-      !Number.isFinite(args.amount) ||
-      args.amount < 0 ||
-      args.currency !== 'USD' ||
-      !['monthly', 'one_time'].includes(String(args.frequency))
-    )
-      return undefined;
-    const expectedFrequency =
-      ASSISTANT_COST_FREQUENCIES[
-        args.category as keyof typeof ASSISTANT_COST_FREQUENCIES
-      ];
-    if (expectedFrequency !== args.frequency) return undefined;
+    if (!validCostArguments(args)) return undefined;
     return value as unknown as AssistantProposal;
   }
   if (value.type === 'property_note.add') {
     if (!text(args.text, 500)) return undefined;
+    return value as unknown as AssistantProposal;
+  }
+  if (value.type === 'saved_listing.set_cost') {
+    if (
+      !hasExactKeys(value, [
+        'id',
+        'type',
+        'explanation',
+        'contextRevision',
+        'arguments',
+      ]) ||
+      !hasExactKeys(args, [
+        'listingId',
+        'category',
+        'amount',
+        'currency',
+        'frequency',
+      ]) ||
+      !text(value.contextRevision, 2_000) ||
+      !text(args.listingId, 200) ||
+      !validCostArguments(args)
+    )
+      return undefined;
+    return value as unknown as AssistantProposal;
+  }
+  if (value.type === 'saved_listing.add_note') {
+    if (
+      !hasExactKeys(value, [
+        'id',
+        'type',
+        'explanation',
+        'contextRevision',
+        'arguments',
+      ]) ||
+      !hasExactKeys(args, ['listingId', 'text']) ||
+      !text(value.contextRevision, 2_000) ||
+      !text(args.listingId, 200) ||
+      !text(args.text, 500) ||
+      !(args.text as string).trim()
+    )
+      return undefined;
     return value as unknown as AssistantProposal;
   }
   if (value.type === 'workspace.navigate') {

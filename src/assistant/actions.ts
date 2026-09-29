@@ -4,7 +4,13 @@ import {
   setUpfrontValue,
   type RentalAnalysis,
 } from '../shared/analysis';
-import { ASSISTANT_COST_FREQUENCIES, type SetCostProposal } from './types';
+import { compactAnalysisForStorage } from '../saved/repository';
+import type { SavedListingRecord } from '../saved/types';
+import {
+  ASSISTANT_COST_FREQUENCIES,
+  type SavedListingProposal,
+  type SetCostProposal,
+} from './types';
 
 export function applyCostProposal(
   analysis: RentalAnalysis,
@@ -35,4 +41,56 @@ export function addAssistantPropertyNote(
   ];
   next.updatedAt = new Date().toISOString();
   return next;
+}
+
+export function applySavedListingProposalToAnalysis(
+  analysis: RentalAnalysis,
+  proposal: SavedListingProposal,
+): RentalAnalysis {
+  if (proposal.type === 'saved_listing.set_cost') {
+    return applyCostProposal(analysis, {
+      id: proposal.id,
+      type: 'analysis.set_cost',
+      explanation: proposal.explanation,
+      arguments: {
+        category: proposal.arguments.category,
+        amount: proposal.arguments.amount,
+        currency: proposal.arguments.currency,
+        frequency: proposal.arguments.frequency,
+      },
+    } as SetCostProposal);
+  }
+  return addAssistantPropertyNote(
+    analysis,
+    proposal.id,
+    proposal.arguments.text,
+  );
+}
+
+export function applySavedListingProposal(
+  records: readonly SavedListingRecord[],
+  proposal: SavedListingProposal,
+): { records: SavedListingRecord[]; record: SavedListingRecord } {
+  const listingId = proposal.arguments.listingId;
+  const existing = records.find((record) => record.id === listingId);
+  if (!existing) throw new Error('The saved listing is no longer available.');
+
+  const parsedUpdatedAt = Date.parse(existing.updatedAt);
+  const updatedAt = new Date(
+    Math.max(
+      Date.now(),
+      Number.isFinite(parsedUpdatedAt) ? parsedUpdatedAt + 1 : 0,
+    ),
+  ).toISOString();
+  const record: SavedListingRecord = {
+    ...existing,
+    analysis: compactAnalysisForStorage(
+      applySavedListingProposalToAnalysis(existing.analysis, proposal),
+    ),
+    updatedAt,
+  };
+  return {
+    records: records.map((item) => (item.id === listingId ? record : item)),
+    record,
+  };
 }
