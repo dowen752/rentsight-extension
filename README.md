@@ -20,6 +20,10 @@ npm run build
 
 The production extension is written to `dist/`.
 
+`npm run build` also creates the independently bundled hosted-auth deployment in
+`dist-auth/`. The two directories are separate build graphs and have different
+deployment targets.
+
 ## Load the unpacked extension
 
 1. Build with `npm run build`.
@@ -29,6 +33,25 @@ The production extension is written to `dist/`.
 5. Pin RentSight, navigate to an HTTP or HTTPS page, and click its toolbar icon to open the side panel.
 
 After rebuilding, select **Reload** on the extension card in `chrome://extensions` and refresh the inspected page if necessary.
+
+## Package for the Chrome Web Store
+
+Run a clean production build, then create the upload ZIP from inside `dist/`:
+
+```bash
+npm run build
+rm -f rentsight-extension.zip
+(cd dist && zip -r ../rentsight-extension.zip . -x '*.DS_Store')
+unzip -l rentsight-extension.zip
+```
+
+Upload `rentsight-extension.zip` as the new Chrome Web Store package. The ZIP
+must contain the contents of `dist/` at its root (including `manifest.json`) and
+must not contain the `dist/` directory itself, `dist-auth/`, `auth-host.html`, or
+`authHost.js`. The build verifier rejects hosted-auth files and known
+Google/reCAPTCHA remote script loaders in any JavaScript emitted under `dist/`.
+`dist-auth/` is a separate Cloudflare deployment artifact and must never be
+included in the Web Store ZIP.
 
 ## Development
 
@@ -79,7 +102,7 @@ VITE_RENTSIGHT_EXTENSION_ID=pkcmgccphdnmmdjhipgiohmolkailema
 
 Both entries are optional for production builds because these values are canonical in `src/auth/config.ts`. The auth-host URL remains configurable for a local bridge deployment. Do not override the extension ID when using the production auth host.
 
-The Google popup cannot run directly in an MV3 extension page. Deploy the generated `dist/auth-host.html` and every asset it references to Cloudflare at `https://auth.umbrellabrand.co/rentsight/auth-host.html`, preserving the generated `/assets/...` URL paths. This does not require or enable Firebase Hosting. The extension opens the page only inside `offscreen.html`; the hosted page uses normal `firebase/auth`, returns a Google OAuth credential through `postMessage` restricted to `chrome-extension://pkcmgccphdnmmdjhipgiohmolkailema` (or the explicit local override), and the extension signs into its own persistent Firebase Auth session with `signInWithCredential`.
+The Google popup cannot run directly in an MV3 extension page. Deploy the generated `dist-auth/rentsight/auth-host.html` and every asset it references to Cloudflare at `https://auth.umbrellabrand.co/rentsight/auth-host.html`, preserving root-relative asset paths such as `/authHost.js` and `/assets/...`. This does not require or enable Firebase Hosting. The extension opens the page only inside `offscreen.html`; the hosted page uses normal `firebase/auth`, returns a Google OAuth credential through `postMessage` restricted to `chrome-extension://pkcmgccphdnmmdjhipgiohmolkailema` (or the explicit local override), and the extension signs into its own persistent Firebase Auth session with `signInWithCredential`.
 
 Firebase Console setup:
 
@@ -91,7 +114,7 @@ Firebase Console setup:
 
 Cloudflare must return `Content-Security-Policy: frame-ancestors chrome-extension://pkcmgccphdnmmdjhipgiohmolkailema` on `/rentsight/auth-host.html`. Do not send `X-Frame-Options`, because it can block the required extension framing. Do not broaden this policy for unpacked development builds: the manifest `key` gives them the same allowed origin. The JavaScript bridge independently enforces that exact extension origin.
 
-Run `npm run build` to create both the Chrome extension in `dist/` and the deployment-specific auth-host bundle in `dist-auth/`. The post-build step copies only `rentsight/auth-host.html`, `authHost.js`, and the hashed JavaScript assets referenced by that HTML. Deploy the separate `rentsight-auth` Cloudflare Worker with `npx wrangler deploy`. Its Static Assets binding serves `dist-auth/` with `html_handling: "none"` so the required literal `/rentsight/auth-host.html` URL returns the file instead of redirecting to an extensionless path. The minimal Worker handler runs first only for that HTML URL, attaches the required `frame-ancestors` policy, and removes any `X-Frame-Options` header. No Firebase Hosting, Worker API, or extension-package files are involved in this deployment.
+Run `npm run build` to create the Chrome extension in `dist/` and the deployment-specific auth-host bundle in `dist-auth/`. Vite builds these in separate invocations: the extension graph contains only its Manifest V3 entry points, while the hosted graph starts at `auth-host.html` and uses normal `firebase/auth`. The auth asset preparation step moves that independently generated page to `dist-auth/rentsight/auth-host.html` and verifies every referenced local asset without copying anything from `dist/`. Deploy the separate `rentsight-auth` Cloudflare Worker with `npx wrangler deploy`. Its Static Assets binding serves `dist-auth/` with `html_handling: "none"` so the required literal `/rentsight/auth-host.html` URL returns the file instead of redirecting to an extensionless path. The minimal Worker handler runs first only for that HTML URL, attaches the required `frame-ancestors` policy, and removes any `X-Frame-Options` header. No Firebase Hosting, Worker API, or extension-package files are involved in this deployment.
 
 `public/manifest.json` includes the Web Store public `key`, required `offscreen` permission, narrow `https://auth.umbrellabrand.co/rentsight/*` auth-host permission, and extension-page `frame-src https://auth.umbrellabrand.co` entry, plus the Firebase Auth endpoints in `connect-src` (`apis.google.com`, `www.gstatic.com`, `www.googleapis.com`, `securetoken.googleapis.com`, and Identity Toolkit). The extension's own `chrome-extension://pkcmgccphdnmmdjhipgiohmolkailema` origin does not need a `host_permissions` entry. A local auth-host override also requires a development manifest whose `host_permissions` and `frame-src` allow that origin. Do not add remote scripts to `script-src`; MV3 extension JavaScript remains bundled locally.
 

@@ -2,6 +2,13 @@
 
 These instructions apply to the entire repository.
 
+## Branch and release policy
+
+- Never push changes directly to `main`.
+- `main` is the production branch.
+- Push all changes to `dev`; every change must go through `dev` before it can reach `main`.
+- Do not bypass this flow unless the user explicitly changes this repository policy.
+
 ## Think at product scope
 
 Approach every request by asking: **What is the root cause of the user's pain point?** Do not optimize only the component, screenshot, field, or failing test immediately in front of you.

@@ -1,10 +1,9 @@
-import { cp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, rename } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 const projectRoot = resolve(import.meta.dirname, '..');
-const extensionBuildDirectory = resolve(projectRoot, 'dist');
 const authBuildDirectory = resolve(projectRoot, 'dist-auth');
-const authHostSource = resolve(extensionBuildDirectory, 'auth-host.html');
+const authHostSource = resolve(authBuildDirectory, 'auth-host.html');
 const authHostDestination = resolve(
   authBuildDirectory,
   'rentsight/auth-host.html',
@@ -19,18 +18,13 @@ if (!referencedPaths.includes('/authHost.js')) {
   throw new Error('The auth-host build does not reference /authHost.js.');
 }
 
-await rm(authBuildDirectory, { force: true, recursive: true });
 await mkdir(dirname(authHostDestination), { recursive: true });
-await cp(authHostSource, authHostDestination);
+await rename(authHostSource, authHostDestination);
 
 for (const referencedPath of new Set(referencedPaths)) {
-  const relativePath = referencedPath.slice(1);
-  const source = resolve(extensionBuildDirectory, relativePath);
-  const destination = resolve(authBuildDirectory, relativePath);
-  await mkdir(dirname(destination), { recursive: true });
-  await cp(source, destination);
+  await readFile(resolve(authBuildDirectory, referencedPath.slice(1)));
 }
 
 console.info(
-  `Prepared ${1 + new Set(referencedPaths).size} auth-host assets in dist-auth.`,
+  `Prepared and verified ${1 + new Set(referencedPaths).size} independently built auth-host assets in dist-auth.`,
 );

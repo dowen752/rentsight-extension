@@ -1533,7 +1533,7 @@ export function AboutPrivacy({
   const version =
     typeof chrome !== 'undefined' && chrome.runtime?.getManifest
       ? chrome.runtime.getManifest().version
-      : '0.1.0';
+      : '0.1.1';
 
   const clear = async () => {
     if (deleting) return;
