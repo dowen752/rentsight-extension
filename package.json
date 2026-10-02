@@ -1,12 +1,14 @@
 {
   "name": "rentsight",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite build --watch --mode development",
-    "build": "tsc -b && vite build && node scripts/verify-extension-build.mjs",
-    "postbuild": "node scripts/build-auth-assets.mjs",
+    "build": "tsc -b && npm run build:extension && npm run build:auth && npm run verify:build",
+    "build:extension": "vite build",
+    "build:auth": "vite build --config vite.auth.config.ts && node scripts/build-auth-assets.mjs",
+    "verify:build": "node scripts/verify-extension-build.mjs",
     "deploy:auth": "npm run build && wrangler deploy",
     "lint": "eslint .",
     "format": "prettier --write .",
