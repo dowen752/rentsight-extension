@@ -130,7 +130,8 @@ export async function fillZumperSearchPage(
           } ${text(candidate)}`.trim();
           if (/close|dismiss/i.test(label)) return true;
           return Array.from(candidate.querySelectorAll('[data-testid]')).some(
-            (icon) => /close|dismiss/i.test(icon.getAttribute('data-testid') ?? ''),
+            (icon) =>
+              /close|dismiss/i.test(icon.getAttribute('data-testid') ?? ''),
           );
         });
         if (close) {
@@ -164,7 +165,7 @@ export async function fillZumperSearchPage(
     const startingUrl = location.href;
     const apply = await waitFor(() =>
       Array.from(panel.querySelectorAll<HTMLButtonElement>('button')).find(
-        (candidate) => /^View .+ results$/i.test(text(candidate)),
+        (candidate) => /^View(?:\s+.+)?\s+results?$/i.test(text(candidate)),
       ),
     );
     apply.click();
@@ -177,6 +178,25 @@ export async function fillZumperSearchPage(
       2_000,
     ).catch(() => undefined);
     await sleep(400);
+  };
+  const finishPanel = async (
+    panel: HTMLElement,
+    triggerLabel: string,
+    criteria: SearchCriterion[],
+  ) => {
+    try {
+      await applyPanel(panel);
+    } catch {
+      for (const criterion of criteria) {
+        const appliedIndex = applied.indexOf(criterion);
+        if (appliedIndex >= 0) applied.splice(appliedIndex, 1);
+        if (!failed.includes(criterion)) failed.push(criterion);
+      }
+      // Keep a single changed Zumper panel from blocking every later filter.
+      // Its trigger toggles the popover closed when the action is unavailable.
+      if (visible(panel)) button(triggerLabel)?.click();
+      await sleep(100);
+    }
   };
   const setInput = async (input: HTMLInputElement, value: string) => {
     await dismissSaveSearch();
@@ -194,26 +214,49 @@ export async function fillZumperSearchPage(
   };
   const choose = async (root: ParentNode, label: string) => {
     await dismissSaveSearch();
-    const input =
-      root.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`) ??
-      Array.from(root.querySelectorAll<HTMLInputElement>('input')).find(
-        (candidate) =>
-          Array.from(candidate.labels ?? []).some(
-            (candidateLabel) => text(candidateLabel) === label,
+    const currentRoot = () => {
+      if (root instanceof HTMLElement && root.id) {
+        const replacement = document.getElementById(root.id);
+        if (replacement && visible(replacement)) return replacement;
+      }
+      if (root instanceof Element && root.isConnected) return root;
+      return Array.from(
+        document.querySelectorAll<HTMLElement>('[role="dialog"]'),
+      ).find(visible);
+    };
+    const findChoice = () => {
+      const liveRoot = currentRoot();
+      if (!liveRoot) return undefined;
+      return (
+        liveRoot.querySelector<HTMLInputElement>(
+          `input[aria-label="${label}"]`,
+        ) ??
+        Array.from(
+          liveRoot.querySelectorAll<HTMLElement>(
+            'input, button, [role="checkbox"]',
           ),
+        ).find((candidate) => {
+          if (text(candidate) === label) return true;
+          return (
+            candidate instanceof HTMLInputElement &&
+            Array.from(candidate.labels ?? []).some(
+              (candidateLabel) => text(candidateLabel) === label,
+            )
+          );
+        })
       );
-    if (input) {
-      if (!input.checked) input.click();
-      await sleep(100);
-      if (!input.checked) throw new Error('Choice not retained');
-      return;
-    }
-    const choice = Array.from(
-      root.querySelectorAll<HTMLButtonElement>('button'),
-    ).find((candidate) => text(candidate) === label);
-    if (!choice) throw new Error('Choice unavailable');
-    choice.click();
-    await sleep(100);
+    };
+    const selected = (choice: HTMLElement) =>
+      (choice instanceof HTMLInputElement && choice.checked) ||
+      choice.getAttribute('aria-checked') === 'true' ||
+      choice.getAttribute('aria-pressed') === 'true' ||
+      choice.getAttribute('data-state') === 'checked';
+    const choice = await waitFor(findChoice);
+    if (!selected(choice)) choice.click();
+    await waitFor(() => {
+      const liveChoice = findChoice();
+      return liveChoice && selected(liveChoice) ? liveChoice : undefined;
+    }, 1_500);
   };
   const chooseRoom = async (
     panel: HTMLElement,
@@ -236,21 +279,27 @@ export async function fillZumperSearchPage(
             { value: 4, label: '4 bathrooms' },
             { value: 5, label: '5 bathrooms or more' },
           ];
-    const desired = options.filter(({ value }) => value >= minimum);
-    if (!desired.length) throw new Error(`${section} choice unavailable`);
-    for (const { label } of desired) {
-      await dismissSaveSearch();
-      const choice = panel.querySelector<HTMLInputElement>(
-        `input[type="checkbox"][aria-label="${label}"]`,
-      );
-      if (!choice) throw new Error(`${section} choice unavailable`);
-      if (!choice.checked) choice.click();
-      await sleep(100);
-      if (!choice.checked) throw new Error(`${section} choice not retained`);
-    }
+    const desired = options.find(({ value }) => value === minimum);
+    if (!desired) throw new Error(`${section} choice unavailable`);
+    await dismissSaveSearch();
+    const choice = panel.querySelector<HTMLElement>(
+      `button[aria-label="${desired.label}"], input[type="checkbox"][aria-label="${desired.label}"]`,
+    );
+    if (!choice) throw new Error(`${section} choice unavailable`);
+    const selected = () =>
+      choice.getAttribute('aria-pressed') === 'true' ||
+      choice.getAttribute('aria-checked') === 'true' ||
+      (choice instanceof HTMLInputElement && choice.checked);
+    if (!selected()) choice.click();
+    await sleep(100);
+    if (!selected()) throw new Error(`${section} choice not retained`);
   };
   const needsRooms =
     search.minBedrooms !== undefined || search.minBathrooms !== undefined;
+  const roomCriteria: SearchCriterion[] = [
+    ...(search.minBedrooms !== undefined ? (['minBedrooms'] as const) : []),
+    ...(search.minBathrooms !== undefined ? (['minBathrooms'] as const) : []),
+  ];
   if (needsRooms) {
     const panel = await openPanel('Beds/Baths');
     if (search.minBedrooms !== undefined)
@@ -261,12 +310,20 @@ export async function fillZumperSearchPage(
       await record(['minBathrooms'], () =>
         chooseRoom(panel, 'Bathrooms', search.minBathrooms!),
       );
-    await applyPanel(panel);
+    await finishPanel(panel, 'Beds/Baths', roomCriteria);
   }
   if (
     search.minListedRent !== undefined ||
     search.maxListedRent !== undefined
   ) {
+    const rentCriteria: SearchCriterion[] = [
+      ...(search.minListedRent !== undefined
+        ? (['minListedRent'] as const)
+        : []),
+      ...(search.maxListedRent !== undefined
+        ? (['maxListedRent'] as const)
+        : []),
+    ];
     const panel = await openPanel('Price');
     if (search.minListedRent !== undefined)
       await record(['minListedRent'], async () => {
@@ -290,7 +347,7 @@ export async function fillZumperSearchPage(
         if (Number(input.value.replace(/\D/g, '')) !== search.maxListedRent)
           throw new Error('Maximum price not retained');
       });
-    await applyPanel(panel);
+    await finishPanel(panel, 'Price', rentCriteria);
   }
   if (search.propertyTypes?.length) {
     const panel = await openPanel('Type');
@@ -304,7 +361,7 @@ export async function fillZumperSearchPage(
       );
       for (const label of labels) await choose(panel, label);
     });
-    await applyPanel(panel);
+    await finishPanel(panel, 'Type', ['propertyTypes']);
   }
   const dogCriteria: SearchCriterion[] = [
     ...(search.smallDogsAllowed ? ['smallDogsAllowed' as const] : []),
@@ -316,10 +373,14 @@ export async function fillZumperSearchPage(
       await record(['catsAllowed'], () => choose(panel, 'Cats allowed'));
     if (dogCriteria.length)
       await record(dogCriteria, () => choose(panel, 'Dogs allowed'));
-    await applyPanel(panel);
+    await finishPanel(panel, 'Pets', [
+      ...(search.catsAllowed ? (['catsAllowed'] as const) : []),
+      ...dogCriteria,
+    ]);
   }
   if (
     search.minSquareFeet !== undefined ||
+    search.parkingAvailable ||
     search.inUnitLaundry ||
     search.airConditioning
   ) {
@@ -337,9 +398,18 @@ export async function fillZumperSearchPage(
       });
     if (search.inUnitLaundry)
       await record(['inUnitLaundry'], () => choose(panel, 'In unit laundry'));
+    if (search.parkingAvailable)
+      await record(['parkingAvailable'], () => choose(panel, 'Garage parking'));
     if (search.airConditioning)
       await record(['airConditioning'], () => choose(panel, 'A/C'));
-    await applyPanel(panel);
+    await finishPanel(panel, 'More', [
+      ...(search.minSquareFeet !== undefined
+        ? (['minSquareFeet'] as const)
+        : []),
+      ...(search.inUnitLaundry ? (['inUnitLaundry'] as const) : []),
+      ...(search.parkingAvailable ? (['parkingAvailable'] as const) : []),
+      ...(search.airConditioning ? (['airConditioning'] as const) : []),
+    ]);
   }
   return { applied, failed };
 }

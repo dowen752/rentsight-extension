@@ -14,6 +14,7 @@ export const ZUMPER_SUPPORTED_CRITERIA = [
   'smallDogsAllowed',
   'largeDogsAllowed',
   'minSquareFeet',
+  'parkingAvailable',
   'inUnitLaundry',
   'airConditioning',
 ] as const satisfies readonly SearchCriterion[];
@@ -43,6 +44,7 @@ export function zumperAppliedCriteria(search: RentalSearch): SearchCriterion[] {
   if (search.largeDogsAllowed) applied.push('largeDogsAllowed');
   if (search.minSquareFeet !== undefined && search.minSquareFeet >= 0)
     applied.push('minSquareFeet');
+  if (search.parkingAvailable) applied.push('parkingAvailable');
   if (search.inUnitLaundry) applied.push('inUnitLaundry');
   if (search.airConditioning) applied.push('airConditioning');
   return applied;

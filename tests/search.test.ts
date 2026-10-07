@@ -351,30 +351,33 @@ describe('rental search site adapters', () => {
           'catsAllowed',
           'smallDogsAllowed',
           'minSquareFeet',
+          'parkingAvailable',
           'inUnitLaundry',
           'airConditioning',
         ],
-        omitted: ['moveInDate', 'parkingAvailable'],
+        omitted: ['moveInDate'],
       },
     });
   });
 
   it('opens Apartments.com cleanly and reports page-assisted filters', () => {
-    const result = SEARCH_SITE_ADAPTERS.find(
+    const apartments = SEARCH_SITE_ADAPTERS.find(
       (site) => site.id === 'apartments',
-    )!.buildLink({
+    )!;
+    const result = apartments.buildLink({
       location: 'Seattle, WA',
       minListedRent: 1500,
       maxListedRent: 2500,
       minBedrooms: 2,
       minBathrooms: 2,
       propertyTypes: ['house'],
+      moveInDate: '2026-10-22',
       parkingAvailable: true,
     });
     expect(result).toEqual({
       status: 'ready',
       link: {
-        url: 'https://www.apartments.com/seattle-wa/',
+        url: 'https://www.apartments.com/',
         transferMode: 'page',
         applied: [
           'location',
@@ -383,8 +386,20 @@ describe('rental search site adapters', () => {
           'minBedrooms',
           'minBathrooms',
           'propertyTypes',
+          'moveInDate',
           'parkingAvailable',
         ],
+        omitted: [],
+      },
+    });
+    expect(
+      apartments.buildLink({ location: 'Seattle', maxListedRent: 2500 }),
+    ).toEqual({
+      status: 'ready',
+      link: {
+        url: 'https://www.apartments.com/',
+        transferMode: 'page',
+        applied: ['location', 'maxListedRent'],
         omitted: [],
       },
     });
@@ -451,7 +466,7 @@ describe('rental search site adapters', () => {
     expect(direct).toEqual({
       status: 'ready',
       link: {
-        url: 'https://www.realtor.com/apartments/springfield_MO',
+        url: 'https://www.realtor.com/rentals',
         transferMode: 'page',
         applied: [
           'location',
@@ -465,8 +480,9 @@ describe('rental search site adapters', () => {
           'minSquareFeet',
           'parkingAvailable',
           'inUnitLaundry',
+          'airConditioning',
         ],
-        omitted: ['airConditioning'],
+        omitted: [],
       },
     });
     expect(realtor.buildLink({ location: 'Springfield' })).toEqual({

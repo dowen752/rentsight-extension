@@ -143,6 +143,32 @@ export async function fillHotpadsSearchPage(
     Array.from(root.querySelectorAll<HTMLButtonElement>('button')).find(
       (button) => button.textContent?.trim() === label,
     );
+  const setInput = async (input: HTMLInputElement, value: string) => {
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value',
+    )?.set;
+    input.focus();
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(100);
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.blur();
+    await sleep(100);
+  };
+  const numeric = (input: HTMLInputElement) =>
+    Number(input.value.replace(/[^\d]/g, ''));
+  const setNumeric = async (
+    root: ParentNode,
+    selector: string,
+    value: number,
+  ) => {
+    const input = await waitFor(() =>
+      root.querySelector<HTMLInputElement>(selector),
+    );
+    await setInput(input, String(value));
+    if (numeric(input) !== value) throw new Error('Value was not retained');
+  };
   const needsRooms =
     requested.includes('minBedrooms') || requested.includes('minBathrooms');
   if (needsRooms) {
@@ -172,9 +198,14 @@ export async function fillHotpadsSearchPage(
         const start = buttonByText(bedrooms, minimumLabel);
         if (!start) throw new Error('Bedroom option unavailable');
         start.click();
-        if (minimum < 4) buttonByText(bedrooms, '4+')?.click();
         await sleep(100);
-        if (start.getAttribute('aria-pressed') !== 'true')
+        const retained = buttonByText(
+          roomDialog.querySelector<HTMLElement>(
+            '[aria-label="Number of bedrooms"]',
+          ) ?? bedrooms,
+          minimumLabel,
+        );
+        if (retained?.getAttribute('aria-pressed') !== 'true')
           throw new Error('Bedroom option was not retained');
       });
     if (requested.includes('minBathrooms'))
@@ -195,71 +226,113 @@ export async function fillHotpadsSearchPage(
     buttonByText(roomDialog, 'Done')?.click();
   }
 
-  const filterButton = await waitFor(() =>
-    document.querySelector<HTMLButtonElement>(
-      '[data-testid="button-all-filters"]',
-    ),
+  const priceCriteria: SearchCriterion[] = [
+    ...(search.minListedRent !== undefined ? ['minListedRent' as const] : []),
+    ...(search.maxListedRent !== undefined ? ['maxListedRent' as const] : []),
+  ];
+  if (priceCriteria.length) {
+    try {
+      const priceButton = await waitFor(() =>
+        Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+          (button) => {
+            const label = button.textContent?.trim() ?? '';
+            return (
+              button.getAttribute('aria-expanded') !== null &&
+              (/^Any price$/i.test(label) || label.includes('$'))
+            );
+          },
+        ),
+      );
+      priceButton.click();
+      const priceDialog = await waitFor(() =>
+        Array.from(
+          document.querySelectorAll<HTMLElement>(
+            '[role="dialog"], [data-radix-popper-content-wrapper]',
+          ),
+        ).find((candidate) => candidate.textContent?.includes('Price range')),
+      );
+      if (search.minListedRent !== undefined)
+        await record(['minListedRent'], () =>
+          setNumeric(
+            priceDialog,
+            'input[aria-label="Minimum price"]',
+            search.minListedRent!,
+          ),
+        );
+      if (search.maxListedRent !== undefined)
+        await record(['maxListedRent'], () =>
+          setNumeric(
+            priceDialog,
+            'input[aria-label="Maximum price"]',
+            search.maxListedRent!,
+          ),
+        );
+      const done = buttonByText(priceDialog, 'Done');
+      if (!done) throw new Error('Price confirmation unavailable');
+      done.click();
+      await sleep(150);
+    } catch {
+      for (const criterion of priceCriteria) {
+        const index = applied.indexOf(criterion);
+        if (index >= 0) applied.splice(index, 1);
+        if (!failed.includes(criterion)) failed.push(criterion);
+      }
+    }
+  }
+
+  const filterButton = await waitFor(
+    () =>
+      document.querySelector<HTMLButtonElement>(
+        '[data-testid="button-all-filters"]',
+      ) ?? buttonByText(document, 'Filters'),
   );
   filterButton.click();
   const dialog = await waitFor(() =>
     Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]')).find(
-      (candidate) => candidate.textContent?.includes('Price range'),
+      (candidate) =>
+        candidate.textContent?.includes('Property type') &&
+        candidate.textContent?.includes('Square feet'),
     ),
   );
-  const setInput = async (input: HTMLInputElement, value: string) => {
-    const setter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      'value',
-    )?.set;
-    input.focus();
-    setter?.call(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+  const toggleByLabel = async (label: string) => {
+    const find = () =>
+      Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button, input, [role="checkbox"]',
+        ),
+      ).find(
+        (control) =>
+          control.getAttribute('aria-label') === label ||
+          control.textContent?.trim() === label,
+      );
+    const control = await waitFor(find);
+    const selected = (candidate: HTMLElement) =>
+      (candidate instanceof HTMLInputElement && candidate.checked) ||
+      candidate.getAttribute('aria-checked') === 'true' ||
+      candidate.getAttribute('aria-pressed') === 'true' ||
+      candidate.getAttribute('data-state') === 'checked';
+    if (!selected(control)) control.click();
     await sleep(100);
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    input.blur();
-    await sleep(100);
-  };
-  const numeric = (input: HTMLInputElement) =>
-    Number(input.value.replace(/[^\d]/g, ''));
-  const setNumeric = async (selector: string, value: number) => {
-    const input = await waitFor(() =>
-      dialog.querySelector<HTMLInputElement>(selector),
-    );
-    await setInput(input, String(value));
-    if (numeric(input) !== value) throw new Error('Value was not retained');
-  };
-  const toggle = async (testId: string) => {
-    const button = await waitFor(() =>
-      dialog.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`),
-    );
-    if (button.getAttribute('aria-pressed') !== 'true') button.click();
-    await sleep(100);
-    if (button.getAttribute('aria-pressed') !== 'true')
+    const retained = find();
+    if (!retained || !selected(retained))
       throw new Error('Toggle was not retained');
   };
 
-  if (search.minListedRent !== undefined)
-    await record(['minListedRent'], () =>
-      setNumeric('[data-testid="filter-price-min"]', search.minListedRent!),
-    );
-  if (search.maxListedRent !== undefined)
-    await record(['maxListedRent'], () =>
-      setNumeric('[data-testid="filter-price-max"]', search.maxListedRent!),
-    );
   if (search.propertyTypes?.length)
     await record(['propertyTypes'], async () => {
-      const ids = search.propertyTypes!.flatMap((type) =>
+      const labels = search.propertyTypes!.flatMap((type) =>
         type === 'apartment_condo'
-          ? ['filter-type-apartment', 'filter-type-condo']
+          ? ['Apartment', 'Condo']
           : type === 'house'
-            ? ['filter-type-house']
-            : ['filter-type-townhouse'],
+            ? ['House']
+            : ['Townhome'],
       );
-      for (const id of ids) await toggle(id);
+      for (const label of labels) await toggleByLabel(label);
     });
   if (search.minSquareFeet !== undefined)
     await record(['minSquareFeet'], () =>
       setNumeric(
+        dialog,
         'input[aria-label="Minimum square feet"]',
         search.minSquareFeet!,
       ),
@@ -267,33 +340,37 @@ export async function fillHotpadsSearchPage(
   if (search.moveInDate)
     await record(['moveInDate'], async () => {
       const input = await waitFor(() =>
-        dialog.querySelector<HTMLInputElement>('input[type="date"]'),
+        dialog.querySelector<HTMLInputElement>(
+          'input[aria-label="Move-in by"], input[type="date"]',
+        ),
       );
       await setInput(input, search.moveInDate!);
       if (input.value !== search.moveInDate)
         throw new Error('Move-in date was not retained');
     });
   if (search.catsAllowed)
-    await record(['catsAllowed'], () => toggle('filter-pet-cats'));
+    await record(['catsAllowed'], () => toggleByLabel('Cats'));
   const dogCriteria: SearchCriterion[] = [
     ...(search.smallDogsAllowed ? ['smallDogsAllowed' as const] : []),
     ...(search.largeDogsAllowed ? ['largeDogsAllowed' as const] : []),
   ];
   if (dogCriteria.length)
-    await record(dogCriteria, () => toggle('filter-pet-dogs'));
+    await record(dogCriteria, () => toggleByLabel('Dogs'));
   if (search.parkingAvailable)
-    await record(['parkingAvailable'], () => toggle('filter-amenity-parking'));
+    await record(['parkingAvailable'], () => toggleByLabel('Parking'));
   if (search.inUnitLaundry)
-    await record(['inUnitLaundry'], () =>
-      toggle('filter-amenity-in-unit-laundry'),
-    );
+    await record(['inUnitLaundry'], () => toggleByLabel('In-unit laundry'));
   if (search.airConditioning)
-    await record(['airConditioning'], () => toggle('filter-amenity-ac'));
+    await record(['airConditioning'], () => toggleByLabel('A/C'));
 
-  const submit = dialog.querySelector<HTMLButtonElement>(
-    '[data-testid="filter-apply"]',
-  );
-  if (!submit) return { applied, failed: requested };
+  const submit =
+    dialog.querySelector<HTMLButtonElement>('[data-testid="filter-apply"]') ??
+    buttonByText(dialog, 'Apply filters');
+  if (!submit)
+    return {
+      applied,
+      failed: requested.filter((criterion) => !applied.includes(criterion)),
+    };
   submit.click();
   return { applied, failed, submitted: true };
 }

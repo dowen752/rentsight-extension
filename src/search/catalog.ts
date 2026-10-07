@@ -19,7 +19,6 @@ import {
   REALTOR_ORIGIN,
   REALTOR_SUPPORTED_CRITERIA,
   realtorAppliedCriteria,
-  realtorLocationPath,
 } from './realtor';
 import {
   REDFIN_ORIGIN,
@@ -111,11 +110,10 @@ const apartments: SearchSiteDefinition = {
   allowedOrigins: [APARTMENTS_ORIGIN],
   supportedCriteria: APARTMENTS_SUPPORTED_CRITERIA,
   buildLink(search) {
-    const path = search.location ? `/${locationSlug(search.location)}/` : '/';
     return readyLink(
       this,
       search,
-      new URL(path, APARTMENTS_ORIGIN),
+      new URL('/', APARTMENTS_ORIGIN),
       apartmentsAppliedCriteria(search),
       'page',
     );
@@ -153,13 +151,10 @@ const realtor: SearchSiteDefinition = {
   allowedOrigins: [REALTOR_ORIGIN],
   supportedCriteria: REALTOR_SUPPORTED_CRITERIA,
   buildLink(search) {
-    const path = search.location
-      ? (realtorLocationPath(search.location) ?? '/rentals')
-      : '/rentals';
     return readyLink(
       this,
       search,
-      new URL(path, REALTOR_ORIGIN),
+      new URL('/rentals', REALTOR_ORIGIN),
       realtorAppliedCriteria(search),
       'page',
     );

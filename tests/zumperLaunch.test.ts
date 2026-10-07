@@ -17,6 +17,8 @@ describe('Zumper assisted search', () => {
     for (const name of [
       'document',
       'location',
+      'Element',
+      'HTMLElement',
       'HTMLInputElement',
       'Event',
     ] as const)
@@ -65,30 +67,30 @@ describe('Zumper assisted search', () => {
     expect(executeScript).toHaveBeenCalledTimes(2);
   });
 
-  it('selects inclusive room minimums and continues through later panels', async () => {
+  it('selects exact room minimum controls and continues through later panels', async () => {
     const dom = new JSDOM(
       `
       <button id="rooms-trigger" aria-controls="rooms-panel">Beds/Baths</button>
       <section id="rooms-panel" hidden>
         <h2>Bedrooms</h2>
-        <input type="checkbox" aria-label="studio" />
-        <input type="checkbox" aria-label="1 bedroom" />
-        <input type="checkbox" aria-label="2 bedrooms" />
-        <input type="checkbox" aria-label="3 bedrooms" />
-        <input type="checkbox" aria-label="4 bedrooms or more" />
+        <button aria-label="studio" aria-pressed="false">Studio</button>
+        <button aria-label="1 bedroom" aria-pressed="false">1</button>
+        <button aria-label="2 bedrooms" aria-pressed="false">2</button>
+        <button aria-label="3 bedrooms" aria-pressed="false">3</button>
+        <button aria-label="4 bedrooms or more" aria-pressed="false">4+</button>
         <h2>Bathrooms</h2>
-        <input type="checkbox" aria-label="1 bathroom" />
-        <input type="checkbox" aria-label="2 bathrooms" />
-        <input type="checkbox" aria-label="3 bathrooms" />
-        <input type="checkbox" aria-label="4 bathrooms" />
-        <input type="checkbox" aria-label="5 bathrooms or more" />
+        <button aria-label="1 bathroom" aria-pressed="false">1</button>
+        <button aria-label="2 bathrooms" aria-pressed="false">2</button>
+        <button aria-label="3 bathrooms" aria-pressed="false">3</button>
+        <button aria-label="4 bathrooms" aria-pressed="false">4</button>
+        <button aria-label="5 bathrooms or more" aria-pressed="false">5+</button>
         <button id="rooms-apply">View 100 results</button>
       </section>
       <button id="price-trigger" aria-controls="price-panel">Price</button>
       <section id="price-panel" hidden>
         <input aria-label="Min price" />
         <input aria-label="Max price" />
-        <button id="price-apply">View 50 results</button>
+        <button id="price-apply">View results</button>
       </section>
       <button id="pets-trigger" aria-controls="pets-panel">Pets</button>
       <section id="pets-panel" hidden>
@@ -98,8 +100,10 @@ describe('Zumper assisted search', () => {
       </section>
       <button id="more-trigger" aria-controls="more-panel">More</button>
       <section id="more-panel" hidden>
+        <input aria-label="minimum square feet" />
         <label><input type="checkbox" />In unit laundry</label>
         <label><input type="checkbox" />A/C</label>
+        <label><input type="checkbox" />Garage parking</label>
         <button id="more-apply">View 10 results</button>
       </section>
       <section id="save-search" role="dialog">
@@ -115,6 +119,8 @@ describe('Zumper assisted search', () => {
     for (const name of [
       'document',
       'location',
+      'Element',
+      'HTMLElement',
       'HTMLInputElement',
       'Event',
     ] as const)
@@ -125,45 +131,94 @@ describe('Zumper assisted search', () => {
         return this.closest('[hidden]') ? [] : [{ width: 1, height: 1 }];
       },
     });
-    const rooms = dom.window.document.querySelector<HTMLElement>('#rooms-panel')!;
-    const price = dom.window.document.querySelector<HTMLElement>('#price-panel')!;
+    const rooms =
+      dom.window.document.querySelector<HTMLElement>('#rooms-panel')!;
+    const price =
+      dom.window.document.querySelector<HTMLElement>('#price-panel')!;
     const pets = dom.window.document.querySelector<HTMLElement>('#pets-panel')!;
     const more = dom.window.document.querySelector<HTMLElement>('#more-panel')!;
-    const saveSearch = dom.window.document.querySelector<HTMLElement>('#save-search')!;
+    const saveSearch =
+      dom.window.document.querySelector<HTMLElement>('#save-search')!;
     const closeSaveSearch = vi.fn(() => {
       saveSearch.hidden = true;
     });
     dom.window.document
       .querySelector('button[aria-label="Close save search"]')!
       .addEventListener('click', closeSaveSearch);
-    dom.window.document.querySelector('#rooms-trigger')!.addEventListener('click', () => {
-      rooms.hidden = false;
-    });
-    dom.window.document.querySelector('#rooms-apply')!.addEventListener('click', () => {
-      rooms.hidden = true;
-      dom.window.history.pushState({}, '', '?rooms=3');
-    });
-    dom.window.document.querySelector('#price-trigger')!.addEventListener('click', () => {
-      price.hidden = false;
-    });
-    dom.window.document.querySelector('#price-apply')!.addEventListener('click', () => {
-      price.hidden = true;
-      dom.window.history.pushState({}, '', '?rooms=3&price=2500-7000');
-    });
-    dom.window.document.querySelector('#pets-trigger')!.addEventListener('click', () => {
-      pets.hidden = false;
-    });
-    dom.window.document.querySelector('#pets-apply')!.addEventListener('click', () => {
-      pets.hidden = true;
-      dom.window.history.pushState({}, '', '?rooms=3&price=2500-7000&pets=true');
-    });
-    dom.window.document.querySelector('#more-trigger')!.addEventListener('click', () => {
-      more.hidden = false;
-    });
-    dom.window.document.querySelector('#more-apply')!.addEventListener('click', () => {
-      more.hidden = true;
-      dom.window.history.pushState({}, '', '?rooms=3&price=2500-7000&pets=true&amenities=true');
-    });
+    dom.window.document
+      .querySelector('#rooms-trigger')!
+      .addEventListener('click', () => {
+        rooms.hidden = false;
+      });
+    for (const choice of rooms.querySelectorAll<HTMLButtonElement>(
+      'button[aria-label]',
+    )) {
+      choice.addEventListener('click', () => {
+        const label = choice.getAttribute('aria-label') ?? '';
+        const group = label.includes('bedroom') ? 'bedroom' : 'bathroom';
+        for (const peer of rooms.querySelectorAll<HTMLButtonElement>(
+          `button[aria-label*="${group}"]`,
+        ))
+          peer.setAttribute('aria-pressed', String(peer === choice));
+      });
+    }
+    dom.window.document
+      .querySelector('#rooms-apply')!
+      .addEventListener('click', () => {
+        rooms.hidden = true;
+        dom.window.history.pushState({}, '', '?rooms=3');
+      });
+    dom.window.document
+      .querySelector('#price-trigger')!
+      .addEventListener('click', () => {
+        price.hidden = false;
+      });
+    dom.window.document
+      .querySelector('#price-apply')!
+      .addEventListener('click', () => {
+        price.hidden = true;
+        dom.window.history.pushState({}, '', '?rooms=3&price=2500-7000');
+      });
+    dom.window.document
+      .querySelector('#pets-trigger')!
+      .addEventListener('click', () => {
+        pets.hidden = false;
+      });
+    dom.window.document
+      .querySelector('#pets-apply')!
+      .addEventListener('click', () => {
+        pets.hidden = true;
+        dom.window.history.pushState(
+          {},
+          '',
+          '?rooms=3&price=2500-7000&pets=true',
+        );
+      });
+    dom.window.document
+      .querySelector('#more-trigger')!
+      .addEventListener('click', () => {
+        dom.window.document.querySelector<HTMLElement>('#more-panel')!.hidden =
+          false;
+      });
+    const attachMoreApply = (panel: HTMLElement) => {
+      panel.querySelector('#more-apply')!.addEventListener('click', () => {
+        panel.hidden = true;
+        dom.window.history.pushState(
+          {},
+          '',
+          '?rooms=3&price=2500-7000&pets=true&amenities=true',
+        );
+      });
+    };
+    attachMoreApply(more);
+    more
+      .querySelector('input[aria-label="minimum square feet"]')!
+      .addEventListener('input', () => {
+        const replacement = more.cloneNode(true) as HTMLElement;
+        replacement.hidden = false;
+        attachMoreApply(replacement);
+        more.replaceWith(replacement);
+      });
 
     await expect(
       fillZumperSearchPage({
@@ -174,8 +229,10 @@ describe('Zumper assisted search', () => {
         maxListedRent: 7000,
         catsAllowed: true,
         smallDogsAllowed: true,
+        minSquareFeet: 537,
         inUnitLaundry: true,
         airConditioning: true,
+        parkingAvailable: true,
       }),
     ).resolves.toEqual({
       applied: [
@@ -186,23 +243,19 @@ describe('Zumper assisted search', () => {
         'maxListedRent',
         'catsAllowed',
         'smallDogsAllowed',
+        'minSquareFeet',
         'inUnitLaundry',
+        'parkingAvailable',
         'airConditioning',
       ],
       failed: [],
     });
-    for (const label of [
-      '3 bedrooms',
-      '4 bedrooms or more',
-      '3 bathrooms',
-      '4 bathrooms',
-      '5 bathrooms or more',
-    ])
+    for (const label of ['3 bedrooms', '3 bathrooms'])
       expect(
-        dom.window.document.querySelector<HTMLInputElement>(
-          `input[aria-label="${label}"]`,
-        )?.checked,
-      ).toBe(true);
+        dom.window.document
+          .querySelector(`button[aria-label="${label}"]`)
+          ?.getAttribute('aria-pressed'),
+      ).toBe('true');
     expect(
       dom.window.document.querySelector<HTMLInputElement>(
         'input[aria-label="Min price"]',
@@ -219,11 +272,11 @@ describe('Zumper assisted search', () => {
           `input[aria-label="${label}"]`,
         )?.checked,
       ).toBe(true);
-    for (const label of ['In unit laundry', 'A/C'])
+    for (const label of ['In unit laundry', 'A/C', 'Garage parking'])
       expect(
-        Array.from(dom.window.document.querySelectorAll('label')).find(
-          (candidate) => candidate.textContent === label,
-        )?.querySelector('input')?.checked,
+        Array.from(dom.window.document.querySelectorAll('label'))
+          .find((candidate) => candidate.textContent === label)
+          ?.querySelector('input')?.checked,
       ).toBe(true);
     expect(closeSaveSearch).toHaveBeenCalledOnce();
     dom.window.close();

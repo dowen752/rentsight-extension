@@ -87,6 +87,98 @@ describe('Zillow assisted search launch', () => {
     dom.window.close();
   });
 
+  it('waits for Zillow to commit bedroom and bathroom choices before submitting', async () => {
+    const dom = new JSDOM(
+      '<button data-testid="beds-filters-button">Beds & baths</button>',
+      { url: 'https://www.zillow.com/chicago-il/rentals/' },
+    );
+    const { window } = dom;
+    Object.defineProperty(window.Element.prototype, 'getClientRects', {
+      configurable: true,
+      value: () => ({ length: 1 }),
+    });
+    for (const [name, value] of [
+      ['document', window.document],
+      ['location', window.location],
+      ['Element', window.Element],
+      ['HTMLElement', window.HTMLElement],
+      ['HTMLInputElement', window.HTMLInputElement],
+      ['HTMLLabelElement', window.HTMLLabelElement],
+      ['Event', window.Event],
+      ['InputEvent', window.InputEvent],
+    ] as const) {
+      vi.stubGlobal(name, value);
+    }
+    let submitted: { bedrooms?: string; bathrooms?: string } = {};
+    window.document
+      .querySelector<HTMLButtonElement>('[data-testid="beds-filters-button"]')!
+      .addEventListener('click', () => {
+        const dialog = window.document.createElement('div');
+        dialog.setAttribute('role', 'dialog');
+        dialog.innerHTML = `
+          <h3>Number of Bedrooms</h3>
+          <fieldset>
+            <legend>Bedrooms</legend>
+            <div role="group" aria-label="Beds Select">
+              <button aria-pressed="true">Any</button>
+              <button aria-pressed="false">1+</button>
+              <button aria-pressed="false">2+</button>
+              <button aria-pressed="false">3+</button>
+            </div>
+          </fieldset>
+          <h3>Number of Bathrooms</h3>
+          <fieldset>
+            <legend>Bathrooms</legend>
+            <div role="group" aria-label="Baths Select">
+              <button aria-pressed="true">Any</button>
+              <button aria-pressed="false">1+</button>
+              <button aria-pressed="false">2+</button>
+              <button aria-pressed="false">3+</button>
+            </div>
+          </fieldset>
+          <button>See 9 rentals available</button>
+        `;
+        for (const group of dialog.querySelectorAll<HTMLElement>(
+          '[role="group"]',
+        )) {
+          for (const button of group.querySelectorAll<HTMLButtonElement>(
+            'button',
+          )) {
+            button.addEventListener('click', () => {
+              window.setTimeout(() => {
+                for (const sibling of group.querySelectorAll('button'))
+                  sibling.setAttribute('aria-pressed', 'false');
+                button.setAttribute('aria-pressed', 'true');
+              }, 25);
+            });
+          }
+        }
+        dialog.lastElementChild!.addEventListener('click', () => {
+          const selected = (label: string) =>
+            dialog
+              .querySelector(
+                `[role="group"][aria-label="${label}"] button[aria-pressed="true"]`,
+              )
+              ?.textContent?.trim();
+          submitted = {
+            bedrooms: selected('Beds Select'),
+            bathrooms: selected('Baths Select'),
+          };
+          dialog.remove();
+        });
+        window.document.body.append(dialog);
+      });
+
+    await expect(
+      fillZillowSearchPage({ minBedrooms: 2, minBathrooms: 3 }),
+    ).resolves.toEqual({
+      applied: ['minBedrooms', 'minBathrooms'],
+      failed: [],
+    });
+    expect(submitted).toEqual({ bedrooms: '2+', bathrooms: '3+' });
+    dom.window.close();
+  });
+
   it('selects Zillow small dogs through the card accessibility label', async () => {
     const dom = new JSDOM(
       '<button data-testid="more-filters-button">Filters</button>',

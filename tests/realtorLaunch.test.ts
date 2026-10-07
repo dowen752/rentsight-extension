@@ -5,6 +5,7 @@ import {
   launchRealtorSearch,
   realtorAppliedCriteria,
   resolveRealtorLocationPage,
+  withRealtorPriceRange,
   type RentalSearch,
 } from '../src/search';
 
@@ -21,6 +22,7 @@ function installDom(dom: JSDOM) {
     ['HTMLSelectElement', window.HTMLSelectElement],
     ['Event', window.Event],
     ['InputEvent', window.InputEvent],
+    ['KeyboardEvent', window.KeyboardEvent],
   ] as const) {
     vi.stubGlobal(name, value);
   }
@@ -29,7 +31,23 @@ function installDom(dom: JSDOM) {
 function chromeForRealtor({ granted }: { granted: boolean }) {
   const permissionRequest = vi.fn().mockResolvedValue(granted);
   const create = vi.fn().mockResolvedValue({ id: 71, status: 'loading' });
-  const get = vi.fn().mockResolvedValue({ id: 71, status: 'complete' });
+  const initialTab = {
+    id: 71,
+    status: 'complete',
+    url: 'https://www.realtor.com/apartments/Springfield_MO',
+  };
+  const filteredTab = {
+    id: 71,
+    status: 'complete',
+    url: 'https://www.realtor.com/apartments/Springfield_MO/type-townhome/sqft-750/dog-friendly',
+  };
+  const get = vi
+    .fn()
+    .mockResolvedValueOnce(initialTab)
+    .mockResolvedValueOnce(initialTab)
+    .mockResolvedValueOnce(initialTab)
+    .mockResolvedValue(filteredTab);
+  const update = vi.fn().mockResolvedValue({ id: 71, status: 'loading' });
   const executeScript = vi
     .fn()
     .mockResolvedValueOnce([{ result: { ready: true, submitted: false } }])
@@ -53,12 +71,13 @@ function chromeForRealtor({ granted }: { granted: boolean }) {
     tabs: {
       create,
       get,
+      update,
       onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
       onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
     },
     scripting: { executeScript },
   });
-  return { permissionRequest, create, executeScript };
+  return { permissionRequest, create, update, executeScript };
 }
 
 afterEach(() => {
@@ -67,26 +86,52 @@ afterEach(() => {
 });
 
 describe('Realtor.com assisted search launch', () => {
-  it('uses Realtor.com autocomplete and clicks the first location suggestion', async () => {
+  it('adds or replaces Realtor canonical price routes without losing other filters', () => {
+    expect(
+      withRealtorPriceRange(
+        'https://www.realtor.com/apartments/Palmdale_CA/type-townhome/beds-2/sqft-750/dog-friendly?view=map',
+        2_190,
+        2_700,
+      ),
+    ).toBe(
+      'https://www.realtor.com/apartments/Palmdale_CA/type-townhome/beds-2/sqft-750/price-2190-2700/dog-friendly?view=map',
+    );
+    expect(
+      withRealtorPriceRange(
+        'https://www.realtor.com/apartments/Palmdale_CA/price-na-2500',
+        undefined,
+        2_700,
+      ),
+    ).toBe('https://www.realtor.com/apartments/Palmdale_CA/price-na-2700');
+  });
+  it("selects Realtor.com's first autocomplete match instead of accepting a restored market", async () => {
     const dom = new JSDOM(
       `
-        <input data-testid="freeTypeInput" role="combobox" />
+        <form>
+          <input data-testid="freeTypeInput" role="combobox" />
+          <button type="button" aria-label="Search"></button>
+        </form>
+        <button>Filters</button>
         <div role="listbox">
-          <div role="option">Springfield, MO</div>
-          <div role="option">Springfield, IL</div>
+          <div role="option">Boise, ID</div>
+          <div role="option">Boise City, OK</div>
         </div>
       `,
-      { url: 'https://www.realtor.com/rentals' },
+      { url: 'https://www.realtor.com/apartments/Springfield_MO' },
     );
     installDom(dom);
+    const submitSearch = vi.fn();
     const suggestions =
       dom.window.document.querySelectorAll<HTMLElement>('[role="option"]');
     const firstClick = vi.fn();
     const secondClick = vi.fn();
+    dom.window.document
+      .querySelector('button[aria-label="Search"]')
+      ?.addEventListener('click', submitSearch);
     suggestions[0].addEventListener('click', firstClick);
     suggestions[1].addEventListener('click', secondClick);
 
-    await expect(resolveRealtorLocationPage('Springfield')).resolves.toEqual({
+    await expect(resolveRealtorLocationPage('Boise')).resolves.toEqual({
       ready: false,
       submitted: true,
     });
@@ -94,9 +139,44 @@ describe('Realtor.com assisted search launch', () => {
       dom.window.document.querySelector<HTMLInputElement>(
         '[data-testid="freeTypeInput"]',
       )?.value,
-    ).toBe('Springfield');
+    ).toBe('Boise');
     expect(firstClick).toHaveBeenCalledOnce();
     expect(secondClick).not.toHaveBeenCalled();
+    expect(submitSearch).not.toHaveBeenCalled();
+    dom.window.close();
+  });
+
+  it('uses an icon-only accessible search button when no autocomplete result appears', async () => {
+    vi.useFakeTimers();
+    const dom = new JSDOM(
+      `
+        <form>
+          <input data-testid="freeTypeInput" role="combobox" />
+          <button type="button" aria-label="Search listings"></button>
+        </form>
+      `,
+      { url: 'https://www.realtor.com/apartments/Springfield_MO' },
+    );
+    installDom(dom);
+    const submitSearch = vi.fn();
+    dom.window.document
+      .querySelector('button[aria-label="Search listings"]')
+      ?.addEventListener('click', submitSearch);
+
+    const resolution = resolveRealtorLocationPage('Boise');
+    await vi.advanceTimersByTimeAsync(4_100);
+
+    await expect(resolution).resolves.toEqual({
+      ready: false,
+      submitted: true,
+    });
+    expect(submitSearch).toHaveBeenCalledOnce();
+    expect(
+      dom.window.document.querySelector<HTMLInputElement>(
+        '[data-testid="freeTypeInput"]',
+      )?.value,
+    ).toBe('Boise');
+    vi.useRealTimers();
     dom.window.close();
   });
 
@@ -135,6 +215,7 @@ describe('Realtor.com assisted search launch', () => {
         </select>
         <label data-testid="option-garage1OrMore"><input type="checkbox" /></label>
         <label data-testid="option-washerDryer"><input type="checkbox" /></label>
+        <label data-testid="option-centralAir"><input type="checkbox" /></label>
         <button data-testid="view-more-filters-results">View 433 homes</button>
       `,
       { url: 'https://www.realtor.com/apartments/springfield_MO' },
@@ -154,9 +235,11 @@ describe('Realtor.com assisted search launch', () => {
     const committed = { min: '', max: '' };
     minInput.addEventListener('input', () => {
       draft.min = minInput.value;
+      maxInput.value = committed.max;
     });
     maxInput.addEventListener('input', () => {
       draft.max = maxInput.value;
+      minInput.value = committed.min;
     });
     document.querySelector('[role="option"]')?.addEventListener('click', () => {
       committed.min = '1,000';
@@ -179,6 +262,31 @@ describe('Realtor.com assisted search launch', () => {
             ? 'Min $1K'
             : '';
     });
+    const commitPrice = (event: KeyboardEvent, bound: 'min' | 'max') => {
+      if (event.key !== 'Enter') return;
+      committed[bound] = draft[bound];
+      minInput.value = Number(committed.min).toLocaleString('en-US');
+      maxInput.value = Number(committed.max).toLocaleString('en-US');
+      heading.querySelector('.status')!.textContent =
+        committed.min && committed.max
+          ? '$1K - $6K'
+          : committed.min
+            ? 'Min $1K'
+            : 'Max $6K';
+    };
+    minInput.addEventListener('keydown', (event) => commitPrice(event, 'min'));
+    maxInput.addEventListener('keydown', (event) => commitPrice(event, 'max'));
+    document
+      .querySelector('#propertyType-townhome')
+      ?.addEventListener('click', () => {
+        // Realtor's shared drawer state may restore its previous price
+        // snapshot when a later filter causes the controls to re-render.
+        committed.min = '';
+        committed.max = '';
+        minInput.value = '';
+        maxInput.value = '';
+        heading.querySelector('.status')!.textContent = '';
+      });
     document
       .querySelector('button[aria-label="Open calendar"]')
       ?.addEventListener('click', () => {
@@ -200,7 +308,11 @@ describe('Realtor.com assisted search launch', () => {
           });
         document.body.append(calendar);
       });
-    const submit = vi.fn();
+    const submittedPrice = { min: '', max: '' };
+    const submit = vi.fn(() => {
+      submittedPrice.min = committed.min;
+      submittedPrice.max = committed.max;
+    });
     dom.window.document
       .querySelector('[data-testid="view-more-filters-results"]')
       ?.addEventListener('click', submit);
@@ -220,12 +332,11 @@ describe('Realtor.com assisted search launch', () => {
         minSquareFeet: 600,
         parkingAvailable: true,
         inUnitLaundry: true,
+        airConditioning: true,
       }),
     ).resolves.toEqual({
       applied: [
         'location',
-        'minListedRent',
-        'maxListedRent',
         'propertyTypes',
         'minBedrooms',
         'minBathrooms',
@@ -236,6 +347,9 @@ describe('Realtor.com assisted search launch', () => {
         'minSquareFeet',
         'parkingAvailable',
         'inUnitLaundry',
+        'airConditioning',
+        'maxListedRent',
+        'minListedRent',
       ],
       failed: [],
     });
@@ -246,8 +360,9 @@ describe('Realtor.com assisted search launch', () => {
     expect(
       dom.window.document.querySelector<HTMLInputElement>('#max-price-dropdown')
         ?.value,
-    ).toBe('6000');
+    ).toBe('6,000');
     expect(heading.querySelector('.status')?.textContent).toBe('$1K - $6K');
+    expect(submittedPrice).toEqual({ min: '1000', max: '6000' });
     for (const id of [
       'propertyType-apartments',
       'propertyType-condo',
@@ -273,6 +388,44 @@ describe('Realtor.com assisted search launch', () => {
         '#home-size-from-options',
       )?.value,
     ).toBe('750');
+    expect(submit).toHaveBeenCalledOnce();
+    dom.window.close();
+  });
+
+  it('waits for the requested market DOM before opening filters', async () => {
+    const dom = new JSDOM(
+      `
+        <h1>Apartments and homes for rent in Springfield, MO</h1>
+        <button id="stale-filters">Filters</button>
+      `,
+      { url: 'https://www.realtor.com/apartments/Boise_ID' },
+    );
+    installDom(dom);
+    const staleClick = vi.fn();
+    const freshClick = vi.fn();
+    const submit = vi.fn();
+    dom.window.document
+      .querySelector('#stale-filters')
+      ?.addEventListener('click', staleClick);
+    setTimeout(() => {
+      dom.window.document.querySelector('h1')!.textContent =
+        'Apartments and homes for rent in Boise, ID';
+      dom.window.document.querySelector('#stale-filters')?.remove();
+      const filters = dom.window.document.createElement('button');
+      filters.textContent = 'Filters';
+      filters.addEventListener('click', freshClick);
+      const results = dom.window.document.createElement('button');
+      results.dataset.testid = 'view-more-filters-results';
+      results.textContent = 'View homes';
+      results.addEventListener('click', submit);
+      dom.window.document.body.append(filters, results);
+    }, 50);
+
+    await expect(fillRealtorSearchPage({ location: 'Boise' })).resolves.toEqual(
+      { applied: ['location'], failed: [] },
+    );
+    expect(staleClick).not.toHaveBeenCalled();
+    expect(freshClick).toHaveBeenCalledOnce();
     expect(submit).toHaveBeenCalledOnce();
     dom.window.close();
   });
@@ -434,15 +587,12 @@ describe('Realtor.com assisted search launch', () => {
     input.addEventListener('input', () => {
       draft = input.value;
     });
-    heading.addEventListener('click', () => {
-      const expanded = heading.getAttribute('aria-expanded') === 'true';
-      heading.setAttribute('aria-expanded', String(!expanded));
-      if (expanded) {
-        setTimeout(() => {
-          input.value = Number(draft).toLocaleString('en-US');
-          heading.querySelector('.status')!.textContent = 'Max $6K';
-        }, 250);
-      }
+    input.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      setTimeout(() => {
+        input.value = Number(draft).toLocaleString('en-US');
+        heading.querySelector('.status')!.textContent = 'Max $6K';
+      }, 250);
     });
     const nativeEdit = vi.fn(() => {
       input.value += '6000';
@@ -461,6 +611,75 @@ describe('Realtor.com assisted search launch', () => {
     });
     expect(input.value).toBe('6,000');
     expect(nativeEdit).not.toHaveBeenCalled();
+    dom.window.close();
+  });
+
+  it('commits both arbitrary bounds across Realtor controlled-input rerenders', async () => {
+    const dom = new JSDOM(
+      `
+        <button>Filters</button>
+        <div data-testid="accordion-price" aria-expanded="true">Price <span class="status"></span></div>
+        <div class="input-dropdown"><input id="min-price-dropdown" /></div>
+        <div class="input-dropdown"><input id="max-price-dropdown" /></div>
+        <button data-testid="view-more-filters-results">View homes</button>
+      `,
+      { url: 'https://www.realtor.com/apartments/Arlington_TX' },
+    );
+    installDom(dom);
+    const { document } = dom.window;
+    const heading = document.querySelector<HTMLElement>(
+      '[data-testid="accordion-price"]',
+    )!;
+    const inputs = {
+      min: document.querySelector<HTMLInputElement>('#min-price-dropdown')!,
+      max: document.querySelector<HTMLInputElement>('#max-price-dropdown')!,
+    };
+    const draft = { min: '', max: '' };
+    const committed = { min: '', max: '' };
+    const render = () => {
+      inputs.min.value = committed.min
+        ? Number(committed.min).toLocaleString('en-US')
+        : '';
+      inputs.max.value = committed.max
+        ? Number(committed.max).toLocaleString('en-US')
+        : '';
+      heading.querySelector('.status')!.textContent =
+        committed.min && committed.max
+          ? `$${Number(committed.min).toLocaleString('en-US')} - $${Number(committed.max).toLocaleString('en-US')}`
+          : committed.min
+            ? `Min $${Number(committed.min).toLocaleString('en-US')}`
+            : committed.max
+              ? `Max $${Number(committed.max).toLocaleString('en-US')}`
+              : '';
+    };
+    for (const bound of ['min', 'max'] as const) {
+      inputs[bound].addEventListener('input', () => {
+        draft[bound] = inputs[bound].value;
+        const other = bound === 'min' ? 'max' : 'min';
+        inputs[other].value = committed[other];
+      });
+      inputs[bound].addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        committed[bound] = draft[bound];
+        render();
+      });
+    }
+
+    await expect(
+      fillRealtorSearchPage({
+        location: 'Arlington',
+        minListedRent: 2_190,
+        maxListedRent: 2_700,
+      }),
+    ).resolves.toEqual({
+      applied: ['location', 'maxListedRent', 'minListedRent'],
+      failed: [],
+    });
+    expect(inputs.min.value).toBe('2,190');
+    expect(inputs.max.value).toBe('2,700');
+    expect(heading.querySelector('.status')?.textContent).toBe(
+      '$2,190 - $2,700',
+    );
     dom.window.close();
   });
 
@@ -485,12 +704,15 @@ describe('Realtor.com assisted search launch', () => {
       origins: ['https://www.realtor.com/*'],
     });
     expect(chromeMock.create).toHaveBeenCalledWith({
-      url: 'https://www.realtor.com/apartments/springfield_MO',
+      url: 'https://www.realtor.com/rentals',
     });
     expect(chromeMock.executeScript).toHaveBeenLastCalledWith({
       target: { tabId: 71 },
       func: fillRealtorSearchPage,
       args: [search],
+    });
+    expect(chromeMock.update).toHaveBeenCalledWith(71, {
+      url: 'https://www.realtor.com/apartments/Springfield_MO/type-townhome/sqft-750/price-1000-6000/dog-friendly',
     });
   });
 
@@ -515,7 +737,7 @@ describe('Realtor.com assisted search launch', () => {
     });
   });
 
-  it('reports only the criteria Realtor can transfer without changing meaning', () => {
+  it('reports the criteria Realtor can transfer to its filter controls', () => {
     expect(
       realtorAppliedCriteria({
         location: 'Springfield, MO',
@@ -523,6 +745,6 @@ describe('Realtor.com assisted search launch', () => {
         minSquareFeet: 600,
         airConditioning: true,
       }),
-    ).toEqual(['location', 'minSquareFeet']);
+    ).toEqual(['location', 'minSquareFeet', 'airConditioning']);
   });
 });

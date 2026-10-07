@@ -1565,29 +1565,26 @@ export function AboutPrivacy({
       </header>
 
       <section aria-labelledby="privacy-heading">
-        <h2 id="privacy-heading">Listing data and AI review</h2>
+        <h2 id="privacy-heading">How RentSight uses your data</h2>
         <p>
-          Drafts, customer edits, saved listings, estimates, preferences, and
-          the current chat draft are stored in this Chrome profile. For
-          signed-in RentSight+ accounts, AI review sends captured listing text,
-          structured listing data, the listing URL, selected unit, and
-          preliminary values to RentSight’s backend and OpenAI. Customer
-          overrides and household inputs are not included in extraction
-          requests.
+          RentSight stores drafts, edits, saved listings, estimates,
+          preferences, and unfinished chat text in this Chrome profile.
         </p>
         <p>
-          When you use Ask, RentSight sends your message and relevant context
-          from the current or selected saved listings to RentSight’s backend and
-          OpenAI. That context can include listing details, calculations, values
-          you changed, property notes, and household inputs. Successful
-          conversations are stored with your account for up to 30 days so you
-          can reopen them, and you can delete them in Ask.
+          When you request AI Review, RentSight securely sends the listing
+          information needed to analyze the property to its service providers.
+          Your edits and household inputs are not included. When you use Ask,
+          the information sent may also include your message, selected listing
+          details, calculations, edits, property notes, and household inputs
+          needed to answer your request. Conversations are stored with your
+          account for up to 30 days so you can reopen them, and you can delete
+          them in Ask.
         </p>
         <p>
-          RentSight inspects only the active page after you click its toolbar
-          icon. Full page captures are not saved locally. JSON and CSV exports
-          may contain property addresses and your financial assumptions, so
-          store and share them carefully.
+          RentSight reads only the active page when you ask it to inspect a
+          listing, and it does not save full-page captures. Exports may contain
+          property addresses and financial assumptions, so store and share them
+          carefully.
         </p>
         <a
           href="https://umbrellabrand.co/rentsight/privacy"
@@ -1754,6 +1751,7 @@ function SavedListingsView({
         {askAboutListings ? (
           <button
             type="button"
+            className="collection-ask"
             disabled={selected.length === 0 || selected.length > 5}
             title={
               selected.length > 5
@@ -1771,6 +1769,7 @@ function SavedListingsView({
         ) : null}
         <button
           type="button"
+          className="collection-select-all"
           disabled={records.length === 0 || selected.length === records.length}
           onClick={() => setSelected(records.map((record) => record.id))}
         >
@@ -1973,7 +1972,7 @@ function ComparisonView({
         ) : null}
       </header>
       {items.length < 2 ? (
-        <section>
+        <section className="comparison-empty">
           <h2>Select at least two listings</h2>
           <p>Use the Saved view to choose listings for comparison.</p>
         </section>

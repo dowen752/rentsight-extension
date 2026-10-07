@@ -41,15 +41,28 @@ function SearchNumberInput({
   label,
   value,
   onChange,
+  emptyValue,
   step = 1,
   min = 0,
 }: {
   label: string;
   value: number | undefined;
   onChange: (value: number | undefined) => void;
+  emptyValue?: number;
   step?: number;
   min?: number;
 }) {
+  const [draft, setDraft] = useState({
+    source: value,
+    text: value === undefined ? '' : String(value),
+  });
+  const displayedValue =
+    draft.source === value
+      ? draft.text
+      : value === undefined
+        ? ''
+        : String(value);
+
   return (
     <label>
       {label}
@@ -57,12 +70,25 @@ function SearchNumberInput({
         type="number"
         min={min}
         step={step}
-        value={value ?? ''}
-        onChange={(event) =>
-          onChange(
-            event.target.value === '' ? undefined : event.target.valueAsNumber,
-          )
-        }
+        value={displayedValue}
+        onChange={(event) => {
+          const nextDraft = event.target.value;
+          const nextNumber = event.target.valueAsNumber;
+          setDraft({
+            source:
+              nextDraft !== '' && Number.isFinite(nextNumber)
+                ? nextNumber
+                : value,
+            text: nextDraft,
+          });
+          if (nextDraft !== '' && Number.isFinite(nextNumber))
+            onChange(event.target.valueAsNumber);
+        }}
+        onBlur={() => {
+          if (displayedValue !== '' || emptyValue === undefined) return;
+          setDraft({ source: emptyValue, text: String(emptyValue) });
+          onChange(emptyValue);
+        }}
       />
     </label>
   );
@@ -96,21 +122,25 @@ function HouseholdDetails({
           label="Occupants"
           value={profile.occupants}
           min={1}
+          emptyValue={1}
           onChange={(value) => update('occupants', value ?? 1)}
         />
         <SearchNumberInput
           label="Cats"
           value={profile.cats}
+          emptyValue={0}
           onChange={(value) => update('cats', value ?? 0)}
         />
         <SearchNumberInput
           label="Small dogs"
           value={profile.smallDogs}
+          emptyValue={0}
           onChange={(value) => update('smallDogs', value ?? 0)}
         />
         <SearchNumberInput
           label="Large dogs"
           value={profile.largeDogs}
+          emptyValue={0}
           onChange={(value) => update('largeDogs', value ?? 0)}
         />
       </div>
@@ -176,6 +206,9 @@ export function FindRentalsView({
   const [submittedSearch, setSubmittedSearch] = useState<RentalSearch>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [launchingSiteIds, setLaunchingSiteIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [message, setMessage] = useState('');
   const [issues, setIssues] = useState<
     ReturnType<typeof normalizeRentalSearch>['issues']
@@ -288,6 +321,8 @@ export function FindRentalsView({
   };
 
   const launch = async (siteId: string, url: string) => {
+    if (launchingSiteIds.has(siteId)) return;
+    setLaunchingSiteIds((current) => new Set(current).add(siteId));
     setMessage('');
     try {
       if (siteId === 'apartments' && activeSearch) {
@@ -332,6 +367,12 @@ export function FindRentalsView({
           ? error.message
           : 'Could not open that rental site.',
       );
+    } finally {
+      setLaunchingSiteIds((current) => {
+        const next = new Set(current);
+        next.delete(siteId);
+        return next;
+      });
     }
   };
 
@@ -490,7 +531,7 @@ export function FindRentalsView({
             className="primary-action"
             disabled={loading || saving}
           >
-            {saving ? 'Preparing…' : 'Show rental sites'}
+            {saving ? 'Saving…' : 'Save Preferences'}
           </button>
           <button
             type="button"
@@ -520,51 +561,53 @@ export function FindRentalsView({
             </p>
           </div>
           <div className="search-site-list">
-            {results.map(({ site, result }) => (
-              <article className="search-site-card" key={site.id}>
-                <div>
-                  <h3>{site.name}</h3>
-                  <p>{site.description}</p>
-                </div>
-                {result.status === 'ready' ? (
-                  <>
-                    <div className="search-transfer-summary">
-                      {result.link.applied.length > 0 ? (
-                        <p>
-                          <strong>
-                            {result.link.transferMode === 'page'
-                              ? 'Will apply:'
-                              : 'Applied:'}
-                          </strong>{' '}
-                          {criterionList(result.link.applied)}
-                        </p>
-                      ) : (
-                        <p>
-                          No preferences can be transferred in this first
-                          adapter.
-                        </p>
-                      )}
-                      {result.link.omitted.length > 0 && (
-                        <p>
-                          <strong>Check on site:</strong>{' '}
-                          {criterionList(result.link.omitted)}
-                        </p>
+            {results.map(({ site, result }) => {
+              const launching = launchingSiteIds.has(site.id);
+              return (
+                <article
+                  className="search-site-card"
+                  key={site.id}
+                  aria-busy={launching}
+                >
+                  <div>
+                    <div className="search-site-title">
+                      <h3>{site.name}</h3>
+                      {launching && (
+                        <span
+                          className="site-launch-spinner"
+                          role="status"
+                          aria-label={`Applying filters to ${site.name}`}
+                        />
                       )}
                     </div>
-                    <button
-                      type="button"
-                      className="site-open-action"
-                      onClick={() => void launch(site.id, result.link.url)}
-                    >
-                      Open {site.name}
-                      <span aria-hidden="true">↗</span>
-                    </button>
-                  </>
-                ) : (
-                  <p className="search-site-unavailable">{result.reason}</p>
-                )}
-              </article>
-            ))}
+                    <p>{site.description}</p>
+                  </div>
+                  {result.status === 'ready' ? (
+                    <>
+                      {result.link.omitted.length > 0 && (
+                        <div className="search-transfer-summary">
+                          <p>
+                            <strong>Check on site:</strong>{' '}
+                            {criterionList(result.link.omitted)}
+                          </p>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        className="site-open-action"
+                        disabled={launching}
+                        onClick={() => void launch(site.id, result.link.url)}
+                      >
+                        Open {site.name}
+                        <span aria-hidden="true">↗</span>
+                      </button>
+                    </>
+                  ) : (
+                    <p className="search-site-unavailable">{result.reason}</p>
+                  )}
+                </article>
+              );
+            })}
           </div>
         </section>
       )}

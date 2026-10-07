@@ -14,6 +14,7 @@ export const APARTMENTS_SUPPORTED_CRITERIA: readonly SearchCriterion[] = [
   'catsAllowed',
   'smallDogsAllowed',
   'largeDogsAllowed',
+  'moveInDate',
   'minSquareFeet',
   'parkingAvailable',
   'inUnitLaundry',
@@ -23,9 +24,9 @@ export const APARTMENTS_SUPPORTED_CRITERIA: readonly SearchCriterion[] = [
 export function apartmentsAppliedCriteria(
   search: RentalSearch,
 ): SearchCriterion[] {
-  // Apartments.com's structured controls exist on location results pages, not
-  // its homepage. Without a location, open the site without promising filters.
-  if (!search.location) return [];
+  // Apartments.com resolves the raw location before RentSight applies the
+  // structured controls that exist on its results page.
+  if (!search.location?.trim()) return [];
   const applied: SearchCriterion[] = [];
   applied.push('location');
   if (search.minListedRent !== undefined) applied.push('minListedRent');
@@ -48,6 +49,7 @@ export function apartmentsAppliedCriteria(
   if (search.catsAllowed) applied.push('catsAllowed');
   if (search.smallDogsAllowed) applied.push('smallDogsAllowed');
   if (search.largeDogsAllowed) applied.push('largeDogsAllowed');
+  if (search.moveInDate) applied.push('moveInDate');
   if (
     search.minSquareFeet !== undefined &&
     Number.isFinite(search.minSquareFeet) &&

@@ -18,6 +18,7 @@ export const REALTOR_SUPPORTED_CRITERIA = [
   'minSquareFeet',
   'parkingAvailable',
   'inUnitLaundry',
+  'airConditioning',
 ] as const satisfies readonly SearchCriterion[];
 
 function locationSlug(value: string): string {
@@ -74,14 +75,14 @@ export function realtorAppliedCriteria(
     applied.push('minSquareFeet');
   if (search.parkingAvailable) applied.push('parkingAvailable');
   if (search.inUnitLaundry) applied.push('inUnitLaundry');
+  if (search.airConditioning) applied.push('airConditioning');
   return applied;
 }
 
 export function realtorNeedsPageFill(search: RentalSearch): boolean {
-  if (!search.location) return false;
-  if (!realtorLocationPath(search.location)) return true;
+  if (!search.location?.trim()) return false;
   const requested = new Set(requestedSearchCriteria(search));
-  return realtorAppliedCriteria(search).some(
-    (criterion) => criterion !== 'location' && requested.has(criterion),
+  return realtorAppliedCriteria(search).some((criterion) =>
+    requested.has(criterion),
   );
 }

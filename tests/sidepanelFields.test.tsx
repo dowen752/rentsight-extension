@@ -274,9 +274,11 @@ describe('about and privacy', () => {
     );
 
     expect(markup).toContain('When you use Ask');
-    expect(markup).toContain('values you changed');
+    expect(markup).toContain('calculations, edits, property notes');
     expect(markup).toContain('household inputs');
     expect(markup).toContain('stored with your account for up to 30 days');
+    expect(markup).not.toContain('OpenAI');
+    expect(markup).not.toContain('RentSight’s backend');
     expect(markup).toContain('Permanently delete all of your RentSight data');
     expect(markup).toContain('>Delete all data</button>');
     expect(markup).not.toContain('Manage local data');
@@ -356,7 +358,7 @@ describe('unavailable listing workspace', () => {
     expect(markup).toContain('City, state or ZIP');
     expect(markup).toContain('Minimum listed rent');
     expect(markup).toContain('Parking available');
-    expect(markup).toContain('Show rental sites');
+    expect(markup).toContain('Save Preferences');
     expect(markup).toContain('Clear search');
   });
 });

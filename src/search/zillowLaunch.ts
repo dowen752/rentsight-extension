@@ -169,20 +169,56 @@ export async function fillZillowSearchPage(
     }
     return labelElement.parentElement ?? undefined;
   };
-  const clickChoice = (
+  const roomGroup = (
+    dialog: HTMLElement,
+    ariaLabel: string,
+    heading: RegExp,
+  ): HTMLElement | undefined =>
+    dialog.querySelector<HTMLElement>(
+      `[role="group"][aria-label="${ariaLabel}"]`,
+    ) ?? groupFor(dialog, heading);
+  const roomChoice = (
     group: HTMLElement,
     labels: readonly string[],
-  ): boolean => {
-    const choice = Array.from(
-      group.querySelectorAll<HTMLButtonElement>('button'),
-    ).find((button) =>
-      labels.some(
-        (label) => normalizedText(button).toLowerCase() === label.toLowerCase(),
-      ),
+  ): HTMLButtonElement | undefined =>
+    Array.from(group.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) =>
+        labels.some(
+          (label) =>
+            normalizedText(button).toLowerCase() === label.toLowerCase(),
+        ),
     );
-    if (!choice) return false;
-    if (choice.getAttribute('aria-pressed') !== 'true') choice.click();
-    return true;
+  const selectRoomChoice = async (
+    ariaLabel: string,
+    heading: RegExp,
+    labels: readonly string[],
+  ): Promise<boolean> => {
+    try {
+      const choice = await waitFor(() => {
+        const dialog = visibleDialog();
+        const group = dialog
+          ? roomGroup(dialog, ariaLabel, heading)
+          : undefined;
+        return group ? roomChoice(group, labels) : undefined;
+      });
+      if (choice.getAttribute('aria-pressed') !== 'true') choice.click();
+
+      // Zillow updates toggle state asynchronously. Re-read the live dialog so
+      // a later click or submit cannot race a React render and preserve "Any".
+      await waitFor(() => {
+        const dialog = visibleDialog();
+        const group = dialog
+          ? roomGroup(dialog, ariaLabel, heading)
+          : undefined;
+        const updated = group ? roomChoice(group, labels) : undefined;
+        return updated?.getAttribute('aria-pressed') === 'true'
+          ? updated
+          : undefined;
+      }, 2_000);
+      return true;
+    } catch {
+      return false;
+    }
   };
   const labeledChoice = (
     root: HTMLElement,
@@ -361,35 +397,41 @@ export async function fillZillowSearchPage(
     ...(search.minBathrooms !== undefined ? (['minBathrooms'] as const) : []),
   ];
   if (roomCriteria.length) {
+    const appliedHere: SearchCriterion[] = [];
     try {
-      const dialog = await openDialog('beds-filters-button');
+      await openDialog('beds-filters-button');
       if (search.minBedrooms !== undefined && search.minBedrooms > 0) {
-        const group = groupFor(dialog, /^bedrooms?$/i);
         if (
-          !group ||
-          !clickChoice(group, [
+          await selectRoomChoice('Beds Select', /^bedrooms?$/i, [
             `${search.minBedrooms}+`,
             String(search.minBedrooms),
           ])
-        )
-          throw new Error('Bedroom control is unavailable.');
-      }
+        ) {
+          appliedHere.push('minBedrooms');
+        } else recordFailure(['minBedrooms']);
+      } else if (search.minBedrooms !== undefined)
+        appliedHere.push('minBedrooms');
       if (search.minBathrooms !== undefined && search.minBathrooms > 0) {
-        const group = groupFor(dialog, /^bathrooms?$/i);
         if (
-          !group ||
-          !clickChoice(group, [
+          await selectRoomChoice('Baths Select', /^bathrooms?$/i, [
             `${search.minBathrooms}+`,
             String(search.minBathrooms),
           ])
-        )
-          throw new Error('Bathroom control is unavailable.');
-      }
+        ) {
+          appliedHere.push('minBathrooms');
+        } else recordFailure(['minBathrooms']);
+      } else if (search.minBathrooms !== undefined)
+        appliedHere.push('minBathrooms');
+
+      const dialog = visibleDialog();
+      if (!dialog) throw new Error('Room filter dialog is unavailable.');
       await clickDone(dialog);
-      recordApplied([...roomCriteria]);
     } catch {
-      recordFailure([...roomCriteria]);
+      recordFailure(
+        roomCriteria.filter((criterion) => !appliedHere.includes(criterion)),
+      );
     }
+    recordApplied(appliedHere);
   }
 
   let propertyTypesHandled = false;

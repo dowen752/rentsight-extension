@@ -23,6 +23,28 @@ export interface RealtorLocationResult {
   submitted: boolean;
 }
 
+export function withRealtorPriceRange(
+  sourceUrl: string,
+  minimum: number | undefined,
+  maximum: number | undefined,
+): string {
+  if (minimum === undefined && maximum === undefined) return sourceUrl;
+  const url = new URL(sourceUrl);
+  const segments = url.pathname.split('/').filter(Boolean);
+  const withoutPrice = segments.filter(
+    (segment) => !segment.startsWith('price-'),
+  );
+  const price = `price-${minimum ?? 'na'}-${maximum ?? 'na'}`;
+  const squareFeetIndex = withoutPrice.findIndex((segment) =>
+    segment.startsWith('sqft-'),
+  );
+  const insertAt =
+    squareFeetIndex >= 0 ? squareFeetIndex + 1 : withoutPrice.length;
+  withoutPrice.splice(insertAt, 0, price);
+  url.pathname = `/${withoutPrice.join('/')}`;
+  return url.toString();
+}
+
 function waitForRealtorTab(tabId: number): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -140,13 +162,6 @@ export async function resolveRealtorLocationPage(
     const style = getComputedStyle(element);
     return style.display !== 'none' && style.visibility !== 'hidden';
   };
-  const hasResultsControls = () =>
-    location.pathname.startsWith('/apartments/') &&
-    Array.from(document.querySelectorAll<HTMLButtonElement>('button')).some(
-      (button) => (button.textContent ?? '').trim() === 'Filters',
-    );
-  if (hasResultsControls()) return { ready: true, submitted: false };
-
   const deadline = Date.now() + 5_000;
   let input: HTMLInputElement | null = null;
   while (Date.now() < deadline && !input) {
@@ -174,18 +189,52 @@ export async function resolveRealtorLocationPage(
   );
   input.dispatchEvent(new Event('change', { bubbles: true }));
 
+  // Realtor.com redirects /rentals to the browser's most recent market. Do
+  // not accept that restored results page as resolved. Prefer the site's own
+  // autocomplete result because it carries Realtor's canonical place data,
+  // rather than merely submitting text against the previously loaded market.
   let firstSuggestion: HTMLElement | undefined;
   const suggestionDeadline = Date.now() + 4_000;
   while (Date.now() < suggestionDeadline && !firstSuggestion) {
     firstSuggestion = Array.from(
       document.querySelectorAll<HTMLElement>('[role="option"]'),
     ).find(
-      (option) => visible(option) && Boolean((option.textContent ?? '').trim()),
+      (option) =>
+        visible(option) &&
+        !option.hasAttribute('disabled') &&
+        option.getAttribute('aria-disabled') !== 'true' &&
+        Boolean((option.textContent ?? '').trim()),
     );
     if (!firstSuggestion) await sleep(100);
   }
-  if (!firstSuggestion) return { ready: false, submitted: false };
-  firstSuggestion.click();
+  if (firstSuggestion) {
+    firstSuggestion.click();
+    return { ready: false, submitted: true };
+  }
+
+  // Some Realtor variants do not expose suggestions. Their submit control is
+  // currently an icon-only button, so match its accessible label as well as
+  // legacy visible text and prefer the control associated with this input.
+  const searchButton = Array.from(
+    (
+      input.closest('form') ??
+      input.parentElement ??
+      document
+    ).querySelectorAll<HTMLButtonElement>('button'),
+  ).find((button) => {
+    if (!visible(button) || button.disabled) return false;
+    const label = [
+      button.textContent,
+      button.getAttribute('aria-label'),
+      button.getAttribute('title'),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    return /search/i.test(label);
+  });
+  if (!searchButton) return { ready: false, submitted: false };
+  searchButton.click();
   return { ready: false, submitted: true };
 }
 
@@ -228,74 +277,18 @@ export async function fillRealtorSearchPage(
   };
   const priceHeading = () =>
     document.querySelector<HTMLElement>('[data-testid="accordion-price"]');
-  const commitPrice = async (selector: string, requested: number) => {
+  const setPrice = async (selector: string, requested: number) => {
     const heading = priceHeading();
     if (!heading) throw new Error('Realtor.com price filter was unavailable.');
-    // Blur is not enough to commit these controlled inputs. Collapsing and
-    // reopening also checks the value survived a Realtor.com render.
     if (heading.getAttribute('aria-expanded') !== 'true') {
       heading.click();
       await waitFor(() =>
         heading.getAttribute('aria-expanded') === 'true' ? heading : undefined,
       );
     }
-    heading.click();
-    await waitFor(() =>
-      heading.getAttribute('aria-expanded') === 'false' ? heading : undefined,
-    );
-    heading.click();
-    await waitFor(() => {
-      const input = document.querySelector<HTMLInputElement>(selector);
-      return heading.getAttribute('aria-expanded') === 'true' && input
-        ? input
-        : undefined;
-    });
-    await waitFor(() => {
-      const committed = document.querySelector<HTMLInputElement>(selector);
-      const summary = heading.querySelector('.status')?.textContent ?? '';
-      const summaryAmounts = Array.from(
-        summary.matchAll(/\$\s*([\d,.]+)\s*([km]?)/gi),
-        ([, number, unit]) =>
-          Math.round(
-            Number(number.replace(/,/g, '')) *
-              (unit.toLowerCase() === 'k'
-                ? 1_000
-                : unit.toLowerCase() === 'm'
-                  ? 1_000_000
-                  : 1),
-          ),
-      );
-      return Number(committed?.value.replace(/[^0-9]/g, '')) === requested &&
-        summaryAmounts.includes(requested)
-        ? (committed ?? undefined)
-        : undefined;
-    }, 2_000);
-  };
-  const setPrice = async (selector: string, requested: number) => {
     const input = await waitFor(
       () => document.querySelector<HTMLInputElement>(selector) ?? undefined,
     );
-    input.click();
-    const option = await waitFor(
-      () =>
-        Array.from(
-          input
-            .closest('.input-dropdown')
-            ?.querySelectorAll<HTMLElement>(
-              '[role="listbox"] [role="option"]',
-            ) ?? [],
-        ).find(
-          (candidate) =>
-            Number(candidate.textContent?.replace(/[^0-9]/g, '')) === requested,
-        ),
-      500,
-    ).catch(() => undefined);
-    if (option) {
-      option.click();
-      await commitPrice(selector, requested);
-      return;
-    }
-
     input.focus();
     input.select();
     const setter = Object.getOwnPropertyDescriptor(
@@ -313,9 +306,41 @@ export async function fillRealtorSearchPage(
         : new Event('input', { bubbles: true }),
     );
     input.dispatchEvent(new Event('change', { bubbles: true }));
-    // Never retry by typing into this controlled input: the site may accept
-    // the first edit after a render, causing a second edit to append digits.
-    await commitPrice(selector, requested);
+
+    // Each bound is its own controlled draft. Commit and verify it before
+    // editing the other bound, otherwise Realtor may discard the first draft
+    // when the second input causes the price controls to re-render.
+    for (const type of ['keydown', 'keypress', 'keyup']) {
+      input.dispatchEvent(
+        new KeyboardEvent(type, {
+          key: 'Enter',
+          code: 'Enter',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }
+    input.blur();
+    await waitFor(() => {
+      const summary = heading.querySelector('.status')?.textContent ?? '';
+      const summaryAmounts = Array.from(
+        summary.matchAll(/\$\s*([\d,.]+)\s*([km]?)/gi),
+        ([, number, unit]) =>
+          Math.round(
+            Number(number.replace(/,/g, '')) *
+              (unit.toLowerCase() === 'k'
+                ? 1_000
+                : unit.toLowerCase() === 'm'
+                  ? 1_000_000
+                  : 1),
+          ),
+      );
+      const committed = document.querySelector<HTMLInputElement>(selector);
+      return Number(committed?.value.replace(/[^0-9]/g, '')) === requested &&
+        summaryAmounts.includes(requested)
+        ? (committed ?? undefined)
+        : undefined;
+    }, 2_000);
   };
   const setMoveInDate = async (requested: string) => {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(requested);
@@ -499,6 +524,7 @@ export async function fillRealtorSearchPage(
       : []),
     ...(search.parkingAvailable ? (['parkingAvailable'] as const) : []),
     ...(search.inUnitLaundry ? (['inUnitLaundry'] as const) : []),
+    ...(search.airConditioning ? (['airConditioning'] as const) : []),
   ];
   if (
     location.origin !== 'https://www.realtor.com' ||
@@ -507,6 +533,23 @@ export async function fillRealtorSearchPage(
     return { applied, failed: supportedRequested };
   }
   if (search.location) record(applied, 'location');
+
+  // Realtor.com changes the URL before its client-rendered results tree has
+  // finished replacing the prior market. Clicking controls from that stale
+  // tree makes the drawer disappear midway through automation.
+  const initialHeading = document.querySelector<HTMLElement>('h1');
+  if (initialHeading && search.location) {
+    const requestedPlace = search.location
+      .split(',')[0]
+      .trim()
+      .toLocaleLowerCase();
+    await waitFor(() => {
+      const heading = document.querySelector<HTMLElement>('h1');
+      return heading?.textContent?.toLocaleLowerCase().includes(requestedPlace)
+        ? heading
+        : undefined;
+    });
+  }
 
   const filterButton = await waitFor(() =>
     Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
@@ -520,17 +563,6 @@ export async function fillRealtorSearchPage(
         'button[data-testid="view-more-filters-results"]',
       ) ?? undefined,
   );
-
-  if (search.minListedRent !== undefined) {
-    await apply(['minListedRent'], () =>
-      setPrice('#min-price-dropdown', search.minListedRent!),
-    );
-  }
-  if (search.maxListedRent !== undefined) {
-    await apply(['maxListedRent'], () =>
-      setPrice('#max-price-dropdown', search.maxListedRent!),
-    );
-  }
 
   if (search.propertyTypes?.length) {
     const propertyTypes = search.propertyTypes;
@@ -638,6 +670,25 @@ export async function fillRealtorSearchPage(
       clickLabeledCheckbox('option-washerDryer', /^unit features/i),
     );
   }
+  if (search.airConditioning) {
+    await apply(['airConditioning'], () =>
+      clickLabeledCheckbox('option-centralAir', /^unit features/i),
+    );
+  }
+
+  // Realtor can restore an older price-range snapshot when another filter
+  // updates its shared drawer state. Apply price last, then commit each bound
+  // independently so no later control can overwrite the accepted range.
+  if (search.maxListedRent !== undefined) {
+    await apply(['maxListedRent'], () =>
+      setPrice('#max-price-dropdown', search.maxListedRent!),
+    );
+  }
+  if (search.minListedRent !== undefined) {
+    await apply(['minListedRent'], () =>
+      setPrice('#min-price-dropdown', search.minListedRent!),
+    );
+  }
 
   // Committing the drawer once preserves every successful filter even if an
   // unrelated optional control was missing.
@@ -653,6 +704,8 @@ export async function launchRealtorSearch(
   if (destination.origin !== REALTOR_ORIGIN)
     throw new Error('RentSight blocked an unexpected Realtor.com destination.');
   destination.hash = '';
+  destination.pathname = '/rentals';
+  destination.search = '';
 
   if (!realtorNeedsPageFill(search)) {
     await chrome.tabs.create({ url: destination.toString() });
@@ -680,6 +733,8 @@ export async function launchRealtorSearch(
 
   try {
     await waitForRealtorTab(tab.id);
+    const locationPage = await chrome.tabs.get(tab.id);
+    const previousLocationUrl = locationPage.url ?? destination.toString();
     const [locationInjection] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: resolveRealtorLocationPage,
@@ -688,7 +743,7 @@ export async function launchRealtorSearch(
     const locationResult = locationInjection?.result as
       RealtorLocationResult | undefined;
     if (locationResult?.submitted) {
-      await waitForRealtorNavigation(tab.id, destination.toString());
+      await waitForRealtorNavigation(tab.id, previousLocationUrl);
     } else if (!locationResult?.ready) {
       throw new Error('Realtor.com could not resolve the requested location.');
     }
@@ -697,6 +752,8 @@ export async function launchRealtorSearch(
       (criterion) => criterion !== 'location',
     );
     if (!requestedFilters.length) return { automated: true };
+    const filterPage = await chrome.tabs.get(tab.id);
+    const previousFilterUrl = filterPage.url ?? previousLocationUrl;
     const [injection] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: fillRealtorSearchPage,
@@ -704,6 +761,28 @@ export async function launchRealtorSearch(
     });
     const result = injection?.result as RealtorPageFillResult | undefined;
     if (!result) throw new Error('Realtor.com did not return filter results.');
+    const hasNonPriceFilters = requestedFilters.some(
+      (criterion) =>
+        criterion !== 'minListedRent' && criterion !== 'maxListedRent',
+    );
+    if (hasNonPriceFilters)
+      await waitForRealtorNavigation(tab.id, previousFilterUrl);
+    if (
+      search.minListedRent !== undefined ||
+      search.maxListedRent !== undefined
+    ) {
+      const filteredTab = await chrome.tabs.get(tab.id);
+      const filteredUrl = filteredTab.url ?? previousLocationUrl;
+      const pricedUrl = withRealtorPriceRange(
+        filteredUrl,
+        search.minListedRent,
+        search.maxListedRent,
+      );
+      if (pricedUrl !== filteredUrl) {
+        await chrome.tabs.update(tab.id, { url: pricedUrl });
+        await waitForRealtorTab(tab.id);
+      }
+    }
     const unapplied = requestedFilters.filter(
       (criterion) => !result.applied.includes(criterion),
     );

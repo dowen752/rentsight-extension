@@ -53,19 +53,25 @@ describe('HotPads assisted search', () => {
          Bathrooms <div aria-label="Number of bathrooms"><button aria-pressed="false">1+</button><button aria-pressed="false">2+</button><button aria-pressed="false">3+</button><button aria-pressed="false">4+</button></div>
          <button>Done</button>
        </div>
+       <button aria-expanded="false">Any price</button>
+       <div role="dialog" id="price">Price range
+         <input aria-label="Minimum price" /><input aria-label="Maximum price" />
+         <button id="price-done">Done</button>
+       </div>
        <button data-testid="button-all-filters">Filters</button>
-       <div role="dialog" id="filters">Price range
-         <input data-testid="filter-price-min" /><input data-testid="filter-price-max" />
-         <button data-testid="filter-type-apartment" aria-pressed="false">Apartment</button>
-         <button data-testid="filter-type-condo" aria-pressed="false">Condo</button>
-         <button data-testid="filter-type-house" aria-pressed="false">House</button>
-         <input aria-label="Minimum square feet" /><input type="date" />
-         <button data-testid="filter-pet-cats" aria-pressed="false">Cats</button>
-         <button data-testid="filter-pet-dogs" aria-pressed="false">Dogs</button>
-         <button data-testid="filter-amenity-parking" aria-pressed="false">Parking</button>
-         <button data-testid="filter-amenity-in-unit-laundry" aria-pressed="false">In-unit laundry</button>
-         <button data-testid="filter-amenity-ac" aria-pressed="false">A/C</button>
-         <button data-testid="filter-apply">Apply filters</button>
+       <div role="dialog" id="filters">Property type Square feet
+         <button role="checkbox" aria-checked="false">Apartment</button>
+         <button role="checkbox" aria-checked="false">Condo</button>
+         <button role="checkbox" aria-checked="false">House</button>
+         <button role="checkbox" aria-checked="false">Townhome</button>
+         <input aria-label="Minimum square feet" />
+         <input type="date" aria-label="Move-in by" />
+         <button role="checkbox" aria-checked="false">Cats</button>
+         <button role="checkbox" aria-checked="false">Dogs</button>
+         <button role="checkbox" aria-checked="false">Parking</button>
+         <button role="checkbox" aria-checked="false">In-unit laundry</button>
+         <button role="checkbox" aria-checked="false">A/C</button>
+         <button id="filter-apply">Apply filters</button>
        </div>`,
       'https://hotpads.com/chicago-il/apartments-for-rent',
     );
@@ -75,11 +81,17 @@ describe('HotPads assisted search', () => {
       button.addEventListener('click', () => {
         if (button.hasAttribute('aria-pressed'))
           button.setAttribute('aria-pressed', 'true');
+        if (button.hasAttribute('aria-checked'))
+          button.setAttribute('aria-checked', 'true');
       });
     const submit = vi.fn();
     dom.window.document
-      .querySelector('[data-testid="filter-apply"]')!
+      .querySelector('#filter-apply')!
       .addEventListener('click', submit);
+    const priceDone = vi.fn();
+    dom.window.document
+      .querySelector('#price-done')!
+      .addEventListener('click', priceDone);
 
     await expect(
       fillHotpadsSearchPage({
@@ -119,6 +131,25 @@ describe('HotPads assisted search', () => {
       submitted: true,
     });
     expect(submit).toHaveBeenCalledOnce();
+    expect(priceDone).toHaveBeenCalledOnce();
+    expect(
+      Array.from(
+        dom.window.document.querySelectorAll<HTMLButtonElement>(
+          '#rooms [aria-label="Number of bedrooms"] button',
+        ),
+      )
+        .find((button) => button.textContent === '3')
+        ?.getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(
+      Array.from(
+        dom.window.document.querySelectorAll<HTMLButtonElement>(
+          '#rooms [aria-label="Number of bedrooms"] button',
+        ),
+      )
+        .find((button) => button.textContent === '4+')
+        ?.getAttribute('aria-pressed'),
+    ).toBe('false');
     dom.window.close();
   });
 

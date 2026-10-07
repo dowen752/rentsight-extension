@@ -32,6 +32,42 @@ describe('Search workflow', () => {
     vi.restoreAllMocks();
   });
 
+  it('allows household counts to be cleared and restores defaults on blur', async () => {
+    const updateHouseholdProfile = vi.fn();
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <FindRentalsView updateHouseholdProfile={updateHouseholdProfile} />,
+      );
+    });
+    const inputFor = (labelText: string) =>
+      Array.from(container.querySelectorAll('label'))
+        .find((label) => label.textContent?.includes(labelText))!
+        .querySelector<HTMLInputElement>('input')!;
+    const occupants = inputFor('Occupants');
+    const cats = inputFor('Cats');
+
+    await act(async () => {
+      enter(occupants, '');
+      enter(cats, '');
+    });
+    expect(occupants.value).toBe('');
+    expect(cats.value).toBe('');
+
+    await act(async () => {
+      occupants.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      cats.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+    expect(occupants.value).toBe('1');
+    expect(cats.value).toBe('0');
+    expect(updateHouseholdProfile).toHaveBeenCalledWith({
+      occupants: 1,
+      cats: 0,
+      smallDogs: 0,
+      largeDogs: 0,
+    });
+  });
+
   it('saves optional preferences, shows all sites, and opens a routed search', async () => {
     const openUrl = vi.fn().mockResolvedValue(undefined);
     const openApartments = vi.fn().mockResolvedValue({ automated: true });
@@ -40,7 +76,13 @@ describe('Search workflow', () => {
     const openRent = vi.fn().mockResolvedValue({ automated: true });
     const openHotpads = vi.fn().mockResolvedValue({ automated: true });
     const openZumper = vi.fn().mockResolvedValue({ automated: true });
-    const openZillow = vi.fn().mockResolvedValue({ automated: true });
+    let finishZillow: ((outcome: { automated: boolean }) => void) | undefined;
+    const openZillow = vi.fn(
+      (_search: unknown, _bootstrapUrl: string) =>
+        new Promise<{ automated: boolean }>((resolve) => {
+          finishZillow = resolve;
+        }),
+    );
     const updateHouseholdProfile = vi.fn();
     const householdProfile: HouseholdProfile = {
       occupants: 1,
@@ -91,7 +133,7 @@ describe('Search workflow', () => {
     });
     await act(async () => {
       Array.from(container.querySelectorAll('button'))
-        .find((button) => button.textContent?.includes('Show rental sites'))!
+        .find((button) => button.textContent?.includes('Save Preferences'))!
         .click();
     });
 
@@ -104,13 +146,12 @@ describe('Search workflow', () => {
       },
     });
     expect(container.querySelectorAll('.search-site-card')).toHaveLength(7);
-    expect(container.textContent).toContain(
-      'Will apply: location, maximum rent, parking',
-    );
+    expect(container.textContent).not.toContain('Will apply:');
+    expect(container.textContent).not.toContain('Applied:');
     expect(container.textContent).toContain('Check on site: parking');
-    expect(container.textContent).toContain('small dogs allowed');
-    expect(container.textContent).toContain('large dogs allowed');
-    expect(container.textContent).toContain('cats allowed');
+    expect(container.textContent).not.toContain('small dogs allowed');
+    expect(container.textContent).not.toContain('large dogs allowed');
+    expect(container.textContent).not.toContain('cats allowed');
     expect(container.textContent).not.toContain('Pet-friendly filters');
     expect(container.textContent).not.toContain('Internet / month');
 
@@ -128,6 +169,24 @@ describe('Search workflow', () => {
     expect(new URL(openZillow.mock.calls[0][1]).origin).toBe(
       'https://www.zillow.com',
     );
+    const zillowCard = Array.from(
+      container.querySelectorAll<HTMLElement>('.search-site-card'),
+    ).find((card) => card.querySelector('h3')?.textContent === 'Zillow')!;
+    expect(zillowCard.getAttribute('aria-busy')).toBe('true');
+    expect(
+      zillowCard
+        .querySelector('.site-launch-spinner')
+        ?.getAttribute('aria-label'),
+    ).toBe('Applying filters to Zillow');
+    expect(zillowCard.querySelector('button')?.disabled).toBe(true);
+
+    await act(async () => {
+      finishZillow!({ automated: true });
+      await Promise.resolve();
+    });
+    expect(zillowCard.getAttribute('aria-busy')).toBe('false');
+    expect(zillowCard.querySelector('.site-launch-spinner')).toBeNull();
+    expect(zillowCard.querySelector('button')?.disabled).toBe(false);
 
     await act(async () => {
       Array.from(container.querySelectorAll('button'))
@@ -136,7 +195,7 @@ describe('Search workflow', () => {
     });
     expect(openApartments).toHaveBeenCalledOnce();
     expect(new URL(openApartments.mock.calls[0][1]).href).toBe(
-      'https://www.apartments.com/seattle-wa/',
+      'https://www.apartments.com/',
     );
 
     await act(async () => {
@@ -146,7 +205,7 @@ describe('Search workflow', () => {
     });
     expect(openRealtor).toHaveBeenCalledOnce();
     expect(new URL(openRealtor.mock.calls[0][1]).href).toBe(
-      'https://www.realtor.com/apartments/seattle_WA',
+      'https://www.realtor.com/rentals',
     );
 
     await act(async () => {

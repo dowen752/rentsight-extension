@@ -9,23 +9,31 @@
   --color-espresso: #3b3428;
   --color-espresso-mist: #d2c2ad;
 
+  /* Botanical accents */
+  --color-fern: #2f6b4f;
+  --color-leaf: #7f9f7a;
+  --color-celadon: #e3eee0;
+  --color-lichen: #b9c9a9;
+  --color-sand: #d7cbb7;
+  --color-paper: #f8f5e8;
+
   /* Core semantic tokens */
   --color-background: var(--color-mist);
   --background-page:
     radial-gradient(
-      circle at 100% 4%,
-      var(--color-espresso-mist) 0,
-      transparent 44%
+      circle at 88% 8%,
+      color-mix(in srgb, var(--color-lichen) 64%, transparent) 0,
+      transparent 40%
     ),
     radial-gradient(
-      circle at 0% 96%,
-      color-mix(in srgb, var(--color-espresso-mist) 84%, transparent) 0,
-      transparent 48%
+      circle at 4% 96%,
+      color-mix(in srgb, var(--color-sand) 38%, transparent) 0,
+      transparent 54%
     ),
-    var(--color-mist);
-  --color-surface: var(--color-ivory);
+    linear-gradient(145deg, #f1f5ec 0%, var(--color-celadon) 52%, #dfe7da 100%);
+  --color-surface: #f8f5e8ed;
   --color-surface-hover: var(--color-cream);
-  --color-input: var(--color-ivory);
+  --color-input: #f8f5e8f2;
   --color-text: var(--color-evergreen);
   --color-text-secondary: var(--color-espresso);
   --color-text-muted: var(--color-eucalyptus);
@@ -37,8 +45,8 @@
   --color-on-primary: var(--color-ivory);
   --color-focus: var(--color-evergreen);
   --color-control-accent: var(--color-evergreen);
-  --color-border: #52675b4d;
-  --color-border-card: #52675b40;
+  --color-border: #52675b47;
+  --color-border-card: #2f6b4f35;
   --color-border-input: #52675b73;
   --color-divider: #52675b2b;
 
@@ -105,9 +113,77 @@
   box-sizing: border-box;
 }
 body {
+  background: var(--background-page);
+  isolation: isolate;
   margin: 0;
   min-height: 100vh;
   min-width: 300px;
+  position: relative;
+}
+.background-decor {
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: fixed;
+  z-index: 0;
+}
+.decor-crop {
+  overflow: hidden;
+  position: absolute;
+}
+.decor-crop img {
+  height: 960px;
+  max-width: none;
+  position: absolute;
+  width: 960px;
+}
+.decor-foliage-top {
+  filter: saturate(0.74) contrast(0.9);
+  height: 650px;
+  opacity: 0.1;
+  right: 0;
+  top: 112px;
+  width: 480px;
+}
+.decor-foliage-top img {
+  height: 800px;
+  right: 0;
+  top: 0;
+  width: 800px;
+}
+.decor-home {
+  bottom: 0;
+  height: 520px;
+  left: 0;
+  opacity: 0;
+  position: absolute;
+  transition: opacity 220ms ease;
+  filter: saturate(0.78);
+  width: 520px;
+}
+.decor-home img {
+  display: block;
+  height: 520px;
+  width: 520px;
+}
+body:has(.find-workspace) .decor-foliage-top,
+body:has(.assistant-starters) .decor-foliage-top,
+body:has(main > .status) .decor-foliage-top,
+body:has(.data-cleared) .decor-foliage-top,
+body:has(.comparison-empty) .decor-foliage-top {
+  opacity: 0.13;
+}
+body:has(.find-workspace) .decor-home,
+body:has(.assistant-starters) .decor-home,
+body:has(main > .status) .decor-home,
+body:has(.data-cleared) .decor-home,
+body:has(.comparison-empty) .decor-home {
+  opacity: 0.28;
+}
+#root {
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
 }
 button,
 input,
@@ -162,6 +238,10 @@ section {
   background: var(--color-surface);
   border: 1px solid var(--color-border-card);
   border-radius: 12px;
+  box-shadow:
+    0 12px 28px #1d4d3512,
+    inset 0 1px #ffffff99;
+  backdrop-filter: blur(8px);
   margin-bottom: 14px;
   padding: 17px 15px;
 }
@@ -169,6 +249,10 @@ section {
   background: var(--color-surface);
   border: 1px solid var(--color-border-card);
   border-radius: 12px;
+  box-shadow:
+    0 12px 28px #1d4d3512,
+    inset 0 1px #ffffff99;
+  backdrop-filter: blur(8px);
   margin-bottom: 14px;
   overflow: hidden;
 }
@@ -547,8 +631,10 @@ fieldset label {
 }
 
 .workspace-tabs {
-  background: var(--color-background);
+  background: color-mix(in srgb, var(--color-celadon) 88%, transparent);
+  backdrop-filter: blur(14px) saturate(1.08);
   border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 6px 18px #1d4d350d;
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   padding: 8px 12px;
@@ -603,6 +689,7 @@ fieldset label {
   max-height: min(520px, 66vh);
   overflow-y: auto;
   padding: 13px;
+  backdrop-filter: blur(10px);
 }
 .assistant-history-heading strong,
 .assistant-history-heading span {
@@ -914,6 +1001,16 @@ fieldset label {
   line-height: 1.4;
   padding: 10px 11px;
   text-align: left;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    transform 150ms ease;
+}
+.assistant-starters button:hover,
+.assistant-followups button:hover {
+  background: color-mix(in srgb, var(--color-celadon) 72%, var(--color-paper));
+  border-color: var(--color-leaf);
+  transform: translateY(-1px);
 }
 .assistant-message {
   border-radius: 12px;
@@ -933,6 +1030,8 @@ fieldset label {
 .assistant-message.assistant {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
+  box-shadow: 0 9px 22px #1d4d3510;
+  backdrop-filter: blur(8px);
   margin-right: 12px;
 }
 .assistant-message > span {
@@ -1146,6 +1245,8 @@ fieldset label {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 12px;
+  box-shadow: 0 14px 32px #1d4d3521;
+  backdrop-filter: blur(12px) saturate(1.06);
   display: grid;
   gap: 8px;
   padding: 11px;
@@ -1208,6 +1309,10 @@ fieldset label {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 12px;
+  box-shadow:
+    0 12px 28px #1d4d3512,
+    inset 0 1px #ffffff99;
+  backdrop-filter: blur(8px);
   padding: 14px;
 }
 .search-section {
@@ -1356,7 +1461,32 @@ fieldset label {
 .search-site-card h3 {
   color: var(--color-primary-dark);
   font-size: 13px;
-  margin: 0 0 2px;
+  margin: 0;
+}
+.search-site-title {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  margin-bottom: 2px;
+}
+.site-launch-spinner {
+  animation: site-launch-spin 700ms linear infinite;
+  border: 2px solid color-mix(in srgb, var(--color-primary) 24%, transparent);
+  border-radius: 50%;
+  border-top-color: var(--color-primary);
+  display: inline-block;
+  height: 13px;
+  width: 13px;
+}
+@keyframes site-launch-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .site-launch-spinner {
+    animation: none;
+  }
 }
 .search-site-card > div > p,
 .search-transfer-summary p,
@@ -1387,10 +1517,16 @@ fieldset label {
   padding: 8px 10px;
   width: 100%;
 }
+.site-open-action:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
 .membership-bar {
   align-items: center;
-  background: var(--color-ivory);
+  background: color-mix(in srgb, var(--color-paper) 93%, transparent);
+  backdrop-filter: blur(16px) saturate(1.08);
   border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 5px 18px #1d4d3510;
   display: flex;
   gap: 10px;
   justify-content: space-between;
@@ -1399,6 +1535,22 @@ fieldset label {
   position: sticky;
   top: 0;
   z-index: 7;
+}
+.membership-bar::after {
+  background: linear-gradient(
+    90deg,
+    var(--color-evergreen),
+    var(--color-fern) 48%,
+    var(--color-leaf)
+  );
+  bottom: -1px;
+  content: '';
+  height: 2px;
+  left: 0;
+  opacity: 0.68;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
 }
 .membership-bar > div {
   align-items: center;
@@ -1683,9 +1835,21 @@ fieldset label {
   font-size: 11px;
   font-weight: 700;
   padding: 9px 4px;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    transform 150ms ease;
+}
+.workspace-tabs button:hover:not([aria-current='page']) {
+  background: color-mix(in srgb, var(--color-leaf) 16%, transparent);
+  color: var(--color-evergreen);
 }
 .workspace-tabs button[aria-current='page'] {
-  background: var(--color-tab-active-bg);
+  background: linear-gradient(
+    135deg,
+    var(--color-evergreen),
+    var(--color-fern)
+  );
   box-shadow: inset 0 0 0 1px #05472a26;
   color: var(--color-tab-active-text);
 }
@@ -1907,13 +2071,26 @@ fieldset label {
   padding: 9px 11px;
 }
 .primary-action {
-  background: var(--color-primary);
+  background: linear-gradient(
+    135deg,
+    var(--color-evergreen),
+    var(--color-fern)
+  );
   border: 1px solid var(--color-primary);
   border-radius: 7px;
   color: var(--color-on-primary);
   cursor: pointer;
   font-weight: 700;
   padding: 10px 13px;
+  transition:
+    box-shadow 150ms ease,
+    filter 150ms ease,
+    transform 150ms ease;
+}
+.primary-action:hover:not(:disabled) {
+  box-shadow: 0 7px 18px #05472a26;
+  filter: brightness(1.04);
+  transform: translateY(-1px);
 }
 .primary-action:disabled {
   background: var(--color-disabled);
@@ -1949,12 +2126,18 @@ fieldset label {
   color: var(--color-on-primary);
   grid-column: 1 / -1;
 }
+.collection-actions .collection-ask {
+  grid-column: 1 / -1;
+}
+.collection-select-all {
+  grid-column: 1;
+}
 .collection-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
 .collection-more {
-  grid-column: 1 / -1;
+  grid-column: 2;
 }
 .collection-more > summary {
   align-items: center;

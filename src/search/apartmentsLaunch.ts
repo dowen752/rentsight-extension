@@ -92,6 +92,10 @@ function waitForApartmentsNavigation(
       cleanup();
       reject(new Error(message));
     };
+    const inspect = (tab: chrome.tabs.Tab) => {
+      if (tab.url && tab.url !== previousUrl) navigated = true;
+      if (navigated && tab.status === 'complete') finish();
+    };
     const onUpdated = (
       updatedTabId: number,
       changeInfo: chrome.tabs.OnUpdatedInfo,
@@ -99,8 +103,7 @@ function waitForApartmentsNavigation(
     ) => {
       if (updatedTabId !== tabId) return;
       if (changeInfo.url && changeInfo.url !== previousUrl) navigated = true;
-      if (navigated && changeInfo.status === 'complete') finish();
-      if (tab.url && tab.url !== previousUrl) navigated = true;
+      inspect(tab);
     };
     const onRemoved = (removedTabId: number) => {
       if (removedTabId === tabId)
@@ -112,45 +115,83 @@ function waitForApartmentsNavigation(
     );
     chrome.tabs.onUpdated.addListener(onUpdated);
     chrome.tabs.onRemoved.addListener(onRemoved);
-    void chrome.tabs.get(tabId).then(
-      (tab) => {
-        if (tab.url && tab.url !== previousUrl) navigated = true;
-        if (navigated && tab.status === 'complete') finish();
-      },
-      () => fail('The Apartments.com search tab is no longer available.'),
-    );
+    void chrome.tabs
+      .get(tabId)
+      .then(inspect, () =>
+        fail('The Apartments.com search tab is no longer available.'),
+      );
   });
 }
 
-/** Uses Apartments.com's own location lookup when a plain slug is ambiguous. */
+/** Gives the raw location to Apartments.com's own smart search. */
 export async function resolveApartmentsLocationPage(
   requestedLocation: string,
 ): Promise<ApartmentsLocationResult> {
   if (document.querySelector('#advancedFiltersIcon'))
     return { ready: true, submitted: false };
+
   const sleep = (milliseconds: number) =>
     new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
   const deadline = Date.now() + 5_000;
-  let input: HTMLInputElement | null = null;
-  while (Date.now() < deadline && !input) {
-    input = document.querySelector<HTMLInputElement>('#quickSearchLookup');
-    if (!input) await sleep(100);
+  let input: HTMLElement | null = null;
+  let searchButton: HTMLButtonElement | null = null;
+  while (Date.now() < deadline && (!input || !searchButton)) {
+    input = document.querySelector<HTMLElement>(
+      '#homepage-smart-search .smart-search-input[contenteditable]',
+    );
+    searchButton = document.querySelector<HTMLButtonElement>(
+      '#homepage-smart-search .smart-search-btn-search',
+    );
+    if (!input || !searchButton) await sleep(100);
   }
-  if (!input) return { ready: false, submitted: false };
-  const setter = Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
-    'value',
-  )?.set;
+  if (!input || !searchButton || !requestedLocation.trim())
+    return { ready: false, submitted: false };
+
   input.focus();
-  setter?.call(input, requestedLocation);
-  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.textContent = requestedLocation;
+  input.dispatchEvent(
+    typeof InputEvent === 'function'
+      ? new InputEvent('input', {
+          bubbles: true,
+          data: requestedLocation,
+          inputType: 'insertText',
+        })
+      : new Event('input', { bubbles: true }),
+  );
   input.dispatchEvent(new Event('change', { bubbles: true }));
-  await sleep(250);
-  const searchButton = Array.from(
-    document.querySelectorAll<HTMLElement>('button,a,input[type="submit"]'),
-  ).find((element) => /^search$/i.test((element.textContent ?? '').trim()));
-  if (!searchButton) return { ready: false, submitted: false };
-  searchButton.click();
+  // Apartments.com resolves autocomplete options asynchronously. Submitting
+  // immediately after the input event leaves the populated menu open without
+  // actually choosing its highlighted result.
+  await sleep(600);
+  input.focus();
+  let enterHandled = false;
+  for (const type of ['keydown', 'keypress', 'keyup']) {
+    const dispatched = input.dispatchEvent(
+      new KeyboardEvent(type, {
+        key: 'Enter',
+        code: 'Enter',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    if (type === 'keydown' && !dispatched) enterHandled = true;
+  }
+  // Keep the visible search control as a fallback for page variants that do
+  // not submit from Enter. Re-query it in case autocomplete re-rendered.
+  searchButton = document.querySelector<HTMLButtonElement>(
+    '#homepage-smart-search .smart-search-btn-search',
+  );
+  if (searchButton && !enterHandled) {
+    for (const type of ['mousedown', 'mouseup', 'click']) {
+      searchButton.dispatchEvent(
+        new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        }),
+      );
+    }
+  }
   return { ready: false, submitted: true };
 }
 
@@ -251,15 +292,57 @@ export async function fillApartmentsSearchPage(
     ...(search.minListedRent !== undefined ? (['minListedRent'] as const) : []),
     ...(search.maxListedRent !== undefined ? (['maxListedRent'] as const) : []),
   ];
+  const hasDetailedRequest = Boolean(
+    canApplyBathrooms ||
+    search.catsAllowed ||
+    search.smallDogsAllowed ||
+    search.largeDogsAllowed ||
+    search.moveInDate ||
+    search.minSquareFeet !== undefined ||
+    search.parkingAvailable ||
+    search.inUnitLaundry ||
+    search.airConditioning,
+  );
+  let advancedModalOpened = false;
+  if (
+    rentCriteria.length ||
+    canApplyBedrooms ||
+    canApplyPropertyType ||
+    hasDetailedRequest
+  ) {
+    try {
+      const allFilters = await waitFor(
+        () =>
+          document.querySelector<HTMLElement>('#advancedFiltersIcon') ??
+          undefined,
+      );
+      activateCustomControl(allFilters);
+      await waitFor(
+        () => document.querySelector<HTMLElement>('#seeResultBtn') ?? undefined,
+      );
+      advancedModalOpened = true;
+    } catch {
+      // Individual filter groups below will report exactly what could not be
+      // applied if the responsive All Filters dialog is unavailable.
+    }
+  }
   if (rentCriteria.length) {
     try {
-      document.querySelector<HTMLElement>('#rentRangeLink')?.click();
+      if (!advancedModalOpened)
+        activateCustomControl(
+          await waitFor(
+            () =>
+              document.querySelector<HTMLElement>(
+                '#rentRangeLink, .rentselector',
+              ) ?? undefined,
+          ),
+        );
       const minimum =
         search.minListedRent !== undefined
           ? await waitFor(
               () =>
                 document.querySelector<HTMLInputElement>(
-                  '#min-input, input.min-rent-select, input[placeholder="Min Price"]',
+                  '.advancedFilters input.min-rent-select, #min-input, input.min-rent-select, input[placeholder="Min Price"]',
                 ) ?? undefined,
             )
           : undefined;
@@ -268,17 +351,18 @@ export async function fillApartmentsSearchPage(
           ? await waitFor(
               () =>
                 document.querySelector<HTMLInputElement>(
-                  '#max-input, input.max-rent-select, input[placeholder="Max Price"]',
+                  '.advancedFilters input.max-rent-select, #max-input, input.max-rent-select, input[placeholder="Max Price"]',
                 ) ?? undefined,
             )
           : undefined;
       if (minimum) await setInput(minimum, String(search.minListedRent));
       if (maximum) await setInput(maximum, String(search.maxListedRent));
-      document
-        .querySelector<HTMLElement>(
-          '#rentRangeLink ~ .dropdownContent .done-btn, .rentRangeSelector .done-btn',
-        )
-        ?.click();
+      if (!advancedModalOpened)
+        document
+          .querySelector<HTMLElement>(
+            '#rentRangeLink ~ .dropdownContent .done-btn, .rentRangeSelector .done-btn, .priceRangeSelector .done-btn',
+          )
+          ?.click();
       for (const criterion of rentCriteria) record(applied, criterion);
     } catch {
       for (const criterion of rentCriteria) record(failed, criterion);
@@ -299,12 +383,53 @@ export async function fillApartmentsSearchPage(
     await sleep(100);
     return button.classList.contains('highlighted');
   };
+  const rangeControlSelected = (control: HTMLElement) =>
+    control.classList.contains('highlighted') ||
+    control.classList.contains('selected') ||
+    control.getAttribute('aria-pressed') === 'true' ||
+    control.getAttribute('aria-checked') === 'true' ||
+    (control instanceof HTMLInputElement && control.checked) ||
+    Boolean(
+      control.querySelector<HTMLInputElement>(
+        'input[type="checkbox"]:checked, input[type="radio"]:checked',
+      ),
+    );
+  const chooseBathroomRange = async (value: number): Promise<boolean> => {
+    const requestedLabel = `${value}+`;
+    const control = await waitFor(() =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>(
+          '.advancedFilters .bath-filter-button, .bath-filter-container .bath-filter-button',
+        ),
+      ).find(
+        (candidate) =>
+          (candidate.textContent ?? '').trim() === requestedLabel ||
+          candidate.getAttribute('aria-label') === requestedLabel,
+      ),
+    );
+    if (!rangeControlSelected(control)) control.click();
+    await sleep(100);
+    if (rangeControlSelected(control)) return true;
+    return Array.from(
+      document.querySelectorAll<HTMLElement>('li, [role="listitem"]'),
+    ).some((item) =>
+      (item.textContent ?? '').trim().startsWith(`${requestedLabel} Baths`),
+    );
+  };
   const roomCriteria: SearchCriterion[] = [
     ...(canApplyBedrooms ? (['minBedrooms'] as const) : []),
   ];
   if (roomCriteria.length) {
     try {
-      document.querySelector<HTMLElement>('#bedRangeLink')?.click();
+      if (!advancedModalOpened)
+        activateCustomControl(
+          await waitFor(
+            () =>
+              document.querySelector<HTMLElement>(
+                '#bedRangeLink, .bedselector',
+              ) ?? undefined,
+          ),
+        );
       if (
         search.minBedrooms !== undefined &&
         search.minBedrooms > 0 &&
@@ -312,9 +437,10 @@ export async function fillApartmentsSearchPage(
         !(await chooseRangeButton('.bed-filter-button', search.minBedrooms))
       )
         throw new Error('Bedroom selection was not accepted.');
-      document
-        .querySelector<HTMLElement>('.bedsRangeSelector .done-btn')
-        ?.click();
+      if (!advancedModalOpened)
+        document
+          .querySelector<HTMLElement>('.bedsRangeSelector .done-btn')
+          ?.click();
       for (const criterion of roomCriteria) record(applied, criterion);
     } catch {
       for (const criterion of roomCriteria) record(failed, criterion);
@@ -323,7 +449,15 @@ export async function fillApartmentsSearchPage(
 
   if (canApplyPropertyType) {
     try {
-      document.querySelector<HTMLElement>('#typeSelect')?.click();
+      if (!advancedModalOpened)
+        activateCustomControl(
+          await waitFor(
+            () =>
+              document.querySelector<HTMLElement>(
+                '#typeSelect, .homeselector',
+              ) ?? undefined,
+          ),
+        );
       const desired = new Set(
         search.propertyTypes?.flatMap((propertyType) =>
           propertyType === 'apartment_condo'
@@ -337,7 +471,9 @@ export async function fillApartmentsSearchPage(
         const choice = await waitFor(
           () =>
             document.querySelector<HTMLButtonElement>(
-              `#PropertyType-${value}`,
+              advancedModalOpened
+                ? `.advancedFilters .home-type-filter button[data-value="${value}"]`
+                : `#PropertyType-${value}`,
             ) ?? undefined,
         );
         const selected =
@@ -346,11 +482,12 @@ export async function fillApartmentsSearchPage(
           choice.getAttribute('aria-pressed') === 'true';
         if (selected !== desired.has(value)) choice.click();
       }
-      document
-        .querySelector<HTMLElement>(
-          '.propertyTypeSelector .done-btn, #typeSelect ~ .dropdownContent .done-btn',
-        )
-        ?.click();
+      if (!advancedModalOpened)
+        document
+          .querySelector<HTMLElement>(
+            '.propertyTypeSelector .done-btn, .homeRangeSelector .done-btn, #typeSelect ~ .dropdownContent .done-btn',
+          )
+          ?.click();
       record(applied, 'propertyTypes');
     } catch {
       record(failed, 'propertyTypes');
@@ -399,7 +536,6 @@ export async function fillApartmentsSearchPage(
   ];
   const detailedCriteria = detailedOptions.filter(({ enabled }) => enabled);
   if (detailedCriteria.length) {
-    let detailedModalOpened = false;
     const applyDetailed = async (
       criteria: SearchCriterion[],
       action: () => Promise<void>,
@@ -412,19 +548,23 @@ export async function fillApartmentsSearchPage(
       }
     };
     try {
-      document.querySelector<HTMLElement>('#advancedFiltersIcon')?.click();
-      await waitFor(
-        () => document.querySelector<HTMLElement>('#seeResultBtn') ?? undefined,
-      );
-      detailedModalOpened = true;
+      if (!advancedModalOpened) {
+        activateCustomControl(
+          await waitFor(
+            () =>
+              document.querySelector<HTMLElement>('#advancedFiltersIcon') ??
+              undefined,
+          ),
+        );
+        await waitFor(
+          () =>
+            document.querySelector<HTMLElement>('#seeResultBtn') ?? undefined,
+        );
+        advancedModalOpened = true;
+      }
       if (canApplyBathrooms && search.minBathrooms !== undefined) {
         await applyDetailed(['minBathrooms'], async () => {
-          if (
-            !(await chooseRangeButton(
-              '.advancedFilters .bath-filter-button, .bath-filter-container .bath-filter-button',
-              search.minBathrooms!,
-            ))
-          )
+          if (!(await chooseBathroomRange(search.minBathrooms!)))
             throw new Error('Bathroom selection was not accepted.');
         });
       }
@@ -441,34 +581,53 @@ export async function fillApartmentsSearchPage(
             : search.catsAllowed
               ? 'Cat Friendly'
               : 'Dog Friendly';
+        const petValue =
+          search.catsAllowed &&
+          (search.smallDogsAllowed || search.largeDogsAllowed)
+            ? '3'
+            : search.catsAllowed
+              ? '2'
+              : '1';
         await applyDetailed(
           petCriteria.map(({ criterion }) => criterion),
           async () => {
             const petButton = await waitFor(
               () =>
                 document.querySelector<HTMLElement>(
-                  '#adv-petPolicy-select-button',
+                  '#adv-petPolicy-select-button, .advancedFilters .petPolicy-select',
                 ) ?? undefined,
               1_500,
             );
-            petButton.click();
-            const option = await waitFor(
-              () =>
-                Array.from(
-                  document.querySelectorAll<HTMLElement>(
-                    '#adv-petPolicy-select-menu [role="option"]',
-                  ),
-                ).find(
+            activateCustomControl(petButton);
+            const menuId = petButton.getAttribute('aria-controls');
+            const option = await waitFor(() => {
+              const menu = menuId ? document.getElementById(menuId) : null;
+              const candidates = Array.from(
+                (menu ?? document).querySelectorAll<HTMLElement>(
+                  '[role="option"]',
+                ),
+              );
+              return (
+                candidates.find(
+                  (candidate) => candidate.dataset.value === petValue,
+                ) ??
+                candidates.find(
                   (candidate) =>
                     (candidate.textContent ?? '').trim() === petLabel,
-                ),
-              1_500,
-            );
-            activateCustomControl(option);
+                )
+              );
+            }, 1_500);
+            // Apartments.com's current listbox renders the ARIA option on an
+            // `li`, but wires selection to its inner dropdown item. Clicking
+            // the ARIA wrapper leaves the visible value unchanged.
+            const optionTarget =
+              option.querySelector<HTMLElement>('.dropdown-select-item') ??
+              option;
+            activateCustomControl(optionTarget);
             await waitFor(() => {
               const selected = (
                 document.querySelector<HTMLElement>(
-                  '#adv-petPolicy-select-button .ui-selectmenu-text',
+                  '#adv-petPolicy-select-button .ui-selectmenu-text, .advancedFilters .petPolicy-select .dropdown-select-text',
                 )?.textContent ??
                 petButton.textContent ??
                 ''
@@ -587,43 +746,50 @@ export async function fillApartmentsSearchPage(
       }
       if (search.minSquareFeet !== undefined) {
         await applyDetailed(['minSquareFeet'], async () => {
-          const select = await waitFor(
-            () =>
-              document.querySelector<HTMLSelectElement>('#minSF') ?? undefined,
-          );
-          const available = Array.from(select.options)
-            .map((option) => Number(option.value))
-            .filter((value) => Number.isFinite(value) && value > 0)
-            .sort((a, b) => a - b);
-          const rounded = available.find(
-            (value) => value >= search.minSquareFeet!,
-          );
-          if (rounded === undefined)
-            throw new Error('Square-footage options were unavailable.');
           const squareFootageButton = await waitFor(
             () =>
-              document.querySelector<HTMLElement>('#minSF-button') ?? undefined,
+              document.querySelector<HTMLElement>(
+                '#minSF-button, .advancedFilters .minSF',
+              ) ?? undefined,
           );
-          squareFootageButton.click();
-          const squareFootageOption = await waitFor(
-            () =>
-              Array.from(
-                document.querySelectorAll<HTMLElement>(
-                  '#minSF-menu [role="option"]',
-                ),
-              ).find(
-                (candidate) =>
-                  Number(
-                    (candidate.textContent ?? '').replace(/[^0-9]/g, ''),
-                  ) === rounded,
+          activateCustomControl(squareFootageButton);
+          const options = await waitFor(() => {
+            const candidates = Array.from(
+              document.querySelectorAll<HTMLElement>(
+                '#minSF-menu [role="option"], [role="option"]',
               ),
-            1_500,
+            ).filter((candidate) => {
+              const value = Number(
+                (candidate.textContent ?? '').replace(/[^0-9]/g, ''),
+              );
+              return Number.isFinite(value) && value > 0;
+            });
+            return candidates.length ? candidates[0] : undefined;
+          }, 1_500).then(() =>
+            Array.from(
+              document.querySelectorAll<HTMLElement>(
+                '#minSF-menu [role="option"], [role="option"]',
+              ),
+            ),
           );
-          activateCustomControl(squareFootageOption);
+          const squareFootageOption = options
+            .map((option) => ({
+              option,
+              value: Number((option.textContent ?? '').replace(/[^0-9]/g, '')),
+            }))
+            .filter(
+              ({ value }) =>
+                Number.isFinite(value) && value >= search.minSquareFeet!,
+            )
+            .sort((left, right) => left.value - right.value)[0];
+          if (!squareFootageOption)
+            throw new Error('Square-footage options were unavailable.');
+          const rounded = squareFootageOption.value;
+          activateCustomControl(squareFootageOption.option);
           await waitFor(() => {
             const selected = (
               document.querySelector<HTMLElement>(
-                '#minSF-button .ui-selectmenu-text',
+                '#minSF-button .ui-selectmenu-text, .advancedFilters .minSF .dropdown-select-text',
               )?.textContent ??
               squareFootageButton.textContent ??
               ''
@@ -656,11 +822,11 @@ export async function fillApartmentsSearchPage(
       for (const { criterion } of detailedCriteria) {
         if (!applied.includes(criterion)) record(failed, criterion);
       }
-    } finally {
-      if (detailedModalOpened)
-        document.querySelector<HTMLElement>('#seeResultBtn')?.click();
     }
   }
+
+  if (advancedModalOpened)
+    document.querySelector<HTMLElement>('#seeResultBtn')?.click();
 
   return { applied, failed };
 }

@@ -75,9 +75,8 @@ what the site offers a person typing the same search. RentSight then opens the
 single Filters drawer and applies price, minimum bedroom and whole-bathroom
 ranges, combined property types, generic cat/dog policy, move-in date,
 rounded-up minimum square footage, parking, and in-unit washer/dryer controls
-before submitting the drawer once. Realtor's Central air control is narrower
-than RentSight's any-air-conditioning preference, so air conditioning remains
-an explicit on-site reminder instead of silently narrowing the search.
+before submitting the drawer once. RentSight's air-conditioning preference maps
+to Realtor.com's Central air unit-feature control.
 Realtor.com access is optional and requested only for this user-initiated flow.
 
 Rent.com opens its homepage, selects a matching place from its own autocomplete,

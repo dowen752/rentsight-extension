@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "RentSight",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwUm9cyZhURoP2HAAbnmO41sy/C4vZldd7XUK21FeYGO8DIU8zHgPzESpIxXWqMLFlb9ncn1n5ViE9Tiqfy6th0R8ahgd1anIBMVP16EvzEws3VMQGYk3tgHRC9mwO1SzYWnQnpTjvU/MgfQ/rhl83P/KSATaoUJFDDDIagFshDljsFyC2BWzdKPIOoUgm97Dai6h7ZettSQJUL5MHV6cxMJGI0Jt613tRn8EVxc7U8Sf1t+iKpxDA1pNGMYNTG7umZc9A+dJ9W4VTSQvXdsf0J4OjwH0FXgz/q6K+ZlEAXdKNpIMlpSxsCcu/B57ZQ+v4C2TaTLuqo/YigyM2Kj1pwIDAQAB",
   "description": "Estimate the true monthly cost of rental-property listings.",
   "icons": {
