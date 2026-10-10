@@ -105,6 +105,26 @@ describe('SPA listing navigation', () => {
 });
 
 describe('Zillow unit selection', () => {
+  it.each(['udp-401905007', 'uap-206287/5631', 'rentsight-unit=udp-401905007'])(
+    'recognizes an explicit detail route %s even before facts mount',
+    (route) => {
+      const document = new JSDOM('<h1>Two Bedroom Two Bath</h1>').window
+        .document;
+      const url = new URL(
+        `https://www.zillow.com/apartments/example/abc/#${route}`,
+      );
+      expect(requiresZillowUnitSelection(document, url)).toBe(false);
+      expect(selectedZillowUnitId(document, url)).toBe(
+        route.replace('rentsight-unit=', ''),
+      );
+      const extraction = extractListing(document, url);
+      expect(extraction.listing.recurring.advertisedRent).toBeUndefined();
+      expect(extraction.warnings).toContain(
+        'The selected Zillow unit layout could not be read safely. Enter its values manually.',
+      );
+    },
+  );
+
   it('requires an explicit choice when several community units are listed', () => {
     const dom = new JSDOM(`
       <html><body>

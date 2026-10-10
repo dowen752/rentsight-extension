@@ -1,3 +1,4 @@
+import { zillowSelectedDetailRoute } from './zillowSelection';
 import {
   classifyIncludedUtilities,
   classifyLaundry,
@@ -46,7 +47,53 @@ function textWithNodeBoundaries(element: Element): string {
   return parts.join(' ').replace(/\s+/g, ' ').trim();
 }
 
-function selectedUnit(document: Document): SelectedUnit | undefined {
+function selectedUnit(document: Document, url: URL): SelectedUnit | undefined {
+  // An opened detail can be named after a floor plan instead of "Unit 42".
+  // Use its bounded header summary; never borrow a community inventory price.
+  if (zillowSelectedDetailRoute(url)) {
+    for (const heading of document.querySelectorAll('h1, h2')) {
+      if (
+        heading.matches(
+          '[data-test-id="bdp-building-title"], [data-testid="bdp-building-title"]',
+        )
+      )
+        continue;
+      let container = heading.parentElement;
+      for (
+        let depth = 0;
+        container && depth < 4;
+        depth++, container = container.parentElement
+      ) {
+        if (
+          container === document.body ||
+          container.matches('main, [role="main"]')
+        )
+          break;
+        const text = textWithNodeBoundaries(container);
+        if (text.length > 1200) break;
+        if (
+          /\b(?:beds?|bd|studio)\b/i.test(text) &&
+          /\b(?:baths?|ba)\b/i.test(text) &&
+          /\$[\d,]+/i.test(text) &&
+          !/\$[\d,]+\s*(?:-|–|—|to)\s*\$?[\d,]+/i.test(text) &&
+          (text.match(/\$[\d,]+/g) ?? []).length === 1
+        ) {
+          const panel =
+            container.closest(
+              '[role="dialog"], [aria-modal="true"], aside, article, section',
+            ) ?? container;
+          const squareFootage = [...panel.querySelectorAll('div, span, p, li')]
+            .map((node) => textWithNodeBoundaries(node))
+            .find((value) => /^[\d,]+\s*(?:sqft|sq\.?\s*ft)\.?$/i.test(value));
+          return {
+            name: heading.textContent?.trim(),
+            text: [text, squareFootage].filter(Boolean).join(' '),
+          };
+        }
+      }
+    }
+  }
+
   for (const dialog of document.querySelectorAll(
     '[role="dialog"], [aria-modal="true"]',
   )) {
@@ -187,7 +234,7 @@ function visibleAddressText(document: Document): string | undefined {
 
 export const zillowExtractor: ListingExtractor = {
   siteName: 'Zillow',
-  version: '1.1.0',
+  version: '1.2.0',
   matches(url) {
     return (
       /(^|\.)zillow\.com$/i.test(url.hostname) &&
@@ -199,10 +246,12 @@ export const zillowExtractor: ListingExtractor = {
     const pick = (selectors: string) =>
       document.querySelector(selectors)?.textContent?.trim();
     const isApartmentCommunity = /\/apartments\//i.test(url.pathname);
-    const unit = isApartmentCommunity ? selectedUnit(document) : undefined;
+    const unit = isApartmentCommunity ? selectedUnit(document, url) : undefined;
     const unitText = unit?.text;
-    const detailText = unitText ?? visibleDetailText(document);
-    const selectedUnitRequested = /(?:^|#)rentsight-unit=/i.test(url.hash);
+    const selectedUnitRequested = Boolean(zillowSelectedDetailRoute(url));
+    const detailText = selectedUnitRequested
+      ? unitText
+      : (unitText ?? visibleDetailText(document));
     if (selectedUnitRequested && !unitText) {
       result.warnings.push(
         'The selected Zillow unit layout could not be read safely. Enter its values manually.',

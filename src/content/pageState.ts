@@ -1,3 +1,4 @@
+import { zillowSelectedDetailRoute } from '../extractors/zillowSelection';
 import type { ListingExtraction } from '../extractors';
 
 const normalizedPageText = (document: Document): string =>
@@ -52,7 +53,7 @@ export function selectedZillowUnitId(
     !/\/apartments\//i.test(url.pathname)
   )
     return undefined;
-  const selectedUnitRoute = url.hash.match(/^#(uap-[\w/-]+)$/i)?.[1];
+  const selectedUnitRoute = zillowSelectedDetailRoute(url);
   if (selectedUnitRoute) return selectedUnitRoute;
   for (const heading of document.querySelectorAll('h1, h2')) {
     const match = heading.textContent
