@@ -190,6 +190,26 @@ input,
 select {
   font: inherit;
 }
+:where(button) {
+  appearance: none;
+  background: var(--color-surface);
+  border: 1px solid var(--color-secondary-button-border);
+  border-radius: 8px;
+  color: var(--color-secondary-button-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  padding: 8px 12px;
+  transition: background 150ms ease;
+}
+:where(button:hover:not(:disabled)) {
+  background: var(--color-surface-hover);
+}
+:where(button:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -1425,8 +1445,21 @@ fieldset label {
   padding: 9px 11px;
 }
 .search-errors {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid var(--color-border);
   background: var(--color-error-bg);
   color: var(--color-error-text);
+}
+.search-error-icon {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
 }
 .search-errors p {
   margin: 0;
@@ -2507,27 +2540,6 @@ fieldset label {
   font-size: 12px;
   padding: 9px 12px;
 }
-.ai-note-suggestions {
-  border: 1px solid var(--color-border-card);
-  border-radius: 16px;
-  padding: 16px;
-  background: var(--color-surface);
-}
-.ai-note-suggestions > h2,
-.ai-note-suggestions > p,
-.ai-note-suggestion > p {
-  margin-top: 0;
-}
-.ai-note-suggestion + .ai-note-suggestion {
-  border-top: 1px solid var(--color-divider);
-  margin-top: 14px;
-  padding-top: 14px;
-}
-.ai-note-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 .ai-extraction-flags {
   background: var(--color-surface);
   border: 1px solid var(--color-border-card);
@@ -2570,18 +2582,6 @@ fieldset label {
   padding: 0;
   width: 16px;
 }
-.ai-source-review blockquote {
-  margin: 12px 0;
-  padding: 8px 12px;
-  border-left: 3px solid var(--color-sage);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.ai-facts {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: 11px;
-}
 @keyframes ai-scan {
   0% {
     transform: translateX(-100%);
@@ -2601,16 +2601,4 @@ fieldset label {
   .ai-scan-track span {
     animation: none;
   }
-}
-.ai-facts > div {
-  padding: 10px 0;
-  border-bottom: 1px solid var(--color-divider);
-}
-.ai-facts dt {
-  font-weight: 700;
-  text-transform: capitalize;
-}
-.ai-facts dd {
-  margin: 5px 0 0;
-  line-height: 1.6;
 }

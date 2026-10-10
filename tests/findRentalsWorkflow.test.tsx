@@ -68,6 +68,46 @@ describe('Search workflow', () => {
     });
   });
 
+  it('shows styled validation and prevents saving invalid bathroom increments', async () => {
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<FindRentalsView />);
+    });
+    const bathrooms = Array.from(container.querySelectorAll('label'))
+      .find((label) => label.textContent?.includes('Minimum bathrooms'))!
+      .querySelector<HTMLInputElement>('input')!;
+    await act(async () => {
+      enter(bathrooms, '3.2');
+    });
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent === 'Save Preferences')!
+        .click();
+    });
+    expect(container.querySelector('form')?.noValidate).toBe(true);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Enter bathrooms in half-bath increments.',
+    );
+    expect(container.querySelector('.search-error-icon')).not.toBeNull();
+    expect(extensionStorage.set).not.toHaveBeenCalled();
+    await act(async () => {
+      enter(bathrooms, '3.5');
+    });
+    await act(async () => {
+      Array.from(container.querySelectorAll('button'))
+        .find((button) => button.textContent === 'Save Preferences')!
+        .click();
+    });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(extensionStorage.set).toHaveBeenCalledWith('searchProfile', {
+      schemaVersion: 2,
+      search: { minBathrooms: 3.5 },
+    });
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it('saves optional preferences, shows all sites, and opens a routed search', async () => {
     const openUrl = vi.fn().mockResolvedValue(undefined);
     const openApartments = vi.fn().mockResolvedValue({ automated: true });

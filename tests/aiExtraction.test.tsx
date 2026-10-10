@@ -27,7 +27,6 @@ import {
 import {
   formatReviewIssue,
   shouldShowReviewIssue,
-  shouldSuggestPropertyNote,
 } from '../src/sidepanel/reviewIssueLabels';
 import { AnalysisEditor } from '../src/sidepanel/App';
 import {
@@ -760,12 +759,10 @@ describe('AI review UI', () => {
     ).toBe(true);
   });
 
-  it('suggests qualified charges and promotions, not restated input values', () => {
+  it('reviews structured flags without a separate suggested-details section', () => {
     const response = fixture(
       'conditional-promotion.response',
     ) as ExtractionSuccess;
-    expect(shouldSuggestPropertyNote(response.result.notes[0])).toBe(false);
-    expect(shouldSuggestPropertyNote(response.result.notes[1])).toBe(true);
     const analysis = applyAiExtraction(
       createInitialAnalysis(page().url),
       response,
@@ -773,10 +770,15 @@ describe('AI review UI', () => {
     const html = renderToStaticMarkup(
       <AiSourceReview analysis={analysis} update={vi.fn()} />,
     );
-    expect(html).toContain('Suggested property details');
-    expect(html).toContain('Keep note');
-    expect(html).toContain('Dismiss');
-    expect(html).toContain('advertised $2,200 effective rent');
+    expect(html).not.toContain('Suggested property details');
+    expect(html).toContain('Flagged during extraction');
+    expect(html).not.toContain('AI source details');
+    expect(html).not.toContain('Property facts and qualifications');
+    expect(html).not.toContain('<blockquote');
+    expect(html).not.toContain('Keep note');
+    expect(html).toContain('Keep as a property note');
+    expect(html).not.toContain('Dismiss');
+    expect(html).not.toContain(response.result.notes[1].text);
   });
 
   it('shows one non-blocking extraction flag with an optional property note', () => {

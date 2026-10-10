@@ -394,6 +394,7 @@ export function FindRentalsView({
 
       <form
         className="rental-search-form"
+        noValidate
         onSubmit={(event) => void submit(event)}
       >
         <section
@@ -520,9 +521,21 @@ export function FindRentalsView({
 
         {issues.length > 0 && (
           <div className="search-errors" role="alert">
-            {issues.map((issue) => (
-              <p key={`${issue.criterion}-${issue.message}`}>{issue.message}</p>
-            ))}
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              className="search-error-icon"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 11v6M12 7v.01" />
+            </svg>
+            <div>
+              {issues.map((issue) => (
+                <p key={`${issue.criterion}-${issue.message}`}>
+                  {SEARCH_CRITERION_LABELS[issue.criterion]}: {issue.message}
+                </p>
+              ))}
+            </div>
           </div>
         )}
         <div className="search-actions">

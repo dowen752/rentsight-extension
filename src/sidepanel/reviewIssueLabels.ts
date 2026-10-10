@@ -1,4 +1,4 @@
-import type { Issue, Note } from '../ai/contracts/response';
+import type { Issue } from '../ai/contracts/response';
 
 const INTERNAL_REVIEW_FIELDS = ['/property/country', '/property/unitLabel'];
 
@@ -11,21 +11,6 @@ export function shouldShowReviewIssue(issue: Issue): boolean {
         (internalPath) =>
           path === internalPath || path.startsWith(`${internalPath}/`),
       ),
-  );
-}
-
-const NOTEWORTHY_COLLECTIONS = [
-  '/property/fees',
-  '/property/utilities',
-  '/property/promotions',
-];
-
-export function shouldSuggestPropertyNote(note: Note): boolean {
-  return note.fieldPaths.some((path) =>
-    NOTEWORTHY_COLLECTIONS.some(
-      (collectionPath) =>
-        path === collectionPath || path.startsWith(`${collectionPath}/`),
-    ),
   );
 }
 

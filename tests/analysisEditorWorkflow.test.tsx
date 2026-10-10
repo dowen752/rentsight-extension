@@ -112,16 +112,35 @@ describe('analysis editor workflow', () => {
       scope: 'unknown',
       evidenceIds: [],
     };
+    response.result.notes.push({
+      id: 'deposit-refundability',
+      fieldPaths: ['/property/fees/value/0/refundable'],
+      text: 'The page shows a deposit amount but does not say whether it is refundable.',
+      evidenceIds: [],
+    });
     const analysis = applyAiExtraction(
       createInitialAnalysis('https://example.com/rental/flagged'),
       response,
     );
+    const existingNote = {
+      id: 'previously-kept-note',
+      text: 'Previously kept detail',
+      source: 'ai' as const,
+      sourceId: 'note:old-suggestion',
+    };
+    analysis.propertyNotes.push(existingNote);
     const update = vi.fn();
     const root = createRoot(container);
 
     await act(async () => {
       root.render(<AiSourceReview analysis={analysis} update={update} />);
     });
+
+    expect(container.textContent).not.toContain('Suggested property details');
+    expect(container.textContent).not.toContain(
+      response.result.notes.at(-1)!.text,
+    );
+    expect(container.querySelectorAll('.ai-charge')).toHaveLength(1);
 
     const checkbox = container.querySelector<HTMLInputElement>(
       '.ai-charge-note-toggle input',
@@ -134,6 +153,7 @@ describe('analysis editor workflow', () => {
     expect(transform).toBeTypeOf('function');
     const updated = transform!(analysis);
     expect(updated.propertyNotes).toEqual([
+      existingNote,
       expect.objectContaining({
         source: 'ai',
         sourceId: 'fee:security-deposit',

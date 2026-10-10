@@ -2,10 +2,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AiState } from '../ai/session';
 import type { RentalAnalysis } from '../shared/analysis';
 import { adaptExtraction } from '../ai/adapter';
-import {
-  formatReviewIssue,
-  shouldSuggestPropertyNote,
-} from './reviewIssueLabels';
 import { AiMark } from './AiMark';
 
 export interface AiControls {
@@ -136,70 +132,9 @@ export function AiSourceReview({
   const response = analysis.aiExtraction;
   if (!response) return null;
   const { manualCharges } = adaptExtraction(response);
-  const noteDecisionKey = (id: string) => `note:${id}`;
-  const suggestedNotes = response.result.notes.filter(
-    (note) =>
-      shouldSuggestPropertyNote(note) &&
-      !analysis.aiReviewDecisions?.[noteDecisionKey(note.id)],
-  );
+  if (!manualCharges.length) return null;
   return (
     <section className="ai-source-review">
-      {suggestedNotes.length > 0 && (
-        <div className="ai-note-suggestions">
-          <h2>Suggested property details</h2>
-          <p>Keep useful listing details that do not fit the cost inputs.</p>
-          {suggestedNotes.map((note) => (
-            <div className="ai-note-suggestion" key={note.id}>
-              <p>{note.text}</p>
-              <div className="ai-note-actions">
-                <button
-                  type="button"
-                  onClick={() =>
-                    update((current) => {
-                      const next = structuredClone(current);
-                      const key = noteDecisionKey(note.id);
-                      next.aiReviewDecisions ??= {};
-                      next.aiReviewDecisions[key] = 'noted';
-                      if (
-                        !(next.propertyNotes ?? []).some(
-                          (item) => item.sourceId === key,
-                        )
-                      ) {
-                        next.propertyNotes ??= [];
-                        next.propertyNotes.push({
-                          id: crypto.randomUUID(),
-                          text: note.text,
-                          source: 'ai',
-                          sourceId: key,
-                        });
-                      }
-                      next.updatedAt = new Date().toISOString();
-                      return next;
-                    })
-                  }
-                >
-                  Keep note
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    update((current) => {
-                      const next = structuredClone(current);
-                      next.aiReviewDecisions ??= {};
-                      next.aiReviewDecisions[noteDecisionKey(note.id)] =
-                        'excluded';
-                      next.updatedAt = new Date().toISOString();
-                      return next;
-                    })
-                  }
-                >
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
       {manualCharges.length > 0 && (
         <div className="ai-extraction-flags">
           <h2>Flagged during extraction</h2>
@@ -251,85 +186,6 @@ export function AiSourceReview({
           ))}
         </div>
       )}
-      <details className="review-disclosure">
-        <summary>AI source details</summary>
-        <div className="review-disclosure-content">
-          <p>These notes describe the extracted baseline, before your edits.</p>
-          {response.result.reviewIssues.map((issue) => (
-            <p key={issue.id}>{formatReviewIssue(issue)}</p>
-          ))}
-          {response.result.notes.map((note) => (
-            <p key={note.id}>{note.text}</p>
-          ))}
-          {response.result.evidence.map((item) => (
-            <blockquote key={item.id}>{item.quote}</blockquote>
-          ))}
-          <details>
-            <summary>Property facts and qualifications</summary>
-            <dl className="ai-facts">
-              {Object.entries(response.result.property).map(([key, field]) => (
-                <div key={key}>
-                  <dt>{humanLabel(key)}</dt>
-                  <dd>{describeFact(field)}</dd>
-                </div>
-              ))}
-            </dl>
-          </details>
-        </div>
-      </details>
     </section>
   );
-}
-
-const humanLabel = (value: string) =>
-  value.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ');
-function describeFact(value: unknown): string {
-  if (value === null || value === undefined) return 'Not stated';
-  if (Array.isArray(value))
-    return value.length ? value.map(describeFact).join('; ') : 'None stated';
-  if (typeof value !== 'object') return humanLabel(String(value));
-  const record = value as Record<string, unknown>;
-  if ('status' in record) {
-    const scope =
-      record.scope === 'unknown'
-        ? ''
-        : ` (${humanLabel(String(record.scope))})`;
-    if (record.status === 'conflict')
-      return `Conflicting claims: ${describeFact(record.candidates)}${scope}`;
-    if (record.status === 'not_applicable') return 'Not applicable';
-    if (record.status === 'unknown') return 'Not stated';
-    return `${describeFact(record.value)}${scope}`;
-  }
-  if ('minMinor' in record) {
-    const format = (amount: unknown) =>
-      amount === null
-        ? null
-        : `${record.currency} ${(Number(amount) / 100).toFixed(2)}`;
-    const min = format(record.minMinor),
-      max = format(record.maxMinor);
-    const bounds =
-      record.kind === 'exact'
-        ? min
-        : min === null
-          ? `Up to ${max}`
-          : max === null
-            ? `From ${min}`
-            : `${min}–${max}`;
-    return `${bounds}, ${humanLabel(String(record.frequency))}, ${humanLabel(String(record.basis))}`;
-  }
-  if ('min' in record) {
-    const bounds =
-      record.kind === 'exact'
-        ? record.min
-        : record.min === null
-          ? `up to ${record.max}`
-          : record.max === null
-            ? `from ${record.min}`
-            : `${record.min}–${record.max}`;
-    return `${bounds} ${humanLabel(String(record.unit))}`;
-  }
-  return Object.entries(record)
-    .filter(([key]) => !['id', 'evidenceIds'].includes(key))
-    .map(([key, entry]) => `${humanLabel(key)}: ${describeFact(entry)}`)
-    .join(' · ');
 }
