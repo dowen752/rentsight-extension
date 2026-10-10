@@ -1,3 +1,4 @@
+import { extractHousingType } from './housingType';
 import type { SourcedValue } from '../calculations';
 import { apartmentsExtractor } from './apartments';
 import { apartmentListExtractor } from './apartmentList';
@@ -158,6 +159,7 @@ export function extractListing(
     result.rawPetPolicyText ??= layer.rawPetPolicyText;
     result.warnings.push(...layer.warnings);
   }
+  result.listing.identity.housingType ??= extractHousingType(document);
   result.rent =
     siteLayer?.rent ??
     reconcileRent(layers.flatMap((layer) => (layer.rent ? [layer.rent] : [])));

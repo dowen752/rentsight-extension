@@ -33,6 +33,7 @@ import {
   listMissingCostCategories,
   validateRentalListing,
   type ListingIdentity,
+  type HousingType,
   type RecurringCosts,
   type RentConcessions,
   type UpfrontCosts,
@@ -2431,6 +2432,32 @@ export function AnalysisEditor({
               onReset={() => reset('identity', 'bathrooms')}
             />
           </div>
+          <label className="select-field">
+            Housing type
+            <select
+              value={analysis.listing.identity.housingType?.value ?? ''}
+              onChange={(event) =>
+                identity('housingType', event.target.value as HousingType)
+              }
+            >
+              <option value="" disabled>
+                Unknown (standard estimate)
+              </option>
+              <option value="apartment">Apartment</option>
+              <option value="condo">Condo</option>
+              <option value="townhouse">Townhouse</option>
+              <option value="single_family">Single-family home</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          {analysis.listing.identity.housingType?.source === 'user' && (
+            <button
+              type="button"
+              onClick={() => reset('identity', 'housingType')}
+            >
+              Reset housing type
+            </button>
+          )}
           <NumberField
             label="Square feet"
             field={analysis.listing.identity.squareFootage}
@@ -2457,7 +2484,7 @@ export function AnalysisEditor({
                 <NumberField
                   label={UTILITY_LABELS[category]}
                   prefix="$"
-                  field={analysis.listing.recurring[category]}
+                  field={listing.recurring[category]}
                   baseline={analysis.baseline.recurring[category]}
                   disabled={analysis.utilityIncluded[category]}
                   onChange={(value) => recurring(category, value)}

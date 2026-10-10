@@ -19,6 +19,7 @@ export interface ListingIdentity {
   bedrooms?: SourcedValue<number>;
   bathrooms?: SourcedValue<number>;
   squareFootage?: SourcedValue<number>;
+  housingType?: SourcedValue<HousingType>;
 }
 
 export interface RecurringCosts {

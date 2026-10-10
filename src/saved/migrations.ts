@@ -46,7 +46,17 @@ function isSourcedGroup(
     Object.entries(value).every(
       ([key, field]) =>
         key in fields &&
-        (field === undefined || isSourcedValue(field, fields[key])),
+        (field === undefined ||
+          (isSourcedValue(field, fields[key]) &&
+            (key !== 'housingType' ||
+              (isObject(field) &&
+                [
+                  'apartment',
+                  'condo',
+                  'townhouse',
+                  'single_family',
+                  'other',
+                ].includes(String(field.value)))))),
     )
   );
 }
@@ -63,6 +73,7 @@ const IDENTITY_FIELDS = {
   bedrooms: 'number',
   bathrooms: 'number',
   squareFootage: 'number',
+  housingType: 'string',
 } as const;
 
 const RECURRING_FIELDS = {

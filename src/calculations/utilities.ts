@@ -41,6 +41,16 @@ export function estimateUtilities(
   const sizeFactor = 1 + sizeSteps * assumptions.squareFootageAdjustmentPer500;
   const housingFactor = assumptions.housingTypeMultiplier[input.housingType];
   const included = new Set(input.includedUtilities);
+  // Energy depends on household and building characteristics. Water/sewer
+  // follow household usage; trash is a fixed monthly service allowance.
+  const energyFactor =
+    occupantFactor * bedroomFactor * sizeFactor * housingFactor;
+  const categoryFactor = (category: UtilityCategory): number => {
+    if (category === 'electricity' || category === 'naturalGas')
+      return energyFactor;
+    if (category === 'water' || category === 'sewer') return occupantFactor;
+    return 1;
+  };
 
   return Object.fromEntries(
     UTILITY_CATEGORIES.map((category) => {
@@ -49,12 +59,7 @@ export function estimateUtilities(
         : category === 'internet'
           ? assumptions.utilities.internet
           : Math.round(
-              assumptions.utilities[category] *
-                occupantFactor *
-                bedroomFactor *
-                sizeFactor *
-                housingFactor +
-                1e-9,
+              assumptions.utilities[category] * categoryFactor(category) + 1e-9,
             );
       return [
         category,

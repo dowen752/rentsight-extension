@@ -33,6 +33,39 @@ describe('analysis editor workflow', () => {
     vi.unstubAllGlobals();
   });
 
+  it('allows correcting housing type from review inputs', async () => {
+    const analysis = createInitialAnalysis('https://example.com/rental/type');
+    const update = vi.fn();
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(<AnalysisEditor analysis={analysis} update={update} />),
+    );
+    const select = [
+      ...container.querySelectorAll<HTMLSelectElement>('select'),
+    ].find((node) =>
+      node.parentElement?.textContent?.includes('Housing type'),
+    )!;
+    expect(select.value).toBe('');
+    await act(async () => {
+      select.value = 'townhouse';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const next = update.mock.calls[0][0](analysis);
+    expect(next.listing.identity.housingType).toMatchObject({
+      value: 'townhouse',
+      source: 'user',
+    });
+    await act(async () =>
+      root.render(<AnalysisEditor analysis={next} update={update} />),
+    );
+    const electricity = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Electricity"]',
+    );
+    // Utility review must display the same recomputed amount used in results.
+    expect(electricity?.value).toBe('99');
+    await act(async () => root.unmount());
+  });
+
   it('removes completed AI review feedback after inputs are confirmed', async () => {
     const analysis = setRecurringValue(
       createInitialAnalysis('https://example.com/rental/confirmed'),

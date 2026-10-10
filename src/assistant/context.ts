@@ -46,6 +46,7 @@ const analysisSnapshot = (analysis: RentalAnalysis) => {
       bedrooms: identity.bedrooms?.value,
       bathrooms: identity.bathrooms?.value,
       squareFeet: identity.squareFootage?.value,
+      housingType: identity.housingType?.value,
       recurring,
       upfront,
       concessions: listing.concessions,

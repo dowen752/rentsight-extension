@@ -70,6 +70,18 @@ export function validateRentalListing(
     }
   }
 
+  const housingType = listing.identity.housingType?.value;
+  if (
+    housingType !== undefined &&
+    !['apartment', 'condo', 'townhouse', 'single_family', 'other'].includes(
+      housingType,
+    )
+  ) {
+    errors.push({
+      path: 'identity.housingType.value',
+      message: 'Choose a supported housing type.',
+    });
+  }
   const latitude = listing.identity.latitude?.value;
   const longitude = listing.identity.longitude?.value;
   const squareFootage = listing.identity.squareFootage?.value;

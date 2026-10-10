@@ -150,7 +150,7 @@ export function materializeListing(analysis: RentalAnalysis): RentalListing {
   );
   const utilityEstimates = estimateUtilities({
     occupants: household.occupants,
-    housingType: 'apartment',
+    housingType: listing.identity.housingType?.value ?? 'apartment',
     bedrooms: listing.identity.bedrooms?.value,
     squareFootage: listing.identity.squareFootage?.value,
     includedUtilities: UTILITY_CATEGORIES.filter(
@@ -306,7 +306,7 @@ export function applyLocationEstimate(
   next.locationEstimate = estimate;
   const utilityEstimates = estimateUtilities({
     occupants: next.occupants,
-    housingType: 'apartment',
+    housingType: next.listing.identity.housingType?.value ?? 'apartment',
     bedrooms: next.listing.identity.bedrooms?.value,
     squareFootage: next.listing.identity.squareFootage?.value,
     includedUtilities: UTILITY_CATEGORIES.filter(

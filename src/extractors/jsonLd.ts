@@ -1,3 +1,4 @@
+import { parseHousingType } from './housingType';
 import { emptyExtraction, type ListingExtraction } from './types';
 import { listingValue, parseRentEvidence } from './parsers';
 
@@ -72,6 +73,9 @@ export function extractJsonLd(
       }
       for (const node of nodes(JSON.parse(source))) {
         if (!matchesActiveListing(node, pageUrl)) continue;
+        const housingType = parseHousingType(text(node['@type']) ?? '');
+        if (housingType && node.address)
+          listing.identity.housingType ??= listingValue(housingType, 0.9);
         const address = object(node.address) ? node.address : undefined;
         const floorSize = object(node.floorSize)
           ? node.floorSize.value
