@@ -1,4 +1,5 @@
 import type { RentalSearch, SearchCriterion } from './types';
+import { moveInDateFailureMessage } from './moveInDate';
 import {
   APARTMENTS_HOST_PERMISSION,
   APARTMENTS_ORIGIN,
@@ -248,6 +249,21 @@ export async function fillApartmentsSearchPage(
         }),
       );
     }
+  };
+  const moveInDateMatches = (): HTMLInputElement | undefined => {
+    const input = document.querySelector<HTMLInputElement>(
+      '.advancedFilterMoveInDate',
+    );
+    const [year, month, day] = (search.moveInDate ?? '').split('-').map(Number);
+    const [selectedMonth, selectedDay, selectedYear] = (input?.value ?? '')
+      .split('/')
+      .map(Number);
+    return input &&
+      selectedYear === year &&
+      selectedMonth === month &&
+      selectedDay === day
+      ? input
+      : undefined;
   };
   const record = (
     destination: SearchCriterion[],
@@ -651,7 +667,23 @@ export async function fillApartmentsSearchPage(
           const targetYear = Number(parts[1]);
           const targetMonth = Number(parts[2]) - 1;
           const targetDay = Number(parts[3]);
-          input.click();
+          activateCustomControl(input);
+          // Other date pickers (including hidden ones) can coexist on the
+          // page. Use the calendar opened by this input, then its current
+          // month/day labels rather than timezone-dependent timestamps.
+          const container =
+            input.closest(
+              '#advancedFilterMoveInDateContainer, .calendar-input',
+            ) ?? input.parentElement;
+          const calendar = await waitFor(
+            () =>
+              Array.from(
+                (container ?? document).querySelectorAll<HTMLElement>(
+                  '.datepicker-days',
+                ),
+              ).find((candidate) => candidate.getClientRects().length > 0),
+            1_500,
+          );
 
           const monthNames = [
             'JANUARY',
@@ -668,9 +700,8 @@ export async function fillApartmentsSearchPage(
             'DECEMBER',
           ];
           const readVisibleMonth = () => {
-            const label = document.querySelector<HTMLElement>(
-              '.datepicker-days .datepicker-switch',
-            );
+            const label =
+              calendar.querySelector<HTMLElement>('.datepicker-switch');
             if (!label) return undefined;
             const match = (label.textContent ?? '')
               .trim()
@@ -695,10 +726,14 @@ export async function fillApartmentsSearchPage(
               (targetYear - visible.year) * 12 + (targetMonth - visible.month);
             if (delta === 0) break;
             const previousLabel = visible.label.textContent;
-            const navigation = document.querySelector<HTMLElement>(
-              `.datepicker-days .${delta > 0 ? 'next' : 'prev'}`,
+            const navigation = calendar.querySelector<HTMLElement>(
+              `.${delta > 0 ? 'next' : 'prev'}`,
             );
-            if (!navigation || navigation.classList.contains('disabled'))
+            if (
+              !navigation ||
+              navigation.classList.contains('disabled') ||
+              navigation.getAttribute('aria-disabled') === 'true'
+            )
               throw new Error('Move-in calendar navigation was unavailable.');
             navigation.click();
             await waitFor(() => {
@@ -716,32 +751,17 @@ export async function fillApartmentsSearchPage(
             throw new Error('Move-in calendar could not reach the date.');
 
           const targetCell = Array.from(
-            document.querySelectorAll<HTMLElement>(
-              '.datepicker-days td.day[data-date]',
+            calendar.querySelectorAll<HTMLElement>(
+              'td.day:not(.old):not(.new):not(.disabled)',
             ),
-          ).find((cell) => {
-            if (cell.classList.contains('disabled')) return false;
-            const timestamp = Number(cell.dataset.date);
-            if (!Number.isFinite(timestamp)) return false;
-            const candidate = new Date(timestamp);
-            return (
-              candidate.getFullYear() === targetYear &&
-              candidate.getMonth() === targetMonth &&
-              candidate.getDate() === targetDay
-            );
-          });
+          ).find(
+            (cell) =>
+              cell.getAttribute('aria-disabled') !== 'true' &&
+              cell.textContent?.trim() === String(targetDay),
+          );
           if (!targetCell) throw new Error('Move-in date was not available.');
-          targetCell.click();
-          await waitFor(() => {
-            const [selectedMonth, selectedDay, selectedYear] = input.value
-              .split('/')
-              .map(Number);
-            return selectedMonth === targetMonth + 1 &&
-              selectedDay === targetDay &&
-              selectedYear === targetYear
-              ? input
-              : undefined;
-          }, 1_500);
+          activateCustomControl(targetCell);
+          await waitFor(moveInDateMatches, 1_500);
         });
       }
       if (search.minSquareFeet !== undefined) {
@@ -825,6 +845,10 @@ export async function fillApartmentsSearchPage(
     }
   }
 
+  if (applied.includes('moveInDate') && !moveInDateMatches()) {
+    applied.splice(applied.indexOf('moveInDate'), 1);
+    record(failed, 'moveInDate');
+  }
   if (advancedModalOpened)
     document.querySelector<HTMLElement>('#seeResultBtn')?.click();
 
@@ -834,6 +858,7 @@ export async function fillApartmentsSearchPage(
 export async function launchApartmentsSearch(
   search: RentalSearch,
   bootstrapUrl: string,
+  siteAccess?: Promise<boolean>,
 ): Promise<ApartmentsLaunchOutcome> {
   const destination = new URL(bootstrapUrl);
   if (destination.origin !== APARTMENTS_ORIGIN)
@@ -849,9 +874,11 @@ export async function launchApartmentsSearch(
 
   let granted = false;
   try {
-    granted = await chrome.permissions.request({
-      origins: [APARTMENTS_HOST_PERMISSION],
-    });
+    granted = siteAccess
+      ? await siteAccess
+      : await chrome.permissions.request({
+          origins: [APARTMENTS_HOST_PERMISSION],
+        });
   } catch (error: unknown) {
     console.error(
       '[RentSight] Apartments.com site access request failed',
@@ -902,8 +929,9 @@ export async function launchApartmentsSearch(
     if (unapplied.length) {
       return {
         automated: false,
-        message:
-          'Apartments.com opened and applied the available filters. Review the remaining preferences on site.',
+        message: unapplied.includes('moveInDate')
+          ? moveInDateFailureMessage('Apartments.com', search.moveInDate!)
+          : 'Apartments.com opened and applied the available filters. Review the remaining preferences on site.',
       };
     }
     return { automated: true };

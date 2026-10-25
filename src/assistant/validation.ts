@@ -1,4 +1,8 @@
-import { normalizeRentalSearch, type SearchCriterion } from '../search';
+import {
+  normalizeRentalSearch,
+  SEARCH_SITE_ADAPTERS,
+  type SearchCriterion,
+} from '../search';
 import {
   ASSISTANT_COST_FREQUENCIES,
   SAVED_LISTING_CLEARABLE_FIELDS,
@@ -184,11 +188,56 @@ export function acceptAssistantProposal(
   if (!object(value) || !proposalBase(value) || !object(value.arguments))
     return undefined;
   const args = value.arguments;
+  if (value.type === 'household.patch') {
+    if (
+      !hasExactKeys(args, ['set']) ||
+      !object(args.set) ||
+      !Object.keys(args.set).length ||
+      Object.entries(args.set).some(
+        ([key, count]) =>
+          !['occupants', 'cats', 'smallDogs', 'largeDogs'].includes(key) ||
+          typeof count !== 'number' ||
+          !Number.isSafeInteger(count) ||
+          count < (key === 'occupants' ? 1 : 0) ||
+          count > Number.MAX_SAFE_INTEGER,
+      )
+    )
+      return undefined;
+    return value as unknown as AssistantProposal;
+  }
+  if (value.type === 'search.launch') {
+    if (
+      !hasExactKeys(args, ['siteIds']) ||
+      !Array.isArray(args.siteIds) ||
+      !args.siteIds.length ||
+      args.siteIds.length !== 1 ||
+      new Set(args.siteIds).size !== args.siteIds.length ||
+      args.siteIds.some(
+        (id) => !SEARCH_SITE_ADAPTERS.some((site) => site.id === id),
+      )
+    )
+      return undefined;
+    return value as unknown as AssistantProposal;
+  }
   if (value.type === 'search.patch') {
-    if (!object(args.set) || !Array.isArray(args.clear)) return undefined;
+    if (
+      !hasExactKeys(args, ['set', 'clear']) ||
+      !object(args.set) ||
+      !Array.isArray(args.clear) ||
+      (!Object.keys(args.set).length && !args.clear.length) ||
+      new Set(args.clear).size !== args.clear.length ||
+      args.clear.some(
+        (key) => typeof key !== 'string' || key in (args.set as object),
+      )
+    )
+      return undefined;
     const normalized = normalizeRentalSearch(args.set);
     if (
       normalized.issues.length ||
+      Object.keys(normalized.search).length !== Object.keys(args.set).length ||
+      (Array.isArray(args.set.propertyTypes) &&
+        new Set(args.set.propertyTypes).size !==
+          args.set.propertyTypes.length) ||
       Object.keys(args.set).some(
         (key) => !SEARCH_KEYS.has(key as SearchCriterion),
       ) ||

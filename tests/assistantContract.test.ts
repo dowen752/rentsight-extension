@@ -465,7 +465,7 @@ describe('assistant contract', () => {
       proposals: [
         {
           id: 'launch-1',
-          type: 'search.launch',
+          type: 'future.unsupported_action',
           explanation: 'Open a search.',
           arguments: { siteIds: ['zillow'] },
         },

@@ -1,3 +1,4 @@
+import { extractAdditionalFees } from './fees';
 import { extractHousingType } from './housingType';
 import type { SourcedValue } from '../calculations';
 import { apartmentsExtractor } from './apartments';
@@ -159,6 +160,7 @@ export function extractListing(
     result.rawPetPolicyText ??= layer.rawPetPolicyText;
     result.warnings.push(...layer.warnings);
   }
+  extractAdditionalFees(document, result);
   result.listing.identity.housingType ??= extractHousingType(document);
   result.rent =
     siteLayer?.rent ??

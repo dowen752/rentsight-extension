@@ -3,13 +3,13 @@ import {
   classifyLaundry,
   classifyNoPetsPolicy,
   listingValue,
-  parseMoney,
   parseBedBathShorthand,
   parseNumberNear,
   parseRentEvidence,
   parseUsAddress,
 } from './parsers';
 import { emptyExtraction, type ListingExtractor } from './types';
+import { FEE_NOISE, feeRoot } from './feeRows';
 
 const MAX_PAGE_TEXT = 300_000;
 const MAX_VISIBLE_FRAGMENTS = 2_000;
@@ -22,7 +22,9 @@ export const genericExtractor: ListingExtractor = {
     const result = emptyExtraction(this.siteName, this.version);
     // textContent avoids a forced layout. Bound all generic work because this
     // code executes on the host page's main thread.
-    const body = (document.body?.textContent ?? '').slice(0, MAX_PAGE_TEXT);
+    const content = feeRoot(document).cloneNode(true) as Element;
+    content.querySelectorAll(FEE_NOISE).forEach((node) => node.remove());
+    const body = (content.textContent ?? '').slice(0, MAX_PAGE_TEXT);
     result.listing.identity.listingTitle = document.title
       ? listingValue(document.title, 0.55)
       : undefined;
@@ -50,7 +52,7 @@ export const genericExtractor: ListingExtractor = {
       );
     }
     const visibleFragments: string[] = [];
-    for (const node of document.querySelectorAll(
+    for (const node of content.querySelectorAll(
       'h1, h2, p, li, [data-testid*="rent"]',
     )) {
       visibleFragments.push((node.textContent ?? '').trim().slice(0, 2_000));
@@ -100,59 +102,6 @@ export const genericExtractor: ListingExtractor = {
       );
     if (squareFeet !== undefined)
       result.listing.identity.squareFootage = listingValue(squareFeet, 0.58);
-    const depositText = body.match(/security deposit[^\n.]*\$[\d,]+/i)?.[0];
-    const applicationText = body.match(/application fee[^\n.]*\$[\d,]+/i)?.[0];
-    const parkingText = body.match(
-      /parking[^\n.]*\$[\d,]+(?:\s*\/\s*(?:mo|month))?/i,
-    )?.[0];
-    const petText = body.match(/pet rent[^\n.]*\$[\d,]+/i)?.[0];
-    const petFeeText = body.match(/pet fee[^\n.]*\$[\d,]+/i)?.[0];
-    if (depositText)
-      result.listing.upfront.securityDeposit = listingValue(
-        parseMoney(depositText)!,
-        0.6,
-        depositText,
-      );
-    if (applicationText)
-      result.listing.upfront.applicationFee = listingValue(
-        parseMoney(applicationText)!,
-        0.6,
-        applicationText,
-      );
-    if (parkingText)
-      result.listing.recurring.parking = listingValue(
-        parseMoney(parkingText)!,
-        0.55,
-        parkingText,
-      );
-    if (petText)
-      result.listing.recurring.petRent = listingValue(
-        parseMoney(petText)!,
-        0.5,
-        petText,
-      );
-    if (petFeeText)
-      result.listing.upfront.otherMoveInFees = listingValue(
-        parseMoney(petFeeText)!,
-        0.5,
-        petFeeText,
-      );
-    const adminText = body.match(/administrative fee[^\n.]*\$[\d,]+/i)?.[0];
-    const amenityText = body.match(
-      /(?:required )?amenity fee[^\n.]*\$[\d,]+/i,
-    )?.[0];
-    if (adminText)
-      result.listing.upfront.administrativeFee = listingValue(
-        parseMoney(adminText)!,
-        0.55,
-        adminText,
-      );
-    if (amenityText)
-      result.listing.recurring.amenityFees = listingValue(
-        parseMoney(amenityText)!,
-        0.5,
-        amenityText,
-      );
     const lease = parseNumberNear(body, /(\d+)\s*(?:-\s*)?month lease/i);
     const freeMonths = parseNumberNear(body, /(\d+(?:\.\d+)?)\s*months? free/i);
     if (lease !== undefined || freeMonths !== undefined) {

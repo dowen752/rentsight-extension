@@ -113,9 +113,9 @@ function HouseholdDetails({
     >
       <h2 id="search-household-heading">Your household</h2>
       <p>
-        Saved across sessions and used for utility estimates, pet-friendly
-        search filters, and applicable pet costs. Pet counts stay in RentSight;
-        only matching cat or dog filters are applied to rental sites.
+        Your household details are saved for future searches and used to
+        estimate utilities, find pet-friendly rentals, and calculate applicable
+        pet costs.
       </p>
       <div className="household-fields">
         <SearchNumberInput
@@ -171,7 +171,7 @@ export function FindRentalsView({
   openZillow = launchZillowSearch,
 }: {
   householdProfile?: HouseholdProfile;
-  updateHouseholdProfile?: (profile: HouseholdProfile) => void;
+  updateHouseholdProfile?: (profile: HouseholdProfile) => void | Promise<void>;
   openUrl?: (url: string) => Promise<unknown>;
   openApartments?: (
     search: RentalSearch,
@@ -389,7 +389,11 @@ export function FindRentalsView({
 
       <HouseholdDetails
         profile={householdProfile}
-        onChange={updateHouseholdProfile}
+        onChange={(profile) => {
+          void Promise.resolve(updateHouseholdProfile(profile)).catch(() =>
+            setMessage('Could not save your household. Please try again.'),
+          );
+        }}
       />
 
       <form

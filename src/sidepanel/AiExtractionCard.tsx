@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AiState } from '../ai/session';
-import type { RentalAnalysis } from '../shared/analysis';
+import { decidePropertyNote, type RentalAnalysis } from '../shared/analysis';
 import { adaptExtraction } from '../ai/adapter';
 import { AiMark } from './AiMark';
 
@@ -130,9 +130,59 @@ export function AiSourceReview({
   update: (transform: (current: RentalAnalysis) => RentalAnalysis) => void;
 }) {
   const response = analysis.aiExtraction;
-  if (!response) return null;
-  const { manualCharges } = adaptExtraction(response);
+  const manualCharges = [
+    ...(response ? adaptExtraction(response).manualCharges : []),
+    ...(analysis.extraction?.feeNoteSuggestions ?? []),
+  ]
+    .filter(
+      (charge, index, charges) =>
+        charges.findIndex((other) => other.id === charge.id) === index,
+    )
+    .filter((charge) => analysis.aiReviewDecisions?.[charge.id] !== 'excluded');
   if (!manualCharges.length) return null;
+  const chargeCards = manualCharges.map((charge) => (
+    <div className="ai-charge" key={charge.id}>
+      <strong>{charge.label}</strong>
+      <p>
+        <span>Current understanding:</span> {charge.detail}
+      </p>
+      <label className="ai-charge-note-toggle">
+        <input
+          type="checkbox"
+          checked={(analysis.propertyNotes ?? []).some(
+            (note) => note.sourceId === charge.id,
+          )}
+          onChange={(event) => {
+            const checked = event.target.checked;
+            update((current) =>
+              decidePropertyNote(
+                current,
+                charge,
+                checked,
+                response ? 'ai' : 'listing',
+              ),
+            );
+          }}
+        />
+        <span>Keep as a property note</span>
+      </label>
+      <button
+        type="button"
+        onClick={() =>
+          update((current) =>
+            decidePropertyNote(
+              current,
+              charge,
+              false,
+              response ? 'ai' : 'listing',
+            ),
+          )
+        }
+      >
+        Dismiss
+      </button>
+    </div>
+  ));
   return (
     <section className="ai-source-review">
       {manualCharges.length > 0 && (
@@ -142,48 +192,13 @@ export function AiSourceReview({
             Review what RentSight found. You can update the related inputs, keep
             any detail as a property note, or continue without changes.
           </p>
-          {manualCharges.map((charge) => (
-            <div className="ai-charge" key={charge.id}>
-              <strong>{charge.label}</strong>
-              <p>
-                <span>Current understanding:</span> {charge.detail}
-              </p>
-              <label className="ai-charge-note-toggle">
-                <input
-                  type="checkbox"
-                  checked={(analysis.propertyNotes ?? []).some(
-                    (note) =>
-                      note.source === 'ai' && note.sourceId === charge.id,
-                  )}
-                  onChange={(event) => {
-                    const checked = event.target.checked;
-                    update((current) => {
-                      const next = structuredClone(current);
-                      next.aiReviewDecisions ??= {};
-                      next.propertyNotes = (next.propertyNotes ?? []).filter(
-                        (note) =>
-                          !(
-                            note.source === 'ai' && note.sourceId === charge.id
-                          ),
-                      );
-                      if (checked) {
-                        next.aiReviewDecisions[charge.id] = 'noted';
-                        next.propertyNotes.push({
-                          id: crypto.randomUUID(),
-                          text: `${charge.label}: ${charge.detail}`,
-                          source: 'ai',
-                          sourceId: charge.id,
-                        });
-                      } else delete next.aiReviewDecisions[charge.id];
-                      next.updatedAt = new Date().toISOString();
-                      return next;
-                    });
-                  }}
-                />
-                <span>Keep as a property note</span>
-              </label>
-            </div>
-          ))}
+          {chargeCards.slice(0, 3)}
+          {chargeCards.length > 3 && (
+            <details className="ai-charge-more">
+              <summary>Show {chargeCards.length - 3} more details</summary>
+              {chargeCards.slice(3)}
+            </details>
+          )}
         </div>
       )}
     </section>

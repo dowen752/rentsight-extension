@@ -3,8 +3,17 @@ import {
   parseMoney,
   parseNumberNear,
   parseUsAddress,
+  parseRentEvidence,
+  classifyIncludedUtilities,
+  classifyLaundry,
 } from './parsers';
 import { emptyExtraction, type ListingExtractor } from './types';
+import {
+  listingText,
+  realtorFeeRows,
+  realtorListingRoot,
+  REALTOR_NOISE,
+} from './realtorDom';
 
 const clean = (value: string | null | undefined) =>
   value?.trim().replace(/\s+/g, ' ') ?? '';
@@ -20,14 +29,20 @@ const uniqueNumbers = (values: Array<number | undefined>) => [
  */
 export const realtorExtractor: ListingExtractor = {
   siteName: 'Realtor.com',
-  version: '1.0.0',
+  version: '1.1.0',
   matches: (url) => /(?:^|\.)realtor\.com$/i.test(url.hostname),
   extract(document, url) {
     const result = emptyExtraction(this.siteName, this.version);
     result.listing.identity.url = listingValue(url.toString(), 1);
 
-    const pageText = clean(document.body?.textContent);
-    const address = parseUsAddress(pageText);
+    const root = realtorListingRoot(document);
+    const heading =
+      root.querySelector('[data-testid="address"]') ??
+      [...root.querySelectorAll('h1,h2')].find(
+        (node) =>
+          !node.closest(REALTOR_NOISE) && parseUsAddress(listingText(node)),
+      );
+    const address = parseUsAddress(listingText(heading));
     if (address) {
       result.listing.identity.fullAddress = listingValue(
         address.fullAddress,
@@ -39,6 +54,63 @@ export const realtorExtractor: ListingExtractor = {
       result.listing.identity.zipCode = listingValue(address.zipCode, 0.94);
     }
 
+    const price =
+      root.querySelector(
+        '[data-testid="rentals-list-price"] [data-rui="Price"]',
+      ) ?? root.querySelector('[data-testid="rentals-list-price"]');
+    const baseRent = realtorFeeRows(root).find((row) =>
+      /^monthly base rent$/i.test(row.label),
+    );
+    result.rent = parseRentEvidence(
+      [baseRent?.amountText ?? listingText(price)],
+      0.98,
+    );
+    if (result.rent?.kind === 'single')
+      result.listing.recurring.advertisedRent = result.rent.amount;
+    for (const [testId, key] of [
+      ['property-meta-beds', 'bedrooms'],
+      ['property-meta-baths', 'bathrooms'],
+      ['property-meta-sqft', 'squareFootage'],
+    ] as const) {
+      const node = root.querySelector(
+        `[data-testid="home-facts"] [data-testid="${testId}"]`,
+      );
+      const text = listingText(node);
+      const valueText = clean(
+        node?.querySelector('[data-testid="meta-value"]')?.textContent,
+      );
+      if (/\d\s*(?:-|–|—|to)\s*\d|studio\s*[-–—]/i.test(valueText || text))
+        continue;
+      const numericText = valueText || text.match(/^[\d,.]+/)?.[0];
+      if (!numericText && !/^studio\b/i.test(text)) continue;
+      const value = /^studio\b/i.test(text)
+        ? 0
+        : Number((numericText ?? '').replaceAll(',', ''));
+      if (
+        (valueText || text) &&
+        Number.isFinite(value) &&
+        value >= 0 &&
+        (key === 'squareFootage' ? value > 0 : value <= 20)
+      )
+        result.listing.identity[key] = listingValue(value, 0.98, text);
+    }
+    for (const node of root.querySelectorAll('li')) {
+      if (node.closest(REALTOR_NOISE)) continue;
+      const text = listingText(node);
+      const deposit = text.match(
+        /^Security Deposit:\s*\$?\s*([\d,]+(?:\.\d{1,2})?)\s*$/i,
+      );
+      if (deposit)
+        result.listing.upfront.securityDeposit = listingValue(
+          Number(deposit[1].replaceAll(',', '')),
+          0.98,
+          text,
+        );
+    }
+    const propertyText = listingText(root);
+    result.includedUtilities = classifyIncludedUtilities(propertyText);
+    result.laundryType = classifyLaundry(propertyText);
+
     const modal = Array.from(
       document.querySelectorAll<HTMLElement>(
         '[role="dialog"][aria-modal="true"]',
@@ -48,20 +120,20 @@ export const realtorExtractor: ListingExtractor = {
     );
     if (!modal) return result;
 
-    const heading = clean(modal.querySelector('h1,h2,h3,h4')?.textContent);
-    const plan = heading.match(
+    const planHeading = clean(modal.querySelector('h1,h2,h3,h4')?.textContent);
+    const plan = planHeading.match(
       /(^|\b)(\d+(?:\.\d+)?)\s*BR\s*\/\s*(\d+(?:\.\d+)?)\s*BA\b/i,
     );
     if (plan) {
       result.listing.identity.bedrooms = listingValue(
         Number(plan[2]),
         0.99,
-        heading,
+        planHeading,
       );
       result.listing.identity.bathrooms = listingValue(
         Number(plan[3]),
         0.99,
-        heading,
+        planHeading,
       );
     }
 

@@ -19,6 +19,8 @@ import {
 } from './household';
 
 export interface CustomFee {
+  source?: 'listing' | 'user';
+  evidence?: string;
   id: string;
   label: string;
   amount: number;
@@ -33,7 +35,7 @@ export interface PaidLaundryDetails {
 export interface PropertyNote {
   id: string;
   text: string;
-  source: 'user' | 'ai';
+  source: 'user' | 'ai' | 'listing';
   sourceId?: string;
 }
 
@@ -196,7 +198,7 @@ export function materializeListing(analysis: RentalAnalysis): RentalListing {
     (sum, fee) => sum + fee.amount,
     0,
   );
-  if (recurringCustom > 0) {
+  if (analysis.customRecurringFees.length > 0) {
     listing.recurring.otherRequiredMonthlyFees = {
       value:
         (listing.recurring.otherRequiredMonthlyFees?.value ?? 0) +
@@ -223,7 +225,9 @@ export function materializeListing(analysis: RentalAnalysis): RentalListing {
     ]) {
       if (
         field?.source === 'listing' &&
-        /\bper (?:each )?pet\b/i.test(field.note ?? '')
+        (field.billingBasis === 'per_pet' ||
+          (field.billingBasis === undefined &&
+            /\bper (?:each )?pet\b/i.test(field.note ?? '')))
       )
         field.value *= petCount;
     }
@@ -561,6 +565,27 @@ export function applyExtraction(
   next.utilityIncludedSource ??= Object.fromEntries(
     UTILITY_CATEGORIES.map((item) => [item, 'default']),
   ) as Record<UtilityCategory, ValueSource>;
+  extraction = structuredClone(extraction);
+  const incoming = extraction.namedRecurringFees ?? [];
+  next.customRecurringFees = next.customRecurringFees.filter(
+    (f) => f.source !== 'listing' || incoming.some((i) => i.id === f.id),
+  );
+  for (const fee of incoming) {
+    if (next.userClearedFields.includes(`fee.${fee.id}`)) continue;
+    const current = next.customRecurringFees.find((f) => f.id === fee.id);
+    if (current && current.source !== 'listing') continue;
+    if (current) Object.assign(current, fee);
+    else next.customRecurringFees.push(structuredClone(fee));
+  }
+  if (incoming.length) {
+    const aggregate = extraction.listing.recurring.otherRequiredMonthlyFees;
+    if (aggregate) {
+      const remainder =
+        aggregate.value - incoming.reduce((sum, fee) => sum + fee.amount, 0);
+      if (remainder > 0) aggregate.value = remainder;
+      else delete extraction.listing.recurring.otherRequiredMonthlyFees;
+    }
+  }
   const extractedIdentity = { ...extraction.listing.identity };
   removeStaleExtractedGroup(
     next.listing.identity as Record<string, SourcedValue<unknown> | undefined>,
@@ -702,8 +727,34 @@ export function applyExtraction(
     next.laundryType = extraction.laundryType;
   }
   delete next.aiExtraction;
-  delete next.aiReviewDecisions;
   next.extraction = structuredClone(extraction);
+  next.updatedAt = new Date().toISOString();
+  return next;
+}
+
+export function decidePropertyNote(
+  analysis: RentalAnalysis,
+  suggestion: { id: string; label: string; detail: string },
+  keep: boolean,
+  source: 'ai' | 'listing',
+): RentalAnalysis {
+  const next = structuredClone(analysis);
+  next.aiReviewDecisions ??= {};
+  next.aiReviewDecisions[suggestion.id] = keep ? 'noted' : 'excluded';
+  const existing = next.propertyNotes.find(
+    (note) => note.sourceId === suggestion.id,
+  );
+  if (keep && !existing)
+    next.propertyNotes.push({
+      id: crypto.randomUUID(),
+      text: `${suggestion.label}: ${suggestion.detail}`,
+      source,
+      sourceId: suggestion.id,
+    });
+  if (!keep)
+    next.propertyNotes = next.propertyNotes.filter(
+      (note) => note.sourceId !== suggestion.id,
+    );
   next.updatedAt = new Date().toISOString();
   return next;
 }

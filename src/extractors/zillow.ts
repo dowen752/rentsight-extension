@@ -234,7 +234,7 @@ function visibleAddressText(document: Document): string | undefined {
 
 export const zillowExtractor: ListingExtractor = {
   siteName: 'Zillow',
-  version: '1.2.0',
+  version: '1.3.0',
   matches(url) {
     return (
       /(^|\.)zillow\.com$/i.test(url.hostname) &&
@@ -417,7 +417,7 @@ export const zillowExtractor: ListingExtractor = {
       utilityManagement: calculatorCharge(
         document,
         'utilities-monthly-fee-fee',
-        /utility management fee/i,
+        /utilit(?:y|ies) (?:management|admin(?:istration|istrative)?|billing|service) fee/i,
       ),
     };
     const deposit =
@@ -443,7 +443,7 @@ export const zillowExtractor: ListingExtractor = {
     );
     const proseAdministrativeFee = parseLabeledMoney(
       propertyText,
-      /(?:administrative|admin) fee/i,
+      /(?<!utility )(?<!utilities )(?:administrative|admin) fee/i,
     );
     const prosePetRent = parseLabeledMoney(
       propertyText,
@@ -451,7 +451,7 @@ export const zillowExtractor: ListingExtractor = {
     );
     const proseUtilityManagement = parseLabeledMoney(
       propertyText,
-      /utility management fee/i,
+      /utilit(?:y|ies) (?:management|admin(?:istration|istrative)?|billing|service) fee/i,
     );
     const applicationFee = calculator.applicationFee ?? proseApplicationFee;
     const administrativeFee =
@@ -514,12 +514,6 @@ export const zillowExtractor: ListingExtractor = {
         calculator.trash.amount,
         0.9,
         calculator.trash.rawText,
-      );
-    if (calculator.utilityManagement)
-      result.listing.recurring.otherRequiredMonthlyFees = listingValue(
-        calculator.utilityManagement.amount,
-        0.9,
-        calculator.utilityManagement.rawText,
       );
     result.includedUtilities = classifyIncludedUtilities(propertyText);
     result.rawUtilityText =

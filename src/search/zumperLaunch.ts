@@ -431,14 +431,17 @@ async function waitForTab(
 export async function launchZumperSearch(
   search: RentalSearch,
   bootstrapUrl: string,
+  siteAccess?: Promise<boolean>,
 ): Promise<ZumperLaunchOutcome> {
   if (!search.location) {
     await chrome.tabs.create({ url: bootstrapUrl });
     return { automated: true };
   }
-  const granted = await chrome.permissions.request({
-    origins: [ZUMPER_HOST_PERMISSION],
-  });
+  const granted = siteAccess
+    ? await siteAccess
+    : await chrome.permissions.request({
+        origins: [ZUMPER_HOST_PERMISSION],
+      });
   if (!granted) {
     await chrome.tabs.create({ url: bootstrapUrl });
     return {

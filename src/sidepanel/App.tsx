@@ -1,3 +1,4 @@
+import { ExpandablePropertyNote } from './ExpandablePropertyNote';
 import { accountSession, rentSightApi } from '../backend/services';
 import { deleteCurrentUser } from '../auth';
 import { ExtractionSession } from '../ai/session';
@@ -206,7 +207,7 @@ function FeeEditor({ title, fees, onChange }: FeeEditorProps) {
                 onChange(
                   fees.map((item, itemIndex) =>
                     itemIndex === index
-                      ? { ...item, label: event.target.value }
+                      ? { ...item, label: event.target.value, source: 'user' }
                       : item,
                   ),
                 )
@@ -221,13 +222,21 @@ function FeeEditor({ title, fees, onChange }: FeeEditorProps) {
               onCommit={(value) =>
                 onChange(
                   fees.map((item, itemIndex) =>
-                    itemIndex === index ? { ...item, amount: value } : item,
+                    itemIndex === index
+                      ? { ...item, amount: value, source: 'user' }
+                      : item,
                   ),
                 )
               }
             />
           </label>
-          <span className="source source-user">Entered by user</span>
+          <span
+            className={`source source-${fee.source === 'listing' ? 'listing' : 'user'}`}
+          >
+            {fee.source === 'listing'
+              ? 'Extracted from listing'
+              : 'Entered by user'}
+          </span>
           <button
             type="button"
             className="remove"
@@ -304,6 +313,17 @@ export function App() {
             throw new Error();
           return response.payload;
         },
+        undefined,
+        () => {
+          setView((current) =>
+            current.status === 'ready'
+              ? {
+                  ...current,
+                  analysis: retainPreliminaryAfterAiFailure(current.analysis),
+                }
+              : current,
+          );
+        },
       ),
   );
   const aiState = useSyncExternalStore(
@@ -311,19 +331,6 @@ export function App() {
     aiSession.getSnapshot,
     aiSession.getSnapshot,
   );
-  const failedRequestId =
-    aiState.status === 'failed' ? aiState.requestId : undefined;
-  useEffect(() => {
-    if (!failedRequestId) return;
-    setView((current) =>
-      current.status === 'ready'
-        ? {
-            ...current,
-            analysis: retainPreliminaryAfterAiFailure(current.analysis),
-          }
-        : current,
-    );
-  }, [failedRequestId]);
   const aiPage = view.status === 'ready' ? view.aiPage : undefined;
   const accountId = account.user?.uid;
   const accountStatus = account.status;
@@ -635,13 +642,9 @@ export function App() {
     });
   };
 
-  const updateHouseholdProfile = (profile: HouseholdProfile) => {
+  const updateHouseholdProfile = async (profile: HouseholdProfile) => {
     const normalized = normalizeHouseholdProfile(profile);
-    void extensionStorage
-      .set('householdProfile', normalized)
-      .catch((error) =>
-        console.error('[RentSight] Could not save household profile', error),
-      );
+    await extensionStorage.set('householdProfile', normalized);
     setView((current) =>
       current.status === 'ready'
         ? {
@@ -906,19 +909,12 @@ export function UnavailableWorkspace({
     setSavedListings(records);
   };
 
-  const updateHouseholdProfile = (profile: HouseholdProfile) => {
+  const updateHouseholdProfile = async (profile: HouseholdProfile) => {
     const normalized = normalizeHouseholdProfile(profile);
+    await extensionStorage.set('householdProfile', normalized);
     setHouseholdProfile(normalized);
-    void extensionStorage
-      .set('householdProfile', normalized)
-      .catch((error) =>
-        setNotice(
-          error instanceof Error
-            ? error.message
-            : 'Could not save the household profile.',
-        ),
-      );
   };
+
   const activeTab = hasActivePass || tab !== 'ask' ? tab : 'current';
 
   return (
@@ -945,6 +941,8 @@ export function UnavailableWorkspace({
       {hasActivePass ? (
         <div hidden={activeTab !== 'ask'}>
           <AssistantView
+            householdProfile={householdProfile}
+            updateHouseholdProfile={updateHouseholdProfile}
             savedListings={savedListings}
             selectedSavedListingIds={assistantSavedListingIds}
             setSelectedSavedListingIds={setAssistantSavedListingIds}
@@ -1054,7 +1052,7 @@ function Workspace({
   deleteAllData: () => Promise<void>;
   onboardingCompleted: boolean;
   householdProfile: HouseholdProfile;
-  updateHouseholdProfile: (profile: HouseholdProfile) => void;
+  updateHouseholdProfile: (profile: HouseholdProfile) => Promise<void>;
   refreshCurrent: () => Promise<void>;
   exportExtractionCapture?: () => void;
 }) {
@@ -1195,22 +1193,32 @@ function Workspace({
       {hasActivePass ? (
         <div hidden={activeTab !== 'ask'}>
           <AssistantView
+            householdProfile={householdProfile}
+            updateHouseholdProfile={updateHouseholdProfile}
             analysis={analysis}
             savedListings={savedListings}
             selectedSavedListingIds={assistantSavedListingIds}
             setSelectedSavedListingIds={setAssistantSavedListingIds}
             navigate={(destination) => setTab(destination)}
-            updateAnalysis={(proposal: AssistantProposal) => {
-              if (proposal.type === 'analysis.set_cost')
-                update((current) => applyCostProposal(current, proposal));
-              else if (proposal.type === 'property_note.add')
-                update((current) =>
-                  addAssistantPropertyNote(
-                    current,
-                    proposal.id,
-                    proposal.arguments.text,
-                  ),
+            updateAnalysis={async (proposal: AssistantProposal) => {
+              const next =
+                proposal.type === 'analysis.set_cost'
+                  ? applyCostProposal(analysis, proposal)
+                  : proposal.type === 'property_note.add'
+                    ? addAssistantPropertyNote(
+                        analysis,
+                        proposal.id,
+                        proposal.arguments.text,
+                      )
+                    : undefined;
+              if (!next)
+                throw new Error(
+                  'This change is not supported for the current listing.',
                 );
+              if (!currentUrl)
+                throw new Error('The current listing is no longer available.');
+              await setRentalAnalysis(currentUrl, next);
+              update(() => next);
             }}
             updateSavedListing={updateSavedListingFromAssistant}
           />
@@ -1685,7 +1693,7 @@ function downloadData(filename: string, content: string, type: string): void {
   URL.revokeObjectURL(url);
 }
 
-function SavedListingsView({
+export function SavedListingsView({
   records,
   householdProfile,
   selected,
@@ -1706,6 +1714,8 @@ function SavedListingsView({
   openCompare: () => void;
   askAboutListings?: (ids: string[]) => void;
 }) {
+  const [moreOptionsOpen, setMoreOptionsOpen] = useState(false);
+  const moreOptionsId = useId();
   const selectedRecords = records.filter((record) =>
     selected.includes(record.id),
   );
@@ -1776,48 +1786,56 @@ function SavedListingsView({
         >
           Select all
         </button>
-        <details className="collection-more">
-          <summary>
-            <span>More options</span>
-            <span className="disclosure-icon" aria-hidden="true" />
-          </summary>
-          <div className="collection-more-options">
-            <button
-              type="button"
-              disabled={exportedRecords.length === 0}
-              onClick={() =>
-                downloadData(
-                  'rentsight-listings.json',
-                  exportListingsJson(exportedRecords),
-                  'application/json',
-                )
-              }
-            >
-              Download {exportScope} backup
-            </button>
-            <label className="import-button">
-              Restore RentSight backup
-              <input
-                type="file"
-                accept="application/json,.json"
-                onChange={(event) => void importFile(event.target.files?.[0])}
-              />
-            </label>
-            <button
-              type="button"
-              disabled={exportedRecords.length === 0}
-              onClick={() =>
-                downloadData(
-                  'rentsight-listings.csv',
-                  exportListingsCsv(exportedRecords, householdProfile),
-                  'text/csv',
-                )
-              }
-            >
-              Download {exportScope} spreadsheet
-            </button>
-          </div>
-        </details>
+        <button
+          type="button"
+          className="collection-more-toggle"
+          aria-expanded={moreOptionsOpen}
+          aria-controls={moreOptionsId}
+          onClick={() => setMoreOptionsOpen((open) => !open)}
+        >
+          More options
+          <span className="disclosure-icon" aria-hidden="true" />
+        </button>
+        <div
+          id={moreOptionsId}
+          className="collection-more-options"
+          hidden={!moreOptionsOpen}
+        >
+          <button
+            type="button"
+            disabled={exportedRecords.length === 0}
+            onClick={() =>
+              downloadData(
+                'rentsight-listings.json',
+                exportListingsJson(exportedRecords),
+                'application/json',
+              )
+            }
+          >
+            Download {exportScope} backup
+          </button>
+          <label className="import-button">
+            Restore RentSight backup
+            <input
+              type="file"
+              accept="application/json,.json"
+              onChange={(event) => void importFile(event.target.files?.[0])}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={exportedRecords.length === 0}
+            onClick={() =>
+              downloadData(
+                'rentsight-listings.csv',
+                exportListingsCsv(exportedRecords, householdProfile),
+                'text/csv',
+              )
+            }
+          >
+            Download {exportScope} spreadsheet
+          </button>
+        </div>
       </div>
       {records.length === 0 ? (
         <section>
@@ -1916,7 +1934,7 @@ function comparableValue(value: unknown): number | undefined {
   return undefined;
 }
 
-function ComparisonView({
+export function ComparisonView({
   records,
   householdProfile,
   askAboutListings,
@@ -2073,7 +2091,7 @@ function ComparisonView({
                           {item.notes.map((note) => (
                             <li key={note.id}>
                               {note.source === 'ai' && <AiMark />}
-                              <span>{note.text}</span>
+                              <ExpandablePropertyNote text={note.text} />
                             </li>
                           ))}
                         </ul>
@@ -2104,8 +2122,10 @@ function PropertyNotesEditor({
   notes,
   onAdd,
   onRemove,
+  onEdit,
 }: {
   notes: PropertyNote[];
+  onEdit: (id: string, text: string) => void;
   onAdd: (text: string) => void;
   onRemove: (id: string) => void;
 }) {
@@ -2128,7 +2148,11 @@ function PropertyNotesEditor({
             {notes.map((note) => (
               <li key={note.id}>
                 {note.source === 'ai' && <AiMark />}
-                <span>{note.text}</span>
+                <input
+                  aria-label="Property note"
+                  value={note.text}
+                  onChange={(event) => onEdit(note.id, event.target.value)}
+                />
                 <button
                   type="button"
                   className="remove-note"
@@ -2313,20 +2337,6 @@ export function AnalysisEditor({
           </section>
         )}
 
-      {!confirmed && analysis.locationEstimate && (
-        <section className="location-note" aria-labelledby="location-heading">
-          <h2 id="location-heading">Local estimate context</h2>
-          <p>
-            {analysis.locationEstimate.location.city},{' '}
-            {analysis.locationEstimate.location.state}{' '}
-            {analysis.locationEstimate.location.zipCode}: utility assumptions
-            adjusted{' '}
-            {analysis.locationEstimate.utilityAdjustmentFactor.toFixed(2)}×
-            using local configuration.
-          </p>
-        </section>
-      )}
-
       {!confirmed && !validation.valid && (
         <section className="warning" aria-labelledby="validation-heading">
           <h2 id="validation-heading">Fix these values</h2>
@@ -2478,6 +2488,24 @@ export function AnalysisEditor({
 
       {!confirmed && (
         <ReviewDisclosure title="Utilities">
+          <div className="utility-estimate-note">
+            <strong>Estimated monthly costs</strong>
+            <p>
+              Where listing costs are missing, we estimate using your household
+              details and{' '}
+              {analysis.locationEstimate ? (
+                <>
+                  regional assumptions for{' '}
+                  {analysis.locationEstimate.location.city},{' '}
+                  {analysis.locationEstimate.location.state}
+                </>
+              ) : (
+                'general utility assumptions'
+              )}
+              . Actual bills may vary. Edit any amount or mark it included in
+              rent.
+            </p>
+          </div>
           <div className="utility-list">
             {UTILITY_CATEGORIES.map((category) => (
               <div className="utility" key={category}>
@@ -2614,7 +2642,16 @@ export function AnalysisEditor({
             title="Add custom recurring fee"
             fees={analysis.customRecurringFees}
             onChange={(fees) =>
-              update((current) => ({ ...current, customRecurringFees: fees }))
+              update((current) => ({
+                ...current,
+                customRecurringFees: fees,
+                userClearedFields: [
+                  ...(current.userClearedFields ?? []),
+                  ...current.customRecurringFees
+                    .filter((f) => !fees.some((next) => next.id === f.id))
+                    .map((f) => `fee.${f.id}`),
+                ],
+              }))
             }
           />
         </ReviewDisclosure>
@@ -2688,6 +2725,15 @@ export function AnalysisEditor({
         <PropertyNotesEditor
           notes={analysis.propertyNotes ?? []}
           onAdd={addPropertyNote}
+          onEdit={(id, text) =>
+            update((current) => ({
+              ...current,
+              propertyNotes: current.propertyNotes.map((note) =>
+                note.id === id ? { ...note, text } : note,
+              ),
+              updatedAt: new Date().toISOString(),
+            }))
+          }
           onRemove={(id) =>
             update((current) => ({
               ...current,

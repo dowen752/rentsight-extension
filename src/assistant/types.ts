@@ -1,7 +1,10 @@
+import type { HouseholdProfile } from '../shared/household';
 import type { RentalSearch, SearchCriterion } from '../search';
 
 export const ASSISTANT_ACTION_VERSIONS = {
-  'search.patch': '1.0',
+  'search.patch': '2.0',
+  'household.patch': '1.0',
+  'search.launch': '2.0',
   'analysis.set_cost': '1.0',
   'property_note.add': '1.0',
   'saved_listing.set_cost': '1.0',
@@ -26,6 +29,7 @@ export interface AssistantContext {
   userNotes?: Record<string, unknown>[];
   reviewIssues?: Record<string, unknown>[];
   search?: RentalSearch;
+  household?: HouseholdProfile;
   selectedListings?: Record<string, unknown>[];
   location?: Record<string, unknown>;
 }
@@ -289,7 +293,19 @@ export interface NavigateProposal extends ProposalBase {
   arguments: { destination: 'find' | 'current' | 'saved' | 'compare' };
 }
 
+export interface HouseholdPatchProposal extends ProposalBase {
+  type: 'household.patch';
+  arguments: { set: Partial<HouseholdProfile> };
+}
+
+export interface SearchLaunchProposal extends ProposalBase {
+  type: 'search.launch';
+  arguments: { siteIds: string[] };
+}
+
 export type AssistantProposal =
+  | HouseholdPatchProposal
+  | SearchLaunchProposal
   | SearchPatchProposal
   | SetCostProposal
   | AddPropertyNoteProposal
@@ -319,6 +335,9 @@ export interface StoredAssistantMessage {
   role: 'user' | 'assistant';
   text: string;
   response?: AssistantResponse;
+  /** Local approval fingerprints and human-readable diffs; never sent to the model. */
+  approvalBaselines?: Record<string, string>;
+  approvalSummaries?: Record<string, string>;
 }
 
 export interface StoredAssistantConversation {

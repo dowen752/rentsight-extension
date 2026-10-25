@@ -5,6 +5,8 @@ export interface SourcedValue<T> {
   source: ValueSource;
   confidence: number;
   note?: string;
+  /** Explicit billing basis survives extraction, household changes and saving. */
+  billingBasis?: 'per_unit' | 'per_pet';
 }
 
 export interface ListingIdentity {

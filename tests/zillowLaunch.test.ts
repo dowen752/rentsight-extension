@@ -356,58 +356,161 @@ describe('Zillow assisted search launch', () => {
     dom.window.close();
   });
 
-  it("formats and fills Zillow's move-in date control", async () => {
-    const dom = new JSDOM(
-      '<button data-testid="more-filters-button">Filters</button>',
-      { url: 'https://www.zillow.com/santa-barbara-ca/rentals/' },
-    );
-    const { window } = dom;
-    Object.defineProperty(window.Element.prototype, 'getClientRects', {
-      configurable: true,
-      value: () => ({ length: 1 }),
-    });
-    for (const [name, value] of [
-      ['document', window.document],
-      ['location', window.location],
-      ['Element', window.Element],
-      ['HTMLElement', window.HTMLElement],
-      ['HTMLInputElement', window.HTMLInputElement],
-      ['HTMLSelectElement', window.HTMLSelectElement],
-      ['HTMLLabelElement', window.HTMLLabelElement],
-      ['Event', window.Event],
-      ['InputEvent', window.InputEvent],
-    ] as const) {
-      vi.stubGlobal(name, value);
-    }
-    let moveInDate: HTMLInputElement | undefined;
-    let submitted = false;
-    window.document
-      .querySelector<HTMLButtonElement>('[data-testid="more-filters-button"]')!
-      .addEventListener('click', () => {
-        const dialog = window.document.createElement('div');
-        dialog.setAttribute('role', 'dialog');
-        dialog.innerHTML = `
+  it.each([
+    ['text', '<input placeholder="MM/DD/YYYY" />', '09/24/2026'],
+    [
+      'native date',
+      '<input type="date" aria-label="Move in date" />',
+      '2026-09-24',
+    ],
+    ['labeled text', '<input aria-label="Move-in date" />', '09/24/2026'],
+  ])(
+    "commits Zillow's %s move-in date before submitting",
+    async (_name, inputMarkup, expected) => {
+      const dom = new JSDOM(
+        '<button data-testid="more-filters-button">Filters</button>',
+        { url: 'https://www.zillow.com/santa-barbara-ca/rentals/' },
+      );
+      const { window } = dom;
+      Object.defineProperty(window.Element.prototype, 'getClientRects', {
+        configurable: true,
+        value: () => ({ length: 1 }),
+      });
+      for (const [name, value] of [
+        ['document', window.document],
+        ['location', window.location],
+        ['Element', window.Element],
+        ['HTMLElement', window.HTMLElement],
+        ['HTMLInputElement', window.HTMLInputElement],
+        ['HTMLSelectElement', window.HTMLSelectElement],
+        ['HTMLLabelElement', window.HTMLLabelElement],
+        ['Event', window.Event],
+        ['InputEvent', window.InputEvent],
+      ] as const) {
+        vi.stubGlobal(name, value);
+      }
+      let moveInDate: HTMLInputElement | undefined;
+      let committedDate = '';
+      let submittedDate = '';
+      let submitted = false;
+      window.document
+        .querySelector<HTMLButtonElement>(
+          '[data-testid="more-filters-button"]',
+        )!
+        .addEventListener('click', () => {
+          const dialog = window.document.createElement('div');
+          dialog.setAttribute('role', 'dialog');
+          dialog.innerHTML = `
           <fieldset>
             <legend>Move in date</legend>
-            <input placeholder="MM/DD/YYYY" />
+            ${inputMarkup}
             <button type="button" aria-label="Open date picker"></button>
           </fieldset>
           <button>See 12 rentals available</button>
         `;
-        moveInDate = dialog.querySelector('input')!;
+          moveInDate = dialog.querySelector('input')!;
+          moveInDate.addEventListener('change', () => {
+            committedDate = moveInDate!.value;
+            // A controlled field can be replaced during the site's render.
+            const updated = moveInDate!.cloneNode(true) as HTMLInputElement;
+            updated.value = committedDate;
+            moveInDate!.replaceWith(updated);
+            moveInDate = updated;
+          });
+          dialog.lastElementChild!.addEventListener('click', () => {
+            submitted = true;
+            submittedDate = committedDate;
+            dialog.remove();
+          });
+          window.document.body.append(dialog);
+        });
+
+      await expect(
+        fillZillowSearchPage({ moveInDate: '2026-09-24' }),
+      ).resolves.toEqual({ applied: ['moveInDate'], failed: [] });
+      expect(moveInDate?.value).toBe(expected);
+      expect(submittedDate).toBe(expected);
+      expect(submitted).toBe(true);
+      dom.window.close();
+    },
+  );
+
+  it.each(['minimum', 'reset'])(
+    'reports a %s-rejected Zillow date while applying other filters',
+    async (rejection) => {
+      const dom = new JSDOM(
+        `
+      <button data-testid="more-filters-button">Filters</button>
+    `,
+        { url: 'https://www.zillow.com/cupertino-ca/rentals/' },
+      );
+      const { window } = dom;
+      Object.defineProperty(window.Element.prototype, 'getClientRects', {
+        configurable: true,
+        value: () => ({ length: 1 }),
+      });
+      for (const [name, value] of [
+        ['document', window.document],
+        ['location', window.location],
+        ['Element', window.Element],
+        ['HTMLElement', window.HTMLElement],
+        ['HTMLInputElement', window.HTMLInputElement],
+        ['HTMLLabelElement', window.HTMLLabelElement],
+        ['Event', window.Event],
+        ['InputEvent', window.InputEvent],
+      ] as const)
+        vi.stubGlobal(name, value);
+      let submitted = false;
+      window.document.querySelector('button')!.addEventListener('click', () => {
+        const dialog = window.document.createElement('div');
+        dialog.setAttribute('role', 'dialog');
+        dialog.innerHTML = `
+        <input type="date" ${rejection === 'minimum' ? 'min="2026-10-24"' : ''} />
+        <button aria-label="On-site parking" aria-pressed="false">On-site parking</button>
+        <button>See 12 rentals available</button>
+      `;
+        if (rejection === 'reset')
+          dialog.querySelector('input')!.addEventListener('change', () => {
+            window.setTimeout(() => {
+              dialog.querySelector('input')!.value = '';
+            }, 0);
+          });
         dialog.lastElementChild!.addEventListener('click', () => {
           submitted = true;
           dialog.remove();
         });
         window.document.body.append(dialog);
       });
+      await expect(
+        fillZillowSearchPage({
+          moveInDate: '2026-10-22',
+          parkingAvailable: true,
+        }),
+      ).resolves.toEqual({
+        applied: ['parkingAvailable'],
+        failed: ['moveInDate'],
+      });
+      expect(submitted).toBe(true);
+      dom.window.close();
+    },
+  );
 
-    await expect(
-      fillZillowSearchPage({ moveInDate: '2026-09-24' }),
-    ).resolves.toEqual({ applied: ['moveInDate'], failed: [] });
-    expect(moveInDate?.value).toBe('09/24/2026');
-    expect(submitted).toBe(true);
-    dom.window.close();
+  it.each([
+    ['2000-01-01', 'your move-in date is in the past'],
+    ['2099-12-01', 'could not apply your move-in date'],
+  ])('explains an unapplied Zillow date (%s)', async (moveInDate, message) => {
+    const chromeMock = chromeForZillow({ granted: true });
+    chromeMock.executeScript.mockResolvedValue([
+      { result: { applied: [], failed: ['moveInDate'] } },
+    ]);
+    const search = { location: 'Cupertino, CA', moveInDate };
+    const outcome = await launchZillowSearch(
+      search,
+      'https://www.zillow.com/cupertino-ca/rentals/',
+    );
+    expect(outcome.automated).toBe(false);
+    expect(outcome.message).toContain(message);
+    expect(search.moveInDate).toBe(moveInDate);
   });
 
   it('opens the clean location page and fills Zillow controls', async () => {

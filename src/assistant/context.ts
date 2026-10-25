@@ -1,11 +1,20 @@
 import {
+  normalizeHouseholdProfile,
+  type HouseholdProfile,
+} from '../shared/household';
+import type { RentalSearch } from '../search';
+import {
   calculateEffectiveMonthlyCostAfterConcessions,
   calculateEstimatedTrueMonthlyCost,
   calculateFirstYearHousingCost,
   calculateRequiredMoveInCash,
 } from '../calculations';
 import type { SavedListingRecord } from '../saved';
-import { materializeListing, type RentalAnalysis } from '../shared/analysis';
+import {
+  applyHouseholdProfile,
+  materializeListing,
+  type RentalAnalysis,
+} from '../shared/analysis';
 import type { AssistantContext } from './types';
 
 const MAX_ASSISTANT_SAVED_LISTINGS = 5;
@@ -115,7 +124,13 @@ export function assistantContextForAnalysis(
   analysis: RentalAnalysis | undefined,
   savedListings: SavedListingRecord[],
   selectedSavedListingIds: string[] = [],
+  household?: HouseholdProfile,
+  search?: RentalSearch,
 ): AssistantContext {
+  const profile = normalizeHouseholdProfile(
+    household ?? analysis?.householdProfile,
+  );
+  const shared = { household: profile, search };
   const selectedIds = new Set(selectedSavedListingIds);
   const selectedSavedListings = savedListings
     .filter((record) => selectedIds.has(record.id))
@@ -123,12 +138,17 @@ export function assistantContextForAnalysis(
 
   if (selectedSavedListings.length) {
     return {
+      ...shared,
       activeView: 'saved',
       extractionNotes: [],
       userNotes: [],
       reviewIssues: [],
       selectedListings: selectedSavedListings.map((record) => {
-        const snapshot = analysisSnapshot(record.analysis);
+        const snapshot = analysisSnapshot(
+          household
+            ? applyHouseholdProfile(record.analysis, profile)
+            : record.analysis,
+        );
         return {
           id: record.id,
           savedAt: record.createdAt,
@@ -146,6 +166,7 @@ export function assistantContextForAnalysis(
 
   if (!analysis)
     return {
+      ...shared,
       activeView: 'unavailable',
       extractionNotes: [],
       userNotes: [],
@@ -156,8 +177,11 @@ export function assistantContextForAnalysis(
       })),
     };
 
-  const snapshot = analysisSnapshot(analysis);
+  const snapshot = analysisSnapshot(
+    household ? applyHouseholdProfile(analysis, profile) : analysis,
+  );
   return {
+    ...shared,
     activeView: 'current',
     currentListing: snapshot.listing,
     currentCalculation: snapshot.calculation,

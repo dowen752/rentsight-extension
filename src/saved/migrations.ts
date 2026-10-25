@@ -33,7 +33,9 @@ function isSourcedValue(
     Number.isFinite(value.confidence) &&
     value.confidence >= 0 &&
     value.confidence <= 1 &&
-    (value.note === undefined || typeof value.note === 'string')
+    (value.note === undefined || typeof value.note === 'string') &&
+    (value.billingBasis === undefined ||
+      ['per_unit', 'per_pet'].includes(String(value.billingBasis)))
   );
 }
 
@@ -147,7 +149,9 @@ function isPropertyNote(value: unknown): boolean {
     isObject(value) &&
     typeof value.id === 'string' &&
     typeof value.text === 'string' &&
-    (value.source === 'user' || value.source === 'ai') &&
+    (value.source === 'user' ||
+      value.source === 'ai' ||
+      value.source === 'listing') &&
     (value.sourceId === undefined || typeof value.sourceId === 'string')
   );
 }

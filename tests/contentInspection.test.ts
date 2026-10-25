@@ -12,6 +12,69 @@ import { readFileSync } from 'node:fs';
 import type { ExtensionResponse } from '../src/shared/messages';
 
 describe('classic content-script inspection', () => {
+  it('refreshes Realtor fee inputs when a delayed fee section changes beyond the first visible prices', async () => {
+    const built = await build({
+      configFile: false,
+      logLevel: 'silent',
+      build: {
+        write: false,
+        lib: {
+          entry: 'src/content/index.ts',
+          name: 'RentSightContent',
+          formats: ['iife'],
+        },
+      },
+    });
+    const output = (Array.isArray(built) ? built[0] : built) as {
+      output: { type: string; code?: string }[];
+    };
+    const dom = new JSDOM(
+      `<main><h1>Background search results</h1></main><div id="left-column-container"><h1 data-testid="address">100 Example St, Boulder, CO 80301</h1><div data-testid="rentals-list-price"><div data-rui="Price">$2,000/mo</div></div>${'<p>$50</p>'.repeat(15)}<li>Monthly Fees: Resident Services: $20</li></div>`,
+      {
+        url: 'https://www.realtor.com/rentals/details/100-Example-St_Boulder_CO_80301',
+        runScripts: 'outside-only',
+      },
+    );
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    Object.assign(dom.window, {
+      TextEncoder,
+      chrome: { runtime: { onMessage: { addListener: vi.fn() }, sendMessage } },
+    });
+    vi.useFakeTimers();
+    try {
+      dom.window.eval(
+        output.output.find((item) => item.type === 'chunk')!.code!,
+      );
+      const fee = dom.window.document.querySelector('li')!;
+      fee.textContent = 'Monthly Fees: Resident Services: $21';
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1300);
+      expect(sendMessage).toHaveBeenCalled();
+      sendMessage.mockClear();
+      fee.textContent =
+        'Monthly Fees: Resident Services: $27, Utilities Admin Fee: $5.95';
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1300);
+      const payload = sendMessage.mock.calls.find(
+        ([message]) => message.type === 'EXTRACTION_UPDATED',
+      )?.[0].payload;
+      expect(
+        payload.extraction.namedRecurringFees.map(
+          (fee: { amount: number }) => fee.amount,
+        ),
+      ).toEqual([27, 5.95]);
+      const a = applyExtraction(
+        createInitialAnalysis(payload.url),
+        payload.extraction,
+      );
+      expect(
+        materializeListing(a).recurring.otherRequiredMonthlyFees?.value,
+      ).toBe(32.95);
+    } finally {
+      dom.window.close();
+      vi.useRealTimers();
+    }
+  });
   it('opens review for a floor-plan detail and keeps its values and identity separate from the community', async () => {
     const built = await build({
       configFile: false,

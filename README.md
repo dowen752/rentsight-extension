@@ -242,8 +242,6 @@ semantic validation. Frontend tests never call the real backend or a paid model.
 
 - `npm run test:capture` runs deterministic stored/synthetic HTML capture tests.
 - `npm run test:e2e` runs the extension flow with mocked transport.
-- `npm run test:live-sites` is an explicit, optional public-site smoke-test lane
-  and is never required for ordinary pull requests.
 
 Capture fixtures live in `tests/capture/fixtures`. Development builds show an
 **Export extraction capture** action in the Current view after capture is ready.
@@ -268,3 +266,24 @@ sanitized HTML fixture and fix the general capture rule. If interpretation is
 wrong, add the sanitized request to the backend evaluation corpus. Run both
 relevant suites. Do not add listing-specific selectors, hostname exceptions, or
 text rewrites merely to make one property pass.
+
+### Chatbot Search and household approvals
+
+Ask receives current saved Search preferences and the current household even when
+no listing is open. Household count changes use a separate approval from search
+preferences. Pet-friendly marketplace filters are derived from household counts;
+clearing Search never clears those counts. Saved-listing chat calculations use
+the same current household as Saved/Compare.
+
+Action cards show before/after Search and household values. Saves complete before
+showing Applied. Target-field approval checks reject outdated edits without
+invalidating unrelated edits from the same answer. Historical proposals remain
+display-only. Rental-site opening is a separate, explicit approval using the
+existing marketplace adapters, with supported/omitted criteria previewed and one
+site per card. Backend capability versions are `search.patch: 2.0`,
+`household.patch: 1.0`, and `search.launch: 2.0`; deploy the matching backend first.
+
+Relevant tests are `tests/assistantSearchHouseholdWorkflow.test.tsx`,
+`tests/assistantApproval.test.ts`, and the existing assistant contract/workflow
+suites. The backend provides optional real-model evaluation via
+`npm run eval:assistant`; ordinary tests use mocked responses.

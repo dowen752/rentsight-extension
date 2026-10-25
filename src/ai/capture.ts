@@ -1,5 +1,14 @@
 import type { ListingExtraction } from '../extractors';
 import type { Capture, CaptureContext } from './types';
+import { readFeeRows, feeText } from '../extractors/feeRows';
+import { feeCadence } from '../extractors/feeMoney';
+import {
+  listingText,
+  realtorListingRoot,
+  realtorFeeRows,
+  REALTOR_FEE_CARDS,
+  REALTOR_NOISE,
+} from '../extractors/realtorDom';
 
 const JSON_LD_NOISE_KEYS = new Set([
   'aggregaterating',
@@ -68,6 +77,8 @@ export function captureListing(
   extraction: ListingExtraction,
   selectedUnitId?: string,
 ): CaptureContext {
+  const realtor = extraction.siteName === 'Realtor.com';
+  const sourceRoot = realtor ? realtorListingRoot(document) : document;
   const capture: Capture = {
     capturedAt: new Date().toISOString(),
     truncated: false,
@@ -144,7 +155,9 @@ export function captureListing(
     capture.blocks = retained;
   };
   const selectedLeaseTermMonths = readSelectedLeaseTermMonths(document);
-  for (const section of document.querySelectorAll('[aria-expanded="false"]')) {
+  for (const section of sourceRoot.querySelectorAll(
+    '[aria-expanded="false"]',
+  )) {
     const label = section.textContent?.trim() ?? '';
     if (/fees|utilities|lease|promotion|pricing/i.test(label))
       capture.unavailableSections.push(
@@ -152,7 +165,7 @@ export function captureListing(
       );
   }
   // Preserve non-executable JSON-LD before scripts are removed.
-  for (const script of document.querySelectorAll(
+  for (const script of sourceRoot.querySelectorAll(
     'script[type="application/ld+json"]',
   )) {
     try {
@@ -168,7 +181,36 @@ export function captureListing(
   // Preserve high-confidence listing facts before interactive wrappers are
   // removed. Text-node boundaries keep adjacent values and labels readable.
   const preservedEvidence = new Set<string>();
-  for (const container of document.querySelectorAll(
+  const semanticRows = realtor
+    ? []
+    : readFeeRows(document).filter(
+        (row) =>
+          row.structured &&
+          !row.element.matches('.fee-row, tr') &&
+          !row.element.closest('.fee-row,table'),
+      );
+  const semanticTexts = new Set<string>();
+  for (const row of semanticRows) {
+    const cadence = feeCadence(row.text, row.context);
+    const applicability = [
+      ...(row.text + ' ' + row.context).matchAll(/\b(required|optional)\b/gi),
+    ].at(-1)?.[1];
+    semanticTexts.add(normalizedBlockText(row.text));
+    add('other', row.text, [
+      'Cost calculator',
+      cadence === 'monthly'
+        ? 'Monthly costs'
+        : cadence === 'one_time'
+          ? 'Move-in costs'
+          : 'Other charges',
+      applicability?.toLowerCase() === 'required'
+        ? 'Required'
+        : applicability?.toLowerCase() === 'optional'
+          ? 'Optional'
+          : 'Charges',
+    ]);
+  }
+  for (const container of sourceRoot.querySelectorAll(
     EVIDENCE_CONTAINER_SELECTORS,
   )) {
     const text = textWithNodeBoundaries(container);
@@ -176,6 +218,30 @@ export function captureListing(
     if (!key || preservedEvidence.has(key)) continue;
     preservedEvidence.add(key);
     add('other', text, ['Listing facts']);
+  }
+  if (realtor) {
+    for (const selector of [
+      '[data-testid="home-facts"]',
+      '[data-testid="rentals-list-price"]',
+    ]) {
+      const text = listingText(sourceRoot.querySelector(selector));
+      if (text) add('other', text, ['Listing facts']);
+    }
+    for (const row of realtorFeeRows(sourceRoot as Element)) {
+      add('other', row.text, [
+        'Cost calculator',
+        row.cadence === 'monthly'
+          ? 'Monthly costs'
+          : row.cadence === 'one_time'
+            ? 'Move-in costs'
+            : 'Additional charges',
+        row.applicability === 'required'
+          ? 'Required'
+          : row.applicability === 'optional'
+            ? 'Optional'
+            : 'Conditional',
+      ]);
+    }
   }
   // Available-unit dialogs are commonly portaled outside <main>. Preserve only
   // their floor-plan heading and inventory table so contact-form dates and phone
@@ -201,7 +267,7 @@ export function captureListing(
   // in the description. Preserve each semantic row as one evidence block so
   // labels, amounts, cadence, applicability, and refundability stay associated.
   const preservedCalculatorRows = new Set<string>();
-  for (const row of document.querySelectorAll('.fee-row')) {
+  for (const row of sourceRoot.querySelectorAll('.fee-row')) {
     const copy = row.cloneNode(true) as HTMLElement;
     copy
       .querySelectorAll('button,input,select,textarea,[aria-hidden="true"]')
@@ -224,8 +290,23 @@ export function captureListing(
     add('other', text, ['Cost calculator', section, applicability]);
   }
   const root = (
-    document.querySelector('main, [role="main"]') ?? document.body
+    realtor
+      ? sourceRoot
+      : (document.querySelector('main, [role="main"]') ?? document.body)
   ).cloneNode(true) as HTMLElement;
+  if (realtor) {
+    root
+      .querySelectorAll(
+        REALTOR_NOISE +
+          ', ' +
+          REALTOR_FEE_CARDS +
+          ', [data-testid="home-facts"], [data-testid="rentals-list-price"]',
+      )
+      .forEach((node) => node.remove());
+    root.querySelectorAll('li,p').forEach((node) => {
+      if (/^Monthly Fees:/i.test(node.textContent?.trim() ?? '')) node.remove();
+    });
+  }
   // Preserve property-level content, but discard explicitly identified sibling
   // unit panels when the page exposes a stable selected-unit identity.
   if (selectedUnitId) {
@@ -249,6 +330,27 @@ export function captureListing(
   const headings: string[] = [];
   // Walk once so custom div-based sites are captured without duplicating parents.
   const walk = (element: Element) => {
+    if (semanticTexts.has(normalizedBlockText(feeText(element)))) return;
+    if (
+      element.tagName === 'DT' &&
+      element.nextElementSibling?.tagName === 'DD' &&
+      semanticTexts.has(
+        normalizedBlockText(
+          `${feeText(element)}: ${feeText(element.nextElementSibling)}`,
+        ),
+      )
+    )
+      return;
+    if (
+      element.tagName === 'DD' &&
+      element.previousElementSibling?.tagName === 'DT' &&
+      semanticTexts.has(
+        normalizedBlockText(
+          `${feeText(element.previousElementSibling)}: ${feeText(element)}`,
+        ),
+      )
+    )
+      return;
     if (/^H[1-6]$/.test(element.tagName)) {
       const title = element.textContent?.trim() ?? '';
       const level = Number(element.tagName[1]);

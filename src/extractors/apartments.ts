@@ -9,6 +9,7 @@ import {
   parseUsAddress,
 } from './parsers';
 import { emptyExtraction, type ListingExtractor } from './types';
+import { feeRoot, FEE_NOISE } from './feeRows';
 import { selectedApartmentsUnitDialog } from '../content/pageState';
 
 export const apartmentsExtractor: ListingExtractor = {
@@ -73,7 +74,9 @@ export const apartmentsExtractor: ListingExtractor = {
         : parseRentEvidence(rentTexts, 0.88);
     if (result.rent?.kind === 'single')
       result.listing.recurring.advertisedRent = result.rent.amount;
-    const body = document.body.textContent ?? '';
+    const content = feeRoot(document).cloneNode(true) as Element;
+    content.querySelectorAll(FEE_NOISE).forEach((node) => node.remove());
+    const body = content.textContent ?? '';
     result.rawPetPolicyText = classifyNoPetsPolicy(body);
     if (result.rawPetPolicyText) result.petPolicy = 'none';
     const labeledFacts = new Map<string, string>();
@@ -145,21 +148,6 @@ export const apartmentsExtractor: ListingExtractor = {
         selectedUnit ? 0.96 : 0.8,
         selectedUnit ? unitText : undefined,
       );
-    for (const [pattern, group, key] of [
-      [/application fee[^.\n]*\$[\d,]+/i, 'upfront', 'applicationFee'],
-      [/security deposit[^.\n]*\$[\d,]+/i, 'upfront', 'securityDeposit'],
-      [/administrative fee[^.\n]*\$[\d,]+/i, 'upfront', 'administrativeFee'],
-      [/amenity fee[^.\n]*\$[\d,]+/i, 'recurring', 'amenityFees'],
-      [/pet rent[^.\n]*\$[\d,]+/i, 'recurring', 'petRent'],
-    ] as const) {
-      const raw = body.match(pattern)?.[0];
-      if (raw)
-        (result.listing[group] as Record<string, unknown>)[key] = listingValue(
-          parseMoney(raw)!,
-          0.72,
-          raw,
-        );
-    }
     const parkingText = body.match(
       /\b(?:parking|garage|carport)(?:\s+(?:fee|rent|cost))?\s*(?::|-)?\s*\$[\d,]+(?:\.\d{2})?/i,
     )?.[0];

@@ -2,6 +2,16 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { JSDOM } from 'jsdom';
 import { describe, expect, it } from 'vitest';
+import {
+  applyExtraction,
+  createInitialAnalysis,
+  materializeListing,
+} from '../src/shared/analysis';
+import {
+  calculateEstimatedTrueMonthlyCost,
+  calculateRequiredMoveInCash,
+} from '../src/calculations';
+import { createComparison } from '../src/saved/comparison';
 import { extractListing } from '../src/extractors';
 import { extractJsonLd } from '../src/extractors/jsonLd';
 import {
@@ -183,6 +193,81 @@ describe('listing extraction', () => {
     expect(result.warnings).toContain(
       "Zillow's property-specific calculator and description list different utility management fee amounts. The calculator value was used; confirm it with the housing provider.",
     );
+  });
+
+  it('carries required custom calculator fees through calculation and saved comparison', () => {
+    const url = new URL(
+      'https://www.zillow.com/apartments/example/community/#udp-123',
+    );
+    const document = new JSDOM(`
+      <h1>Unit 086</h1><p>2 beds, 2 baths $2,399</p>
+      <div><h2>Monthly costs</h2><div><span>Required</span>
+        <div class="base-rent-fee fee-row">Monthly base rent <span>$2,399</span></div>
+        <div class="custom-fee fee-row"><span>Monthly Utility Admin Fee - Not to Exceed</span><span data-testid="fee-total">$10</span></div>
+        <div class="custom-fee fee-row"><span>Monthly Utility Admin Fee - Not to Exceed</span><span data-testid="fee-total">$10</span></div>
+        <div class="custom-fee fee-row">Utilities - Water, Trash, Sewer <span data-testid="fee-total">Varies</span></div>
+        <div class="custom-fee fee-row">Resident service fee <span data-testid="fee-total">$5</span></div>
+      </div><div><span>Optional</span>
+        <div class="custom-fee fee-row">Storage fee <span data-testid="fee-total">$50</span></div>
+      </div><p>Est. total monthly cost $2,414</p></div>
+      <div><h2>Application costs</h2><div><span>Required</span>
+        <div class="application-fee fee-row">Application Fee <span>$65</span></div>
+        <div class="custom-fee fee-row">Account setup fee <span data-testid="fee-total">$20</span></div>
+      </div></div>
+      <p>Monthly utility admin fee - not to exceed $10.</p>
+    `).window.document;
+    const extraction = extractListing(document, url);
+    expect(extraction.listing.recurring.otherRequiredMonthlyFees?.value).toBe(
+      5,
+    );
+    expect(
+      extraction.feeNoteSuggestions?.find((n) =>
+        n.label.includes('Not to Exceed'),
+      )?.detail,
+    ).toContain('up to $10');
+    expect(extraction.listing.upfront.administrativeFee).toBeUndefined();
+    expect(extraction.listing.upfront.applicationFee?.value).toBe(65);
+    expect(extraction.listing.upfront.otherMoveInFees?.value).toBe(20);
+    expect(extraction.listing.recurring.water).toBeUndefined();
+    const initial = createInitialAnalysis(url.href, 'Example');
+    const baseline = applyExtraction(initial, {
+      ...extraction,
+      namedRecurringFees: [],
+      listing: {
+        ...extraction.listing,
+        recurring: {
+          ...extraction.listing.recurring,
+          otherRequiredMonthlyFees: undefined,
+        },
+        upfront: { ...extraction.listing.upfront, otherMoveInFees: undefined },
+      },
+    });
+    const analysis = applyExtraction(initial, extraction);
+    const listing = materializeListing(analysis);
+    expect(
+      calculateEstimatedTrueMonthlyCost(listing) -
+        calculateEstimatedTrueMonthlyCost(materializeListing(baseline)),
+    ).toBe(5);
+    expect(
+      calculateRequiredMoveInCash(listing) -
+        calculateRequiredMoveInCash(materializeListing(baseline)),
+    ).toBe(20);
+    const comparison = createComparison(
+      JSON.parse(
+        JSON.stringify({
+          schemaVersion: 1,
+          id: 'test',
+          url: url.href,
+          analysis,
+          createdAt: analysis.updatedAt,
+          updatedAt: analysis.updatedAt,
+        }),
+      ),
+    );
+    expect(comparison.trueMonthlyCost).toBe(
+      calculateEstimatedTrueMonthlyCost(listing),
+    );
+    expect(comparison.moveInCash).toBe(calculateRequiredMoveInCash(listing));
   });
 
   it('reads Zillow facts split across sibling spans inside a button', () => {

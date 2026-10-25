@@ -67,13 +67,21 @@ export class ExtractionSession {
     private apply: (response: ExtractionSuccess) => void,
     private recapture?: () => Promise<PageInfo>,
     cache?: ExtractionCache,
+    private onFailure?: (state: Extract<AiState, { status: 'failed' }>) => void,
   ) {
     this.cache =
       cache ??
       (typeof chrome !== 'undefined' ? new ChromeExtractionCache() : undefined);
   }
   private publish(state: AiState) {
+    const previous = this.state;
     this.state = state;
+    if (
+      state.status === 'failed' &&
+      (previous.status !== 'failed' || previous.requestId !== state.requestId)
+    ) {
+      this.onFailure?.(state);
+    }
     this.listeners.forEach((listener) => listener());
   }
   activate(page: PageInfo, accountId: string) {

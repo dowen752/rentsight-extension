@@ -28,6 +28,8 @@ export type RentEvidence =
   SingleRentEvidence | RentRangeEvidence | RentConflictEvidence;
 
 export interface ListingExtraction {
+  namedRecurringFees?: import('./fees').ExtractedFee[];
+  feeNoteSuggestions?: import('./fees').FeeNoteSuggestion[];
   listing: RentalListing;
   rent?: RentEvidence;
   includedUtilities: UtilityCategory[];

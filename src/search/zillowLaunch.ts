@@ -1,4 +1,5 @@
 import type { RentalSearch, SearchCriterion } from './types';
+import { moveInDateFailureMessage } from './moveInDate';
 import {
   ZILLOW_HOST_PERMISSION,
   ZILLOW_ORIGIN,
@@ -356,6 +357,20 @@ export async function fillZillowSearchPage(
     const [year, month, day] = date.split('-');
     return `${month}/${day}/${year}`;
   };
+  const moveInInput = (dialog: HTMLElement): HTMLInputElement | undefined => {
+    const group = groupFor(dialog, /^move[\s-]*in date$/i);
+    const selector =
+      'input[type="date"], input[aria-label*="move" i][aria-label*="date" i], input[placeholder="MM/DD/YYYY" i]';
+    return (
+      group?.querySelector<HTMLInputElement>('input') ??
+      dialog.querySelector<HTMLInputElement>(selector) ??
+      undefined
+    );
+  };
+  const moveInDateMatches = (input: HTMLInputElement): boolean =>
+    (input.value === search.moveInDate ||
+      input.value === zillowMoveInDate(search.moveInDate!)) &&
+    input.validity.valid;
 
   if (location.origin !== 'https://www.zillow.com') {
     return {
@@ -490,18 +505,31 @@ export async function fillZillowSearchPage(
         else recordFailure(['propertyTypes']);
       }
       if (search.moveInDate !== undefined) {
-        const moveInGroup = groupFor(dialog, /^move in date$/i);
-        const input =
-          moveInGroup?.querySelector<HTMLInputElement>(
-            'input[placeholder="MM/DD/YYYY" i]',
-          ) ??
-          dialog.querySelector<HTMLInputElement>(
-            'input[placeholder="MM/DD/YYYY" i]',
+        try {
+          const input = await waitFor(() =>
+            moveInInput(visibleDialog() ?? dialog),
           );
-        if (input) {
-          await setInput(input, zillowMoveInDate(search.moveInDate));
+          // Native date controls display a localized placeholder but require
+          // an ISO value. They need not have a placeholder attribute at all.
+          if (
+            input.disabled ||
+            input.readOnly ||
+            (input.min && search.moveInDate < input.min) ||
+            (input.max && search.moveInDate > input.max)
+          )
+            throw new Error('Zillow does not accept that move-in date.');
+          await setInput(
+            input,
+            input.type === 'date'
+              ? search.moveInDate
+              : zillowMoveInDate(search.moveInDate),
+          );
+          await waitFor(() => {
+            const updated = moveInInput(visibleDialog() ?? dialog);
+            return updated && moveInDateMatches(updated) ? updated : undefined;
+          }, 1_500);
           appliedHere.push('moveInDate');
-        } else {
+        } catch {
           recordFailure(['moveInDate']);
         }
       }
@@ -526,6 +554,13 @@ export async function fillZillowSearchPage(
           }
         }
       }
+      if (appliedHere.includes('moveInDate')) {
+        const input = moveInInput(visibleDialog() ?? dialog);
+        if (!input || !moveInDateMatches(input)) {
+          appliedHere.splice(appliedHere.indexOf('moveInDate'), 1);
+          recordFailure(['moveInDate']);
+        }
+      }
       await clickDone(dialog);
       recordApplied(appliedHere);
     } catch {
@@ -541,6 +576,7 @@ export async function fillZillowSearchPage(
 export async function launchZillowSearch(
   search: RentalSearch,
   bootstrapUrl: string,
+  siteAccess?: Promise<boolean>,
 ): Promise<ZillowLaunchOutcome> {
   const destination = new URL(bootstrapUrl);
   if (destination.origin !== ZILLOW_ORIGIN)
@@ -554,9 +590,11 @@ export async function launchZillowSearch(
 
   let granted = false;
   try {
-    granted = await chrome.permissions.request({
-      origins: [ZILLOW_HOST_PERMISSION],
-    });
+    granted = siteAccess
+      ? await siteAccess
+      : await chrome.permissions.request({
+          origins: [ZILLOW_HOST_PERMISSION],
+        });
   } catch (error: unknown) {
     console.error('[RentSight] Zillow site access request failed', error);
   }
@@ -589,8 +627,9 @@ export async function launchZillowSearch(
     if (unapplied.length) {
       return {
         automated: false,
-        message:
-          'Zillow opened and applied the available filters. Review the remaining preferences on Zillow.',
+        message: unapplied.includes('moveInDate')
+          ? moveInDateFailureMessage('Zillow', search.moveInDate!)
+          : 'Zillow opened and applied the available filters. Review the remaining preferences on Zillow.',
       };
     }
     return { automated: true };

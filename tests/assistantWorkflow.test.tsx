@@ -103,8 +103,7 @@ describe('assistant workflow', () => {
         .dispatchEvent(
           new Event('submit', { bubbles: true, cancelable: true }),
         );
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
 
     expect(captured?.context?.currentCalculation).toMatchObject({
@@ -113,7 +112,7 @@ describe('assistant workflow', () => {
     expect(captured?.context?.currentListing).toMatchObject({
       address: '123 Main St',
     });
-    expect(captured?.capabilities.actions).not.toHaveProperty('search.launch');
+    expect(captured?.capabilities.actions['search.launch']).toBe('2.0');
     expect(
       vi
         .mocked(extensionStorage.set)
@@ -128,8 +127,9 @@ describe('assistant workflow', () => {
 
     await act(async () => {
       Array.from(container.querySelectorAll('button'))
-        .find((button) => button.textContent === 'Apply')!
+        .find((button) => button.textContent === 'Save search preferences')!
         .click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
     expect(extensionStorage.set).toHaveBeenCalledWith('searchProfile', {
       schemaVersion: 2,
@@ -238,8 +238,7 @@ describe('assistant workflow', () => {
       container
         .querySelector<HTMLButtonElement>('.assistant-starters button')!
         .click();
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
 
     expect(captured?.context?.activeView).toBe('saved');
@@ -255,7 +254,8 @@ describe('assistant workflow', () => {
     });
     expect(captured?.contextRevision).toContain('saved-listings:saved-1:');
     expect(captured?.capabilities.actions).toEqual({
-      'search.patch': '1.0',
+      'search.patch': '2.0',
+      'search.launch': '2.0',
       'saved_listing.set_cost': '1.0',
       'saved_listing.set_field': '1.0',
       'saved_listing.clear_field': '1.0',
@@ -342,12 +342,12 @@ describe('assistant workflow', () => {
         .dispatchEvent(
           new Event('submit', { bubbles: true, cancelable: true }),
         );
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
 
     expect(captured?.capabilities.actions).toEqual({
-      'search.patch': '1.0',
+      'search.patch': '2.0',
+      'search.launch': '2.0',
       'saved_listing.set_cost': '1.0',
       'saved_listing.set_field': '1.0',
       'saved_listing.clear_field': '1.0',
@@ -365,6 +365,7 @@ describe('assistant workflow', () => {
       Array.from(container.querySelectorAll('button'))
         .find((button) => button.textContent === 'Apply')!
         .click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
       await Promise.resolve();
     });
     expect(updateSavedListing).toHaveBeenCalledWith(
@@ -452,8 +453,7 @@ describe('assistant workflow', () => {
         .dispatchEvent(
           new Event('submit', { bubbles: true, cancelable: true }),
         );
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
 
     const applyButtons = Array.from(
@@ -461,7 +461,10 @@ describe('assistant workflow', () => {
     ).filter((button) => button.textContent === 'Apply');
     expect(applyButtons).toHaveLength(1);
     expect(container.textContent).not.toContain('Unselected note.');
-    await act(async () => applyButtons[0].click());
+    await act(async () => {
+      applyButtons[0].click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
     expect(updateSavedListing).not.toHaveBeenCalled();
     expect(container.textContent).toContain('Stale');
     await act(async () => root.unmount());
@@ -520,8 +523,7 @@ describe('assistant workflow', () => {
       Array.from(container.querySelectorAll('button'))
         .find((button) => button.textContent === 'Try again')!
         .click();
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
 
     expect(requests).toHaveLength(2);
@@ -574,8 +576,7 @@ describe('assistant workflow', () => {
       container
         .querySelector<HTMLButtonElement>('.assistant-starters button')!
         .click();
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
 
     const response = container.querySelector('.assistant-message.assistant')!;
@@ -659,8 +660,7 @@ describe('assistant workflow', () => {
           sendMessage={sendMessage}
         />,
       );
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
 
     expect(container.textContent).toContain('What is the deposit?');
@@ -672,8 +672,7 @@ describe('assistant workflow', () => {
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('.new-chat')!.click();
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
 
     expect(stored).toEqual({
@@ -689,8 +688,7 @@ describe('assistant workflow', () => {
       container
         .querySelector<HTMLButtonElement>('.assistant-starters button')!
         .click();
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
 
     expect(nextRequest).not.toHaveProperty('conversationId');
@@ -784,8 +782,7 @@ describe('assistant workflow', () => {
       container
         .querySelector<HTMLButtonElement>('.chat-history-toggle')!
         .click();
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
     expect(container.textContent).toContain(
       'The listing discloses a move-in fee.',
@@ -794,8 +791,7 @@ describe('assistant workflow', () => {
       container
         .querySelector<HTMLButtonElement>('.assistant-history-open')!
         .click();
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
 
     expect(container.textContent).toContain('Are there hidden fees?');
@@ -816,8 +812,7 @@ describe('assistant workflow', () => {
         .dispatchEvent(
           new Event('submit', { bubbles: true, cancelable: true }),
         );
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
 
     expect(continuedRequest?.conversationId).toBe('conversation-history');
@@ -960,8 +955,7 @@ describe('assistant workflow', () => {
       container
         .querySelector<HTMLButtonElement>('.assistant-older-turns')!
         .click();
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
     const userMessages = Array.from(
       container.querySelectorAll('.assistant-message.user'),
@@ -1086,8 +1080,7 @@ describe('assistant workflow', () => {
           '.assistant-delete-confirmation button',
         )!
         .click();
-      await Promise.resolve();
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
     expect(deleteConversation).toHaveBeenCalledWith('conversation-delete');
     expect(container.textContent).not.toContain('Can I delete this?');

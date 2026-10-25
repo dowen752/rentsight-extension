@@ -29,6 +29,14 @@ function validateSourcedValue(
   errors: ValidationError[],
 ): void {
   if (
+    field.billingBasis !== undefined &&
+    !['per_unit', 'per_pet'].includes(field.billingBasis)
+  )
+    errors.push({
+      path: `${path}.billingBasis`,
+      message: 'Choose a supported billing basis.',
+    });
+  if (
     !Number.isFinite(field.confidence) ||
     field.confidence < 0 ||
     field.confidence > 1

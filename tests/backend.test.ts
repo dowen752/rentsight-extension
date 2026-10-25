@@ -130,7 +130,7 @@ describe('RentSightBackendClient', () => {
       message: 'Why is the total higher?',
       capabilities: {
         actions: {
-          'search.patch': '1.0' as const,
+          'search.patch': '2.0' as const,
           'analysis.set_cost': '1.0' as const,
           'property_note.add': '1.0' as const,
           'workspace.navigate': '1.0' as const,
@@ -289,7 +289,7 @@ describe('RentSightBackendClient', () => {
         message: 'Explain this listing.',
         capabilities: {
           actions: {
-            'search.patch': '1.0',
+            'search.patch': '2.0',
             'analysis.set_cost': '1.0',
             'property_note.add': '1.0',
             'workspace.navigate': '1.0',
@@ -338,7 +338,7 @@ describe('RentSightBackendClient', () => {
       message: 'Explain this listing.',
       capabilities: {
         actions: {
-          'search.patch': '1.0' as const,
+          'search.patch': '2.0' as const,
           'analysis.set_cost': '1.0' as const,
           'property_note.add': '1.0' as const,
           'workspace.navigate': '1.0' as const,
@@ -381,7 +381,7 @@ describe('RentSightBackendClient', () => {
         message: 'Explain this listing.',
         capabilities: {
           actions: {
-            'search.patch': '1.0',
+            'search.patch': '2.0',
             'analysis.set_cost': '1.0',
             'property_note.add': '1.0',
             'workspace.navigate': '1.0',

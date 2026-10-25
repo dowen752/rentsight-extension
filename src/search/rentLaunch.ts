@@ -450,6 +450,7 @@ async function waitForTab(
 export async function launchRentSearch(
   search: RentalSearch,
   bootstrapUrl: string,
+  siteAccess?: Promise<boolean>,
 ): Promise<RentLaunchOutcome> {
   const destination = new URL(bootstrapUrl);
   if (destination.origin !== RENT_ORIGIN)
@@ -460,9 +461,11 @@ export async function launchRentSearch(
   }
   let granted = false;
   try {
-    granted = await chrome.permissions.request({
-      origins: [RENT_HOST_PERMISSION],
-    });
+    granted = siteAccess
+      ? await siteAccess
+      : await chrome.permissions.request({
+          origins: [RENT_HOST_PERMISSION],
+        });
   } catch (error) {
     console.error('[RentSight] Rent.com site access request failed', error);
   }

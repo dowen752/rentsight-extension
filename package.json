@@ -16,9 +16,10 @@
     "test": "vitest run",
     "test:capture": "vitest run tests/capture",
     "test:e2e": "vitest run tests/aiExtraction.test.tsx tests/backend.test.ts",
-    "test:live-sites": "vitest run tests/live-sites --passWithNoTests",
     "test:watch": "vitest",
-    "contract:generate": "node scripts/generate-extraction-contract.mjs"
+    "contract:generate": "node scripts/generate-extraction-contract.mjs",
+    "test:fees": "vitest run tests/namedFeeWorkflow.test.tsx tests/feeFixWorkflow.test.tsx tests/feeExtraction.test.tsx tests/feeFormats.test.tsx tests/feeContractMatrix.test.tsx tests/realtorExtraction.test.tsx tests/aiFeeMapping.test.ts tests/extractors.test.ts tests/analysisIntegration.test.ts tests/savedListings.test.ts tests/aiExtraction.test.tsx tests/analysisEditorWorkflow.test.tsx tests/contentInspection.test.ts tests/capture",
+    "test:fees:strict": "RENTSIGHT_REQUIRE_FEE_SUPPORT=1 npm run test:fees -- --reporter=verbose"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

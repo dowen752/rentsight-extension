@@ -398,6 +398,7 @@ async function waitForTab(
 export async function launchRedfinSearch(
   search: RentalSearch,
   bootstrapUrl: string,
+  siteAccess?: Promise<boolean>,
 ): Promise<RedfinLaunchOutcome> {
   const destination = new URL(bootstrapUrl);
   if (destination.origin !== REDFIN_ORIGIN)
@@ -416,9 +417,11 @@ export async function launchRedfinSearch(
   }
   let granted = false;
   try {
-    granted = await chrome.permissions.request({
-      origins: [REDFIN_HOST_PERMISSION],
-    });
+    granted = siteAccess
+      ? await siteAccess
+      : await chrome.permissions.request({
+          origins: [REDFIN_HOST_PERMISSION],
+        });
   } catch (error) {
     console.error('[RentSight] Redfin site access request failed', error);
   }

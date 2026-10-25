@@ -10,6 +10,14 @@ import {
 
 function installDom(dom: JSDOM) {
   const { window } = dom;
+  Object.defineProperty(window.Element.prototype, 'getClientRects', {
+    configurable: true,
+    value: function (this: Element) {
+      return {
+        length: this.closest('[hidden], [style*="display: none"]') ? 0 : 1,
+      };
+    },
+  });
   for (const [name, value] of [
     ['document', window.document],
     ['window', window],
@@ -344,6 +352,125 @@ describe('Apartments.com assisted search launch', () => {
     ).toBe('Dog Friendly');
     dom.window.close();
   });
+
+  it.each(['selectable', 'disabled', 'aria-disabled', 'reset'])(
+    'uses the move-in calendar and verifies a %s date without shifting calendar days',
+    async (state) => {
+      const dom = new JSDOM(
+        `
+        <button id="advancedFiltersIcon">All Filters</button>
+        <div class="datepicker-days" hidden>
+          <span class="datepicker-switch">JANUARY 2000</span>
+          <table><tbody><tr><td class="day" data-date="0">24</td></tr></tbody></table>
+        </div>
+        <div class="advancedFilters">
+          <div id="advancedFilterMoveInDateContainer">
+            <input class="advancedFilterMoveInDate" readonly />
+            <div class="datepicker-days" hidden>
+              <span class="datepicker-switch">SEPTEMBER 2026</span>
+              <button class="next">Next</button>
+              <table><tbody><tr>
+                <td class="old day">24</td>
+                <td class="day ${state === 'disabled' ? 'disabled' : ''}"
+                  ${state === 'aria-disabled' ? 'aria-disabled="true"' : ''}
+                  data-date="${Date.UTC(2026, 9, 24)}">24</td>
+                <td class="new day">24</td>
+              </tr></tbody></table>
+            </div>
+          </div>
+          <button aria-pressed="false">Parking</button>
+          <button id="seeResultBtn">See Results</button>
+        </div>
+      `,
+        { url: 'https://www.apartments.com/cupertino-ca/' },
+      );
+      installDom(dom);
+      const { document } = dom.window;
+      const input = document.querySelector<HTMLInputElement>(
+        '.advancedFilterMoveInDate',
+      )!;
+      const calendar = document.querySelector<HTMLElement>(
+        '#advancedFilterMoveInDateContainer .datepicker-days',
+      )!;
+      input.addEventListener('mousedown', () => {
+        calendar.hidden = false;
+      });
+      const nextMonth = vi.fn(() => {
+        calendar.querySelector('.datepicker-switch')!.textContent =
+          'OCTOBER 2026';
+      });
+      calendar.querySelector('.next')!.addEventListener('click', nextMonth);
+      const wrongCalendar = vi.fn();
+      document
+        .querySelector('.datepicker-days[hidden] td')!
+        .addEventListener('click', wrongCalendar);
+      const adjacentDate = vi.fn();
+      for (const cell of calendar.querySelectorAll('.old,.new'))
+        cell.addEventListener('click', adjacentDate);
+      const selected = vi.fn(() => {
+        input.value = '10/24/2026';
+      });
+      calendar
+        .querySelector('td:not(.old):not(.new)')!
+        .addEventListener('click', selected);
+      const parking = document.querySelector<HTMLButtonElement>(
+        'button[aria-pressed]',
+      )!;
+      parking.addEventListener('click', () => {
+        parking.setAttribute('aria-pressed', 'true');
+        if (state === 'reset') input.value = '';
+      });
+      const submitted = vi.fn();
+      document
+        .querySelector('#seeResultBtn')!
+        .addEventListener('click', submitted);
+
+      const result = await fillApartmentsSearchPage({
+        moveInDate: '2026-10-24',
+        parkingAvailable: true,
+      });
+      expect(result).toEqual({
+        applied:
+          state === 'selectable'
+            ? ['moveInDate', 'parkingAvailable']
+            : ['parkingAvailable'],
+        failed: state === 'selectable' ? [] : ['moveInDate'],
+      });
+      expect(input.value).toBe(state === 'selectable' ? '10/24/2026' : '');
+      expect(selected).toHaveBeenCalledTimes(
+        state === 'selectable' || state === 'reset' ? 1 : 0,
+      );
+      expect(nextMonth).toHaveBeenCalledOnce();
+      expect(wrongCalendar).not.toHaveBeenCalled();
+      expect(adjacentDate).not.toHaveBeenCalled();
+      expect(submitted).toHaveBeenCalledOnce();
+      dom.window.close();
+    },
+  );
+
+  it.each([
+    ['2000-01-01', 'your move-in date is in the past'],
+    ['2099-12-01', 'could not apply your move-in date'],
+  ])(
+    'explains an unapplied Apartments.com date (%s)',
+    async (moveInDate, message) => {
+      const chromeMock = chromeForApartments({ granted: true });
+      chromeMock.executeScript
+        .mockReset()
+        .mockResolvedValueOnce([{ result: { ready: true } }])
+        .mockResolvedValueOnce([
+          { result: { applied: ['location'], failed: ['moveInDate'] } },
+        ]);
+      const search = { location: 'Cupertino, CA', moveInDate };
+      const outcome = await launchApartmentsSearch(
+        search,
+        'https://www.apartments.com/cupertino-ca/',
+      );
+      expect(outcome.automated).toBe(false);
+      expect(outcome.message).toContain(message);
+      expect(search.moveInDate).toBe(moveInDate);
+    },
+  );
 
   it('submits the detailed search even when one optional widget is unavailable', async () => {
     const dom = new JSDOM(

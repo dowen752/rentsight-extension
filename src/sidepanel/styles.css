@@ -2130,18 +2130,26 @@ fieldset label {
   border-color: var(--color-disabled);
   cursor: not-allowed;
 }
-.location-note {
-  background: var(--color-extraction-card-bg);
-  border-color: var(--color-extraction-card-border);
+.utility-estimate-note {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 17px;
+}
+.utility-estimate-note strong {
+  color: var(--color-label);
+}
+.utility-estimate-note p {
+  margin: 4px 0 0;
 }
 .collection-actions {
+  align-items: start;
   display: grid;
   gap: 7px;
   grid-template-columns: 1fr 1fr;
   margin-bottom: 14px;
 }
 .collection-actions > button,
-.collection-more > summary,
 .collection-more-options > button,
 .import-button {
   background: var(--color-surface);
@@ -2169,24 +2177,18 @@ fieldset label {
   cursor: not-allowed;
   opacity: 0.55;
 }
-.collection-more {
-  grid-column: 2;
-}
-.collection-more > summary {
+.collection-more-toggle {
   align-items: center;
   display: flex;
   gap: 9px;
   justify-content: center;
   list-style: none;
 }
-.collection-more > summary::-webkit-details-marker {
-  display: none;
-}
-.collection-more > summary .disclosure-icon {
+.collection-more-toggle .disclosure-icon {
   height: 7px;
   width: 7px;
 }
-.collection-more[open] > summary .disclosure-icon {
+.collection-more-toggle[aria-expanded='true'] .disclosure-icon {
   transform: rotate(225deg);
 }
 .collection-more-options {
@@ -2196,8 +2198,11 @@ fieldset label {
   display: grid;
   gap: 7px;
   grid-template-columns: 1fr 1fr;
-  margin-top: 7px;
+  grid-column: 1 / -1;
   padding: 9px;
+}
+.collection-more-options[hidden] {
+  display: none;
 }
 .collection-more-options > :last-child {
   grid-column: 1 / -1;
@@ -2426,7 +2431,8 @@ fieldset label {
   border-radius: 8px;
   padding: 9px 10px;
 }
-.property-notes-editor li > span:nth-child(2) {
+.property-notes-editor li > input {
+  min-width: 0;
   flex: 1;
 }
 .property-notes-editor .remove-note {
@@ -2601,4 +2607,29 @@ fieldset label {
   .ai-scan-track span {
     animation: none;
   }
+}
+
+.comparison-note-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.comparison-note-toggle {
+  background: transparent;
+  border: 0;
+  color: var(--color-label);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  min-width: 28px;
+  padding: 0 4px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ai-charge-more {
+  margin-top: 12px;
+}
+.ai-charge-more > summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding-block: 8px;
 }

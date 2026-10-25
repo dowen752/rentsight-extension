@@ -777,7 +777,7 @@ describe('AI review UI', () => {
     expect(html).not.toContain('<blockquote');
     expect(html).not.toContain('Keep note');
     expect(html).toContain('Keep as a property note');
-    expect(html).not.toContain('Dismiss');
+    expect(html).toContain('Dismiss');
     expect(html).not.toContain(response.result.notes[1].text);
   });
 
@@ -1416,4 +1416,46 @@ it('resolves recapture failures without sending another provider request', async
   );
   session.continueWithPreliminary();
   expect(session.getSnapshot()).toMatchObject({ continued: true });
+});
+
+describe('session failure notification', () => {
+  it('retains local inputs once per failure and does not repeat when continuing', () => {
+    const extraction = emptyExtraction('Local', '1');
+    extraction.listing.recurring.advertisedRent = {
+      value: 2000,
+      source: 'listing',
+      confidence: 0.9,
+    };
+    let analysis = applyExtraction(
+      createInitialAnalysis('https://example.com/rental', 'Example'),
+      extraction,
+    );
+    analysis = setRecurringValue(analysis, 'parking', 50);
+    const onFailure = vi.fn(() => {
+      analysis = retainPreliminaryAfterAiFailure(analysis);
+    });
+    const session = new ExtractionSession(
+      { extractListing: vi.fn() },
+      vi.fn(),
+      undefined,
+      undefined,
+      onFailure,
+    );
+    session.captureFailed();
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(analysis.listing.recurring.advertisedRent?.value).toBe(2000);
+    expect(analysis.listing.recurring.advertisedRent?.source).toBe(
+      'location_estimate',
+    );
+    expect(analysis.listing.recurring.parking).toMatchObject({
+      value: 50,
+      source: 'user',
+    });
+    session.continueWithPreliminary();
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    session.prepareCapture();
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    session.captureFailed();
+    expect(onFailure).toHaveBeenCalledTimes(2);
+  });
 });

@@ -699,6 +699,7 @@ export async function fillRealtorSearchPage(
 export async function launchRealtorSearch(
   search: RentalSearch,
   bootstrapUrl: string,
+  siteAccess?: Promise<boolean>,
 ): Promise<RealtorLaunchOutcome> {
   const destination = new URL(bootstrapUrl);
   if (destination.origin !== REALTOR_ORIGIN)
@@ -714,9 +715,11 @@ export async function launchRealtorSearch(
 
   let granted = false;
   try {
-    granted = await chrome.permissions.request({
-      origins: [REALTOR_HOST_PERMISSION],
-    });
+    granted = siteAccess
+      ? await siteAccess
+      : await chrome.permissions.request({
+          origins: [REALTOR_HOST_PERMISSION],
+        });
   } catch (error: unknown) {
     console.error('[RentSight] Realtor.com site access request failed', error);
   }

@@ -4,6 +4,11 @@ import { developmentDiagnostic } from '../ai/cache';
 import { extractListing } from '../extractors';
 import type { ListingExtraction } from '../extractors';
 import { emptyExtraction } from '../extractors/types';
+import {
+  listingText,
+  realtorListingRoot,
+  realtorFeeRows,
+} from '../extractors/realtorDom';
 import { observeListingNavigation } from './navigation';
 import {
   requiresHomesUnitSelection,
@@ -156,14 +161,29 @@ if (!contentWindow.__rentSightInitialized) {
     window.clearTimeout(settleTimer);
     settleTimer = window.setTimeout(() => {
       const currentUrl = new URL(window.location.href);
-      const root =
-        document.querySelector('main, [role="main"]') ?? document.body;
+      const root = /(^|\.)realtor\.com$/i.test(currentUrl.hostname)
+        ? realtorListingRoot(document)
+        : (document.querySelector('main, [role="main"]') ?? document.body);
       const text = root?.textContent ?? '';
       const signature = JSON.stringify([
         window.location.href,
-        selectedUnitIdForPage(document, currentUrl),
-        document.querySelector('h1')?.textContent?.trim(),
+        selectedRealtorUnit(document, currentUrl) ??
+          selectedUnitIdForPage(document, currentUrl),
+        root.querySelector('[data-testid="address"], h1')?.textContent?.trim(),
         (text.match(/\$\s?[\d,]+/g) ?? []).slice(0, 12),
+        /(^|\.)realtor\.com$/i.test(currentUrl.hostname)
+          ? [
+              listingText(root.querySelector('[data-testid="home-facts"]')),
+              realtorFeeRows(root).map((row) => [
+                row.text,
+                row.cadence,
+                row.applicability,
+              ]),
+              [...root.querySelectorAll('li')]
+                .filter((node) => /^Security Deposit:/i.test(listingText(node)))
+                .map(listingText),
+            ]
+          : undefined,
       ]);
       if (signature === previousDetailSignature) return;
       previousDetailSignature = signature;

@@ -75,7 +75,9 @@ export function parseRentEvidence(
 ): RentEvidence | undefined {
   const relevant = texts.map((text) => text.trim()).filter(Boolean);
   for (const text of relevant) {
-    const range = text.match(/\$\s*([\d,]+)\s*(?:-|–|—|to)\s*\$?\s*([\d,]+)/i);
+    const range = text.match(
+      /\$\s*([\d,]+(?:\.\d{1,2})?)\s*(?:-|–|—|to)\s*\$?\s*([\d,]+(?:\.\d{1,2})?)/i,
+    );
     if (range) {
       const minimum = Number(range[1].replaceAll(',', ''));
       const maximum = Number(range[2].replaceAll(',', ''));

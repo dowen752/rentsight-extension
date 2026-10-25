@@ -99,3 +99,94 @@ Add regression fixtures covering:
 - optional per-pet rent and nonrefundable pet fee;
 - per-applicant application fees;
 - evidence IDs, exact quotes, and source-scope/applicability preservation.
+
+## Realtor.com capture and mapping
+
+The frontend now scopes Realtor capture to the active listing's left column.
+Search cards behind detail overlays, recommendations, price-reduction amounts,
+and the advertised home purchase affordability amount are excluded. Visible
+headline rent and bed/bath/area facts are captured together with text boundaries,
+so `3 bath` cannot become `3bath` or detach from its value. A numeric property
+fact such as `Security Deposit: 3995.0` is a dollar deposit even without a `$`
+symbol; do not drop it or attach another fee's amount to it.
+
+Realtor calculator rows use the same `Cost calculator / Monthly costs|Move-in
+costs / Required|Optional` paths as Zillow. A label and the amount in its sibling
+column form one charge. Inherit frequency and applicability from these paths.
+A required service with a fixed amount need not repeat “monthly” or “required”
+in its label. Preserve named fees such as resident benefits, damage waiver
+programs, and utility administration as separate `service` entries. Required
+monthly non-deposit fees can populate inputs when refundability is unstated;
+refundability uncertainty is still material for deposits and one-time charges.
+Do not classify a monthly utility administration fee as a one-time admin fee.
+
+For inline property details such as `Monthly Fees: Resident Benefits Package:
+$37, Pet Rent: $150, Utilities Admin Fee: $10`, the capture contains three
+separate blocks with monthly cadence. Extract three entries, each with its own
+amount and evidence. Commas in `$1,250.50` do not delimit fees. Keep per-pet and
+per-vehicle qualifications; parking required only for vehicles is conditional,
+even if the label contains the word “required.” Variable utilities remain
+unknown amounts for ordinary utility estimation, without repetitive issues.
+
+Use the calculator's **Monthly base rent** over an estimated monthly total or
+headline rent that might include fees. For an unselected community range,
+retain the range and request the applicable unit rent; never select the lowest
+rent as if it were a definite unit price. A selected-unit dialog takes precedence
+over the community range.
+
+A holding payment explicitly credited toward a security deposit must be counted
+once. When the source lists a $350 holding payment applied to the deposit and a
+$150 remaining deposit balance, the deposit is $500, not a $350 nonrefundable
+fee plus a $150 deposit. Retain credit and remaining-balance evidence. A separate
+refundable setup charge remains refundable and must not become a nonrefundable
+move-in fee.
+
+Optional storage and parking can be separate reviewable notes with their actual
+cost and basis. Do not turn every incidental replacement charge or termination
+penalty into a prominent note. Preserve such details in source evidence for
+conversational follow-up. No new response fields or schema version are required
+for this Realtor capture change; the existing fee and utility contracts apply.
+
+## Shared fee rules after the strict-suite fixes
+
+Atomic fee blocks can also represent native/ARIA tables, description lists,
+mobile cards, sibling label/value paragraphs, or comma-delimited details.
+Section context supplies cadence and applicability. Soft line wraps are not
+charge boundaries, and table headers are not fees. Recognize explicit USD codes
+without requiring a dollar sign; retain other currencies in qualified results.
+
+Keep capped, starting-at, ranged, and conflicting-cadence charges qualified.
+“Not to Exceed” in the label is a cap even if a separate amount cell contains
+one price. Explicitly free charges are known zero; utility inclusion is a
+separate concept. Keep both range endpoints and the stated cadence in evidence.
+
+First/last month's rent payable at signing is prepaid rent, not an additional
+nonrefundable expense. Use existing `move_in` entries with clear first/last-month
+labels and one-time cadence; the frontend routes them into upfront rent inputs.
+Return a standalone refundable holding payment as `holding_deposit`. If it is
+credited to a full security deposit, do not add it to the full deposit again.
+If the security amount is a remaining balance, explicitly label it as such.
+
+The frontend persists `Money.basis` for pet charges independently of quote
+wording, including “for each animal.” A per-unit pet amount stays singular;
+per-pet amounts scale with the household. Preserve that distinction explicitly.
+
+When only a fee-inclusive monthly headline is known, do not invent base rent by
+subtracting an incomplete fee breakdown. Keep the total once and explain which
+fees it includes. Use an explicit separate base-rent row when available.
+These are prompt/interpretation requirements using the current contract; the
+backend service must apply this document separately from the extension build.
+
+## Amenities are not charge evidence
+
+An amenity name alone (for example “Valet Trash”, “Garage Parking”, or “Pest
+Control” in a feature list) must not become an unknown fee or a review issue.
+A fee-section heading also establishes cost context: keep “Garage Parking”
+under “Fees” even when no price is supplied. Suppress a bare amenity only when
+its feature-list context is clear and there is no competing fee evidence. When
+context is ambiguous, preserve it for review. Keep actual fee statements even when the price
+is absent: “parking fee — contact property” is an unresolved cost; “parking
+available” is an amenity. Do not infer required parking from availability.
+Preserve amenity evidence in capture rather than generating repetitive notes.
+Group duplicate descriptions of the same obligation; do not repeat a charge
+merely because it appears in both amenities and the fee schedule.

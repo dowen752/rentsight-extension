@@ -1,3 +1,4 @@
+import { feeIdentity } from '../extractors/fees';
 import type {
   SourcedValue,
   RecurringCosts,
@@ -117,6 +118,11 @@ export function adaptExtraction(response: ExtractionSuccess) {
   );
   const { property: p, evidence, reviewIssues } = response.result;
   const manualCharges: ManualCharge[] = [];
+  const mappedMonthlyCharges: {
+    id: string;
+    key: keyof RecurringCosts;
+    amount: number;
+  }[] = [];
   const sourced = <T>(
     value: T,
     field: { evidenceIds: string[] },
@@ -208,11 +214,13 @@ export function adaptExtraction(response: ExtractionSuccess) {
     amenity: 'amenityFees',
     service: 'otherRequiredMonthlyFees',
     other: 'otherRequiredMonthlyFees',
+    administration: 'otherRequiredMonthlyFees',
   };
   const upfront: Record<string, keyof UpfrontCosts> = {
     application: 'applicationFee',
     administration: 'administrativeFee',
     security_deposit: 'securityDeposit',
+    holding_deposit: 'utilityDeposits',
     pet_deposit: 'petDeposit',
     pet_fee: 'petFee',
     move_in: 'otherMoveInFees',
@@ -220,7 +228,21 @@ export function adaptExtraction(response: ExtractionSuccess) {
   };
   const defer = (id: string, label: string, detail: string) =>
     manualCharges.push({ id, label, detail });
-  for (const fee of p.fees.status === 'known' ? p.fees.value! : []) {
+  const knownFees = p.fees.status === 'known' ? p.fees.value! : [];
+  const security = knownFees.find(
+    (fee) =>
+      fee.category === 'security_deposit' &&
+      fee.applicability.kind === 'required' &&
+      amount(fee.amount, 'one_time') !== undefined &&
+      fee.refundable.status === 'known' &&
+      fee.refundable.value === true,
+  );
+  for (const fee of knownFees) {
+    const prepaid = /^(?:first|1st)\s+month(?:'s)?\s+rent\b/i.test(fee.label)
+      ? 'firstMonthsRent'
+      : /^(?:last)\s+month(?:'s)?\s+rent\b/i.test(fee.label)
+        ? 'lastMonthsRent'
+        : undefined;
     const petCharge =
       fee.category === 'pet_rent' ||
       fee.category === 'pet_deposit' ||
@@ -235,6 +257,21 @@ export function adaptExtraction(response: ExtractionSuccess) {
           : ['per_unit'];
     const monthly = amount(fee.amount, 'monthly', allowedBases);
     const once = amount(fee.amount, 'one_time', allowedBases);
+    const creditedHolding =
+      fee.category === 'holding_deposit' &&
+      /(?:applied to|credited (?:to|toward)).*security deposit/i.test(
+        [
+          fee.label,
+          ...fee.applicability.conditions,
+          sourced(once ?? 0, fee.amount).note,
+        ].join(' '),
+      );
+    if (
+      creditedHolding &&
+      security &&
+      !/remaining balance/i.test(security.label)
+    )
+      continue;
     const deposit = fee.category.endsWith('_deposit');
     const standardApplicability =
       fee.applicability.kind === 'required' ||
@@ -246,11 +283,33 @@ export function adaptExtraction(response: ExtractionSuccess) {
       : fee.refundable.status === 'known' && fee.refundable.value === false;
     if (
       standardApplicability &&
-      refundableSafe &&
+      !(fee.refundable.status === 'known' && fee.refundable.value === true) &&
       monthly !== undefined &&
       recurring[fee.category]
     ) {
+      if (recurring[fee.category] === 'otherRequiredMonthlyFees') {
+        extraction.namedRecurringFees ??= [];
+        const id = feeIdentity(fee.label);
+        const existing = extraction.namedRecurringFees.find(
+          (item) => item.id === id,
+        );
+        if (existing) existing.amount += monthly;
+        else
+          extraction.namedRecurringFees.push({
+            id,
+            label: `${fee.label} (required)`,
+            amount: monthly,
+            source: 'listing',
+            evidence: sourced(monthly, fee.amount).note,
+          });
+      }
       const key = recurring[fee.category];
+      if (key !== 'otherRequiredMonthlyFees')
+        mappedMonthlyCharges.push({
+          id: feeIdentity(fee.label),
+          key,
+          amount: monthly,
+        });
       const previous = extraction.listing.recurring[key];
       extraction.listing.recurring[key] = sourced(
         (previous?.value ?? 0) + monthly,
@@ -258,19 +317,28 @@ export function adaptExtraction(response: ExtractionSuccess) {
       );
     } else if (
       standardApplicability &&
-      refundableSafe &&
+      (refundableSafe || prepaid !== undefined) &&
       once !== undefined &&
       upfront[fee.category]
     ) {
-      const key = upfront[fee.category];
+      const key =
+        prepaid ??
+        (creditedHolding && security
+          ? 'securityDeposit'
+          : upfront[fee.category]);
       const previous = extraction.listing.upfront[key];
       extraction.listing.upfront[key] = sourced(
         (previous?.value ?? 0) + once,
         fee.amount,
       );
+      if (previous?.note)
+        extraction.listing.upfront[key]!.note =
+          `${previous.note}; ${extraction.listing.upfront[key]!.note}`;
     } else
       defer(
-        `fee:${fee.id}`,
+        fee.category === 'service' || fee.category === 'other'
+          ? feeIdentity(fee.label)
+          : `fee:${fee.id}`,
         fee.label,
         [
           describeMoneyField(fee.amount),
@@ -278,6 +346,21 @@ export function adaptExtraction(response: ExtractionSuccess) {
           describeRefundability(fee.refundable),
         ].join(' · '),
       );
+    if (petCharge && fee.amount.value?.basis) {
+      const key =
+        fee.category === 'pet_rent'
+          ? 'petRent'
+          : fee.category === 'pet_fee'
+            ? 'petFee'
+            : 'petDeposit';
+      const field =
+        fee.category === 'pet_rent'
+          ? extraction.listing.recurring.petRent
+          : extraction.listing.upfront[key as 'petFee' | 'petDeposit'];
+      if (field)
+        field.billingBasis =
+          fee.amount.value.basis === 'per_pet' ? 'per_pet' : 'per_unit';
+    }
   }
   if (p.fees.status === 'conflict')
     defer(
@@ -317,9 +400,14 @@ export function adaptExtraction(response: ExtractionSuccess) {
       extraction.includedUtilities.push(key);
     else {
       const value = amount(utility.amount, 'monthly');
-      if (value !== undefined)
+      if (value !== undefined) {
         extraction.listing.recurring[key] = sourced(value, utility.amount);
-      else if (utility.amount.status !== 'unknown')
+        mappedMonthlyCharges.push({
+          id: feeIdentity(utility.label),
+          key,
+          amount: value,
+        });
+      } else if (utility.amount.status !== 'unknown')
         defer(
           `utility:${utility.id}`,
           utility.label,
@@ -352,7 +440,7 @@ export function adaptExtraction(response: ExtractionSuccess) {
       'The listing contains conflicting promotion information.',
     );
   extraction.warnings.push(...reviewIssues.map((issue) => issue.message));
-  return { extraction, manualCharges };
+  return { extraction, manualCharges, mappedMonthlyCharges };
 }
 
 function markRetainedPreliminaryLocal(
@@ -393,7 +481,58 @@ export function applyAiExtraction(
   current: RentalAnalysis,
   response: ExtractionSuccess,
 ): RentalAnalysis {
-  const { extraction } = adaptExtraction(response);
+  const { extraction, manualCharges, mappedMonthlyCharges } =
+    adaptExtraction(response);
+  // A local named charge and the same AI charge in a standard category are one
+  // obligation. Keep the existing editable input (including edits/deletions)
+  // rather than charging it again under a different category.
+  for (const mapped of mappedMonthlyCharges) {
+    const existing = current.extraction?.namedRecurringFees?.find(
+      (fee) => fee.id === mapped.id,
+    );
+    if (!existing) continue;
+    const standard = extraction.listing.recurring[mapped.key];
+    if (standard && standard.value > mapped.amount)
+      standard.value -= mapped.amount;
+    else delete extraction.listing.recurring[mapped.key];
+    extraction.namedRecurringFees ??= [];
+    extraction.namedRecurringFees.push({
+      ...existing,
+      amount: mapped.amount,
+      evidence: standard?.note ?? existing.evidence,
+    });
+    const aggregate = extraction.listing.recurring.otherRequiredMonthlyFees;
+    extraction.listing.recurring.otherRequiredMonthlyFees = {
+      value: (aggregate?.value ?? 0) + mapped.amount,
+      source: 'listing',
+      confidence: 0.8,
+    };
+  }
+  const retainedFees = (current.extraction?.namedRecurringFees ?? []).filter(
+    (fee) =>
+      !extraction.namedRecurringFees?.some(
+        (incoming) => incoming.id === fee.id,
+      ) && !manualCharges.some((note) => note.id === fee.id),
+  );
+  if (retainedFees.length) {
+    extraction.namedRecurringFees = [
+      ...(extraction.namedRecurringFees ?? []),
+      ...retainedFees,
+    ];
+    const aggregate = extraction.listing.recurring.otherRequiredMonthlyFees;
+    extraction.listing.recurring.otherRequiredMonthlyFees = {
+      value:
+        (aggregate?.value ?? 0) +
+        retainedFees.reduce((sum, fee) => sum + fee.amount, 0),
+      source: 'listing',
+      confidence: 0.8,
+    };
+  }
+  extraction.feeNoteSuggestions = (
+    current.extraction?.feeNoteSuggestions ?? []
+  ).filter(
+    (note) => !extraction.namedRecurringFees?.some((fee) => fee.id === note.id),
+  );
   const preliminary = markRetainedPreliminaryLocal(current);
   // Suppress applyExtraction's stale-local cleanup. Missing fields in this
   // adapted extraction represent AI unknown/conflict fields, not deletions.
@@ -408,7 +547,7 @@ export function applyAiExtraction(
     baselineUtilityIncluded: fresh.baselineUtilityIncluded,
     utilityIncludedSource: fresh.utilityIncludedSource,
     aiExtraction: structuredClone(response),
-    aiReviewDecisions: {},
+    aiReviewDecisions: { ...current.aiReviewDecisions },
     locationEstimate: undefined,
     laundryType:
       current.laundryType === current.extraction?.laundryType

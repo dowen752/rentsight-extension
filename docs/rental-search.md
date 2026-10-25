@@ -47,22 +47,27 @@ shared-laundry filtering.
 Zillow uses an assisted two-stage launch because a URL containing filter state
 can render correct filter pills with an incorrect zero-result response.
 RentSight first opens the canonical unfiltered location route and then uses
-Zillow's own visible controls to apply rent, bedroom, bathroom, square-footage,
+Zillow's own visible controls to apply rent, bedroom, bathroom, move-in date, square-footage,
 cat, small-dog, large-dog, parking, in-unit-laundry, and air-conditioning
 preferences. This requires the narrowly declared optional Zillow host
 permission, requested only from the user-initiated Zillow launch. Denial or
 failure leaves the correct unfiltered location page open and tells the user to
 review filters there.
+Native move-in date inputs receive the ISO calendar value; text date controls
+receive MM/DD/YYYY. RentSight checks that the live input retains the date before
+submitting and reports an unsuccessful transfer instead of claiming success.
 
 Apartments.com also uses an assisted launch because fully composed filter routes
 can resolve to an error page. RentSight opens the canonical location-results
 route, then uses its Price, Beds/Baths, Home Type, and All Filters controls.
 That applies rent, bedroom, bathroom, combined property-type, pet-policy,
-rounded-up minimum-square-footage, parking, in-unit-laundry, and
+move-in date, rounded-up minimum-square-footage, parking, in-unit-laundry, and
 air-conditioning preferences while leaving unsupported preferences as explicit
-on-site reminders. Move-in date remains a check-on-site preference because
-Apartments.com's readonly calendar has not reliably registered assisted selections.
-The adapter may still attempt its calendar as a best effort, but does not promise it.
+on-site reminders. RentSight opens the move-in field's own readonly calendar,
+navigates to the requested month, and selects its enabled day. Calendar labels
+avoid timezone-dependent timestamp conversion. The input must retain the selected
+date before submitting. Disabled or rejected dates are reported explicitly; a past
+saved date prompts the renter to choose a future date without changing their profile.
 If a location-only route is ambiguous or invalid,
 RentSight uses Apartments.com's own location search so the site resolves the same
 first match it would offer a person typing that city name. Apartments.com access

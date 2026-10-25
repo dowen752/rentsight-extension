@@ -117,8 +117,10 @@ describe('Search workflow', () => {
     const openHotpads = vi.fn().mockResolvedValue({ automated: true });
     const openZumper = vi.fn().mockResolvedValue({ automated: true });
     let finishZillow: ((outcome: { automated: boolean }) => void) | undefined;
-    const openZillow = vi.fn(
-      (_search: unknown, _bootstrapUrl: string) =>
+    const openZillow = vi.fn<
+      (search: unknown, bootstrapUrl: string) => Promise<{ automated: boolean }>
+    >(
+      () =>
         new Promise<{ automated: boolean }>((resolve) => {
           finishZillow = resolve;
         }),
@@ -160,11 +162,14 @@ describe('Search workflow', () => {
     const parkingLabel = Array.from(container.querySelectorAll('label')).find(
       (label) => label.textContent?.includes('Parking available'),
     )!;
+    const moveInDate =
+      container.querySelector<HTMLInputElement>('input[type="date"]')!;
 
     await act(async () => {
       enter(occupants, '2');
       enter(location, 'Seattle, WA');
       enter(maxRent, '2000');
+      enter(moveInDate, '2026-11-15');
       parkingLabel.querySelector<HTMLInputElement>('input')!.click();
     });
     expect(updateHouseholdProfile).toHaveBeenCalledWith({
@@ -183,6 +188,7 @@ describe('Search workflow', () => {
         location: 'Seattle, WA',
         maxListedRent: 2000,
         parkingAvailable: true,
+        moveInDate: '2026-11-15',
       },
     });
     expect(container.querySelectorAll('.search-site-card')).toHaveLength(7);
@@ -205,6 +211,7 @@ describe('Search workflow', () => {
       catsAllowed: true,
       smallDogsAllowed: true,
       largeDogsAllowed: true,
+      moveInDate: '2026-11-15',
     });
     expect(new URL(openZillow.mock.calls[0][1]).origin).toBe(
       'https://www.zillow.com',
@@ -234,6 +241,9 @@ describe('Search workflow', () => {
         .click();
     });
     expect(openApartments).toHaveBeenCalledOnce();
+    expect(openApartments.mock.calls[0][0]).toMatchObject({
+      moveInDate: '2026-11-15',
+    });
     expect(new URL(openApartments.mock.calls[0][1]).href).toBe(
       'https://www.apartments.com/',
     );

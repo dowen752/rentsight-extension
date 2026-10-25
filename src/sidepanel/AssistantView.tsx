@@ -8,6 +8,9 @@ import {
 } from 'react';
 import {
   ASSISTANT_ACTION_VERSIONS,
+  approvalFingerprint,
+  approvalSummary,
+  type ApprovalState,
   acceptStoredAssistantConversation,
   assistantContextForAnalysis,
   assistantContextRevision,
@@ -28,9 +31,16 @@ import { rentSightApi } from '../backend/services';
 import type { SavedListingRecord } from '../saved';
 import {
   getSearchProfile,
+  applyHouseholdPetFilters,
+  launchRentalSite,
+  prepareRentalSiteAccess,
   setSearchProfile,
   type RentalSearch,
 } from '../search';
+import {
+  normalizeHouseholdProfile,
+  type HouseholdProfile,
+} from '../shared/household';
 import type { RentalAnalysis } from '../shared/analysis';
 import { extensionStorage } from '../storage';
 import { AssistantMarkdown } from './AssistantMarkdown';
@@ -68,6 +78,7 @@ const HISTORY_PAGE_SIZE = 20;
 const TURN_PAGE_SIZE = 20;
 const SAVED_LISTING_ACTION_VERSIONS = {
   'search.patch': ASSISTANT_ACTION_VERSIONS['search.patch'],
+  'search.launch': ASSISTANT_ACTION_VERSIONS['search.launch'],
   'saved_listing.set_cost': ASSISTANT_ACTION_VERSIONS['saved_listing.set_cost'],
   'saved_listing.set_field':
     ASSISTANT_ACTION_VERSIONS['saved_listing.set_field'],
@@ -84,8 +95,14 @@ const SAVED_LISTING_ACTION_VERSIONS = {
     ASSISTANT_ACTION_VERSIONS['saved_listing.remove_note'],
   'workspace.navigate': ASSISTANT_ACTION_VERSIONS['workspace.navigate'],
 };
+const SEARCH_ACTION_VERSIONS = {
+  'search.patch': ASSISTANT_ACTION_VERSIONS['search.patch'],
+  'search.launch': ASSISTANT_ACTION_VERSIONS['search.launch'],
+  'workspace.navigate': ASSISTANT_ACTION_VERSIONS['workspace.navigate'],
+};
 const CURRENT_LISTING_ACTION_VERSIONS = {
   'search.patch': ASSISTANT_ACTION_VERSIONS['search.patch'],
+  'search.launch': ASSISTANT_ACTION_VERSIONS['search.launch'],
   'analysis.set_cost': ASSISTANT_ACTION_VERSIONS['analysis.set_cost'],
   'property_note.add': ASSISTANT_ACTION_VERSIONS['property_note.add'],
   'workspace.navigate': ASSISTANT_ACTION_VERSIONS['workspace.navigate'],
@@ -216,6 +233,10 @@ function proposalSummary(
   proposal: AssistantProposal,
   savedListing?: SavedListingRecord,
 ): string {
+  if (proposal.type === 'household.patch')
+    return 'Update your saved household counts.';
+  if (proposal.type === 'search.launch')
+    return 'Open rental sites using saved preferences.';
   if (proposal.type === 'search.patch') {
     const changes = Object.entries(proposal.arguments.set).map(
       ([key, value]) =>
@@ -292,30 +313,56 @@ function ProposalCard({
   status,
   onApply,
   onDismiss,
+  summary,
+  applying,
+  busy,
 }: {
   proposal: AssistantProposal;
   savedListing?: SavedListingRecord;
   status?: AssistantActionOutcome['status'];
   onApply: () => void;
   onDismiss: () => void;
+  summary?: string;
+  applying?: boolean;
+  busy?: boolean;
 }) {
   return (
     <div className="assistant-proposal">
       <strong>{proposalTitle(proposal, savedListing)}</strong>
-      <p>{proposalSummary(proposal, savedListing)}</p>
+      <p>{summary ?? proposalSummary(proposal, savedListing)}</p>
       {status ? (
         <span className={`assistant-proposal-status ${status}`}>
-          {label(status)}
+          {status === 'applied' &&
+          (proposal.type === 'search.launch' ||
+            proposal.type === 'workspace.navigate')
+            ? 'Opened'
+            : label(status)}
         </span>
       ) : (
         <div>
-          <button type="button" className="primary-action" onClick={onApply}>
-            {proposal.type === 'workspace.navigate' ? 'Open' : 'Apply'}
+          <button
+            type="button"
+            className="primary-action"
+            onClick={onApply}
+            disabled={busy}
+          >
+            {applying
+              ? 'Working…'
+              : proposal.type === 'household.patch'
+                ? 'Update household'
+                : proposal.type === 'search.patch'
+                  ? 'Save search preferences'
+                  : proposal.type === 'search.launch'
+                    ? 'Open rental site'
+                    : proposal.type === 'workspace.navigate'
+                      ? `Open ${proposal.arguments.destination === 'find' ? 'Search' : label(proposal.arguments.destination)}`
+                      : 'Apply'}
           </button>
           <button
             type="button"
             className="secondary-action"
             onClick={onDismiss}
+            disabled={busy}
           >
             Dismiss
           </button>
@@ -333,8 +380,10 @@ function ConversationMessageCard({
   dismiss,
   submitMessage,
   resolveSavedListing,
+  applyingProposalId,
 }: {
   message: ConversationMessage;
+  applyingProposalId?: string;
   animateResponse: boolean;
   statusFor: (
     proposalId: string,
@@ -342,6 +391,7 @@ function ConversationMessageCard({
   apply: (
     proposal: AssistantProposal,
     response: AssistantResponse,
+    baseline?: string,
   ) => Promise<void>;
   dismiss: (proposalId: string) => void;
   submitMessage: (message: string) => Promise<void>;
@@ -387,9 +437,12 @@ function ConversationMessageCard({
               if (!message.savedScope) return !isSavedListingProposal(proposal);
               if (isSavedListingProposal(proposal))
                 return Boolean(resolveSavedListing(proposal));
-              return ['search.patch', 'workspace.navigate'].includes(
-                proposal.type,
-              );
+              return [
+                'search.patch',
+                'household.patch',
+                'search.launch',
+                'workspace.navigate',
+              ].includes(proposal.type);
             })
             .map((proposal) => (
               <ProposalCard
@@ -400,8 +453,17 @@ function ConversationMessageCard({
                     ? resolveSavedListing(proposal)
                     : undefined
                 }
+                summary={message.approvalSummaries?.[proposal.id]}
+                applying={applyingProposalId === proposal.id}
+                busy={Boolean(applyingProposalId)}
                 status={statusFor(proposal.id)}
-                onApply={() => void apply(proposal, message.response!)}
+                onApply={() =>
+                  void apply(
+                    proposal,
+                    message.response!,
+                    message.approvalBaselines?.[proposal.id],
+                  )
+                }
                 onDismiss={() => dismiss(proposal.id)}
               />
             ))
@@ -604,6 +666,9 @@ function ConversationHistory({
 
 export function AssistantView({
   analysis,
+  householdProfile,
+  updateHouseholdProfile,
+  openRentalSite = launchRentalSite,
   savedListings,
   selectedSavedListingIds,
   setSelectedSavedListingIds,
@@ -615,10 +680,13 @@ export function AssistantView({
   animateResponses = true,
 }: {
   analysis?: RentalAnalysis;
+  householdProfile?: HouseholdProfile;
+  updateHouseholdProfile?: (profile: HouseholdProfile) => Promise<void>;
+  openRentalSite?: typeof launchRentalSite;
   savedListings: SavedListingRecord[];
   selectedSavedListingIds?: string[];
   setSelectedSavedListingIds?: (ids: string[]) => void;
-  updateAnalysis?: (proposal: AssistantProposal) => void;
+  updateAnalysis?: (proposal: AssistantProposal) => void | Promise<void>;
   updateSavedListing?: (proposal: SavedListingProposal) => Promise<string>;
   navigate: (tab: AssistantTab) => void;
   sendMessage?: (request: AssistantRequest) => Promise<AssistantResponse>;
@@ -626,6 +694,44 @@ export function AssistantView({
   animateResponses?: boolean;
 }) {
   const [draft, setDraft] = useState('');
+  const [storageError, setStorageError] = useState('');
+  const [search, setSearch] = useState<RentalSearch>();
+  const household = useMemo(
+    () =>
+      normalizeHouseholdProfile(householdProfile ?? analysis?.householdProfile),
+    [householdProfile, analysis?.householdProfile],
+  );
+  const [applyingProposalId, setApplyingProposalId] = useState<string>();
+  const applyingRef = useRef(false);
+  const requestStates = useRef(new Map<string, ApprovalState>());
+  useEffect(() => {
+    let active = true;
+    const load = () => {
+      void getSearchProfile()
+        .then((profile) => {
+          if (active) setSearch(profile.search);
+        })
+        .catch(() => {
+          if (active)
+            setStorageError(
+              'Could not load Search preferences. Reopen Ask to try again.',
+            );
+        });
+    };
+    load();
+    const changes = globalThis.chrome?.storage?.onChanged;
+    const listener = (
+      items: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ) => {
+      if (area === 'local' && items.searchProfile) load();
+    };
+    changes?.addListener(listener);
+    return () => {
+      active = false;
+      changes?.removeListener(listener);
+    };
+  }, []);
   const [localSavedListingIds, setLocalSavedListingIds] = useState<string[]>(
     [],
   );
@@ -637,7 +743,6 @@ export function AssistantView({
   >([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
-  const [storageError, setStorageError] = useState('');
   const [failedRequest, setFailedRequest] = useState<AssistantRequest>();
   const [conversationLoaded, setConversationLoaded] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -680,8 +785,10 @@ export function AssistantView({
         analysis,
         savedListings,
         activeSavedListingIds,
+        household,
+        search,
       ),
-    [activeSavedListingIds, analysis, savedListings],
+    [activeSavedListingIds, analysis, savedListings, household, search],
   );
 
   const persistConversation = useCallback(
@@ -800,6 +907,7 @@ export function AssistantView({
   };
 
   const resetConversation = useCallback(() => {
+    requestStates.current.clear();
     setConversationId(undefined);
     setMessages([]);
     setOutcomes([]);
@@ -831,7 +939,8 @@ export function AssistantView({
   );
 
   const openConversation = async (selectedId: string) => {
-    if (pending || openingConversationId || deletingId) return;
+    if (pending || applyingRef.current || openingConversationId || deletingId)
+      return;
     setOpeningConversationId(selectedId);
     setHistoryError('');
     setError('');
@@ -919,8 +1028,9 @@ export function AssistantView({
     request: AssistantRequest,
     appendUserMessage: boolean,
   ) => {
-    if (pending) return;
+    if (pending || applyingRef.current) return;
     if (appendUserMessage) {
+      requestStates.current.clear();
       setMessages((current) => [
         ...current,
         {
@@ -934,7 +1044,40 @@ export function AssistantView({
     setError('');
     setPending(true);
     try {
+      let frozenState = requestStates.current.get(request.clientRequestId);
+      if (!frozenState) {
+        frozenState = structuredClone({
+          search: request.context?.search ?? search ?? {},
+          household: request.context?.household ?? household,
+          analysis,
+          savedListings,
+          selectedIds: activeSavedListingIds,
+        });
+        requestStates.current.set(request.clientRequestId, frozenState);
+      }
       const response = await sendMessage(request);
+      if (
+        response.contextRevision &&
+        response.contextRevision !== request.contextRevision
+      )
+        throw new Error(
+          'The answer references an outdated workspace. Send a new message.',
+        );
+      const approvalBaselines = Object.fromEntries(
+        await Promise.all(
+          response.proposals.map(async (proposal) => [
+            proposal.id,
+            await approvalFingerprint(proposal, frozenState!),
+          ]),
+        ),
+      );
+      const approvalSummaries = Object.fromEntries(
+        response.proposals.flatMap((proposal) => {
+          const summary = approvalSummary(proposal, frozenState!);
+          return summary ? [[proposal.id, summary]] : [];
+        }),
+      );
+      requestStates.current.delete(request.clientRequestId);
       setFailedRequest(undefined);
       setConversationId(response.conversationId);
       setMessages((current) => [
@@ -944,6 +1087,8 @@ export function AssistantView({
           role: 'assistant',
           text: response.message.text,
           response,
+          approvalBaselines,
+          approvalSummaries,
           animate: true,
           historical: false,
           savedScope: request.context?.activeView === 'saved',
@@ -973,7 +1118,15 @@ export function AssistantView({
 
   const submitMessage = async (message: string) => {
     const trimmed = message.trim();
-    if (!trimmed || pending || openingConversationId || deletingId) return;
+    if (
+      !trimmed ||
+      search === undefined ||
+      pending ||
+      openingConversationId ||
+      deletingId ||
+      applyingRef.current
+    )
+      return;
     const request: AssistantRequest = {
       schemaVersion: '1.0',
       clientRequestId: randomId(),
@@ -982,9 +1135,18 @@ export function AssistantView({
       contextRevision: revision,
       context,
       capabilities: {
-        actions: usingSavedListings
-          ? SAVED_LISTING_ACTION_VERSIONS
-          : CURRENT_LISTING_ACTION_VERSIONS,
+        actions: {
+          ...(usingSavedListings
+            ? SAVED_LISTING_ACTION_VERSIONS
+            : analysis && updateAnalysis
+              ? CURRENT_LISTING_ACTION_VERSIONS
+              : SEARCH_ACTION_VERSIONS),
+          ...(updateHouseholdProfile
+            ? {
+                'household.patch': ASSISTANT_ACTION_VERSIONS['household.patch'],
+              }
+            : {}),
+        },
       },
       ...(pendingOutcomes.length ? { actionOutcomes: pendingOutcomes } : {}),
     };
@@ -1007,19 +1169,77 @@ export function AssistantView({
   const apply = async (
     proposal: AssistantProposal,
     response: AssistantResponse,
+    baseline?: string,
   ) => {
-    if (response.contextRevision && response.contextRevision !== revision) {
-      setOutcome(proposal.id, 'stale');
-      return;
-    }
+    if (applyingRef.current) return;
+    applyingRef.current = true;
+    setApplyingProposalId(proposal.id);
+    setError('');
+    // Chrome requires the optional permission request inside the original click gesture.
+    const siteAccess =
+      proposal.type === 'search.launch' && openRentalSite === launchRentalSite
+        ? prepareRentalSiteAccess(
+            proposal.arguments.siteIds[0],
+            applyHouseholdPetFilters(search ?? {}, household),
+          )
+        : undefined;
     try {
+      const freshSearch = (await getSearchProfile()).search;
+      const freshHousehold = normalizeHouseholdProfile(
+        (await extensionStorage.get('householdProfile')) ?? household,
+      );
+      const state: ApprovalState = {
+        search: freshSearch,
+        household: freshHousehold,
+        analysis,
+        savedListings,
+        selectedIds: activeSavedListingIds,
+      };
+      if (
+        baseline
+          ? baseline !== (await approvalFingerprint(proposal, state))
+          : response.contextRevision && response.contextRevision !== revision
+      ) {
+        setOutcome(proposal.id, 'stale');
+        setError(
+          'The values for this change have changed. Ask for an updated suggestion.',
+        );
+        return;
+      }
+      if (proposal.type === 'household.patch') {
+        if (!updateHouseholdProfile)
+          throw new Error('Household updates are not available.');
+        await updateHouseholdProfile({
+          ...freshHousehold,
+          ...proposal.arguments.set,
+        });
+        setOutcome(proposal.id, 'applied');
+        return;
+      }
       if (proposal.type === 'search.patch') {
-        const current = (await getSearchProfile()).search;
-        const next: RentalSearch = { ...current, ...proposal.arguments.set };
+        const next: RentalSearch = {
+          ...freshSearch,
+          ...proposal.arguments.set,
+        };
         for (const key of proposal.arguments.clear) delete next[key];
         await setSearchProfile(next);
+        setSearch(next);
         setOutcome(proposal.id, 'applied');
         navigate('find');
+        return;
+      }
+      if (proposal.type === 'search.launch') {
+        for (const siteId of proposal.arguments.siteIds) {
+          const activeSearch = applyHouseholdPetFilters(
+            freshSearch,
+            freshHousehold,
+          );
+          const outcome = siteAccess
+            ? await openRentalSite(siteId, activeSearch, siteAccess)
+            : await openRentalSite(siteId, activeSearch);
+          if (outcome.message) setError(outcome.message);
+        }
+        setOutcome(proposal.id, 'applied');
         return;
       }
       if (proposal.type === 'workspace.navigate') {
@@ -1028,14 +1248,13 @@ export function AssistantView({
         return;
       }
       if (isSavedListingProposal(proposal)) {
-        const matchingTargets = scopedSavedListings.filter(
+        const targets = scopedSavedListings.filter(
           (record) => record.id === proposal.arguments.listingId,
         );
         if (
           !response.contextRevision ||
           proposal.contextRevision !== response.contextRevision ||
-          proposal.contextRevision !== revision ||
-          matchingTargets.length !== 1 ||
+          targets.length !== 1 ||
           !updateSavedListing
         ) {
           setOutcome(proposal.id, 'stale');
@@ -1049,10 +1268,16 @@ export function AssistantView({
         setOutcome(proposal.id, 'stale');
         return;
       }
-      updateAnalysis(proposal);
+      await updateAnalysis(proposal);
       setOutcome(proposal.id, 'applied');
-    } catch {
+    } catch (cause) {
       setOutcome(proposal.id, 'failed');
+      setError(
+        cause instanceof Error ? cause.message : 'Could not apply this change.',
+      );
+    } finally {
+      applyingRef.current = false;
+      setApplyingProposalId(undefined);
     }
   };
 
@@ -1060,7 +1285,8 @@ export function AssistantView({
     outcomes.find((item) => item.proposalId === proposalId)?.status;
 
   const startNewChat = () => {
-    if (pending || openingConversationId || deletingId) return;
+    if (pending || applyingRef.current || openingConversationId || deletingId)
+      return;
     resetConversation();
     setHistoryOpen(false);
   };
@@ -1096,6 +1322,8 @@ export function AssistantView({
           className="new-chat"
           disabled={
             !conversationLoaded ||
+            search === undefined ||
+            Boolean(applyingProposalId) ||
             pending ||
             Boolean(openingConversationId) ||
             Boolean(deletingId) ||
@@ -1288,6 +1516,7 @@ export function AssistantView({
             }
             statusFor={statusFor}
             apply={apply}
+            applyingProposalId={applyingProposalId}
             dismiss={(proposalId) => setOutcome(proposalId, 'rejected')}
             submitMessage={submitMessage}
             resolveSavedListing={(proposal) =>
@@ -1338,6 +1567,8 @@ export function AssistantView({
           placeholder="Ask about costs, fees, the area, or your next search…"
           disabled={
             !conversationLoaded ||
+            search === undefined ||
+            Boolean(applyingProposalId) ||
             Boolean(openingConversationId) ||
             Boolean(deletingId)
           }
@@ -1354,6 +1585,8 @@ export function AssistantView({
           className="primary-action"
           disabled={
             !conversationLoaded ||
+            search === undefined ||
+            Boolean(applyingProposalId) ||
             pending ||
             Boolean(openingConversationId) ||
             Boolean(deletingId) ||
